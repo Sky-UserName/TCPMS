@@ -1,0 +1,33 @@
+# .NET build output
+**/bin/
+**/obj/
+
+# Node dependencies and build output
+**/node_modules/
+**/dist/
+**/.vite/
+coverage/
+
+# Local logs and generated exports
+.run-logs/
+output/
+*.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+**/appsettings.Local.json
+
+# IDE and OS files
+.idea/
+.vscode/
+.vs/
+*.user
+!src/TCPMS.User/
+!src/TCPMS.User/**
+src/TCPMS.User/**/*.user
+src/TCPMS.User/unpackage/
+*.suo
+Thumbs.db
+Desktop.ini
