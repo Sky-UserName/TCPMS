@@ -11,8 +11,9 @@
 		<view class="order-summary-strip">
 			<view class="order-summary-item"><text class="summary-value">{{ orderSummary.total }}</text><text class="summary-label">全部订单</text></view>
 			<view class="order-summary-item"><text class="summary-value">{{ orderSummary.pending }}</text><text class="summary-label">待处理</text></view>
-			<view class="order-summary-sync"><ProtoIcon name="check-circle" :size="22" /><text>状态已同步</text></view>
+			<view class="order-summary-sync" @tap="loadOrders"><ProtoIcon :name="syncError ? 'warning' : syncing ? 'refresh' : 'check-circle'" :size="22" /><text>{{ syncError ? '同步失败，点此重试' : syncing ? '正在同步' : '接口已同步' }}</text></view>
 		</view>
+		<view v-if="syncError" class="order-sync-error">暂时无法连接订单服务，当前列表可能是本机缓存。{{ syncError }}</view>
 		<view v-if="visibleOrders.length" class="order-section-heading"><text>订单列表</text><text>共 {{ visibleOrders.length }} 笔</text></view>
 
 		<ProtoEmptyState v-if="!visibleOrders.length" action-text="去首页逛逛" @action="goHome" />
@@ -75,6 +76,8 @@
 		data() {
 			return {
 				orders: [],
+				syncError: '',
+				syncing: true,
 				searchText: '',
 				activeTab: 'all',
 				tabs: [
@@ -105,14 +108,21 @@
 			}
 		},
 		async onShow() {
-			this.orders = getOrders()
-			try {
-				this.orders = await fetchRemoteOrders()
-			} catch (error) {
-				// Keep locally cached orders available when the API is offline.
-			}
+			await this.loadOrders()
 		},
 		methods: {
+			async loadOrders() {
+				this.orders = getOrders()
+				this.syncError = ''
+				this.syncing = true
+				try {
+					this.orders = await fetchRemoteOrders()
+				} catch (error) {
+					this.syncError = error?.message || '网络异常'
+				} finally {
+					this.syncing = false
+				}
+			},
 			goDetail(order) {
 				goPage(`/pages/order/detail?id=${order.id}`)
 			},
@@ -166,11 +176,8 @@
 							try {
 								await cancelRemoteOrder(order.id)
 							} catch (error) {
-								updateOrder(order.id, {
-									status: '已取消',
-									statusKey: 'cancel',
-									action: '再次预订'
-								})
+								showToast(error?.message || '取消未提交，请重试')
+								return
 							}
 						} else {
 							updateOrder(order.id, {
@@ -178,6 +185,9 @@
 								statusKey: 'cancel',
 								action: '再次预订'
 							})
+							this.orders = getOrders()
+							showToast('演示订单仅在本机更新')
+							return
 						}
 						this.orders = getOrders()
 						showToast('订单已取消')
@@ -192,6 +202,16 @@
 </script>
 
 <style lang="scss" scoped>
+	.order-sync-error {
+		margin: 12rpx 24rpx;
+		padding: 14rpx 18rpx;
+		color: #8a4b13;
+		background: #fff4e5;
+		border-radius: 12rpx;
+		font-size: 19rpx;
+		line-height: 1.45;
+	}
+
 	.order-tabs {
 		width: 100%;
 		padding: 0 24rpx;

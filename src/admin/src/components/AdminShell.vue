@@ -89,9 +89,38 @@
         </div>
         <div class="topbar-actions">
           <span class="topbar-date">{{ todayLabel }}</span>
-          <button class="icon-button notification-button" title="消息提醒" type="button" @click="navigate('messages')">
-            <el-icon><Bell /></el-icon><i></i>
-          </button>
+          <el-popover
+            v-model:visible="notificationVisible"
+            placement="bottom-end"
+            :width="390"
+            trigger="click"
+            popper-class="notification-popover"
+          >
+            <template #reference>
+              <button class="icon-button notification-button" title="消息提醒" aria-label="消息提醒" type="button">
+                <el-badge :value="notificationCount" :max="99" :hidden="notificationCount === 0" class="notification-badge">
+                  <el-icon><BellFilled /></el-icon>
+                </el-badge>
+              </button>
+            </template>
+            <div class="notification-center">
+              <div class="notification-center-head">
+                <div><strong>消息提醒</strong><span>{{ notificationCount ? `${notificationCount} 项待处理` : '暂无待处理事项' }}</span></div>
+                <button class="notification-refresh" title="刷新消息" aria-label="刷新消息" type="button" :disabled="notificationState.loading" @click="syncNotifications">
+                  <el-icon><Refresh /></el-icon>
+                </button>
+              </div>
+              <div v-if="notificationItems.length" class="notification-list">
+                <button v-for="item in notificationItems.slice(0, 6)" :key="item.id" type="button" class="notification-entry" @click="openNotification(item)">
+                  <span class="notification-entry-icon" :class="item.tone"><el-icon><component :is="notificationIcon(item.type)" /></el-icon></span>
+                  <span class="notification-entry-copy"><strong>{{ item.title }}</strong><small>{{ item.description }}</small><em>{{ formatNotificationTime(item.createdAt) }}</em></span>
+                  <el-icon class="notification-entry-arrow"><ArrowRight /></el-icon>
+                </button>
+              </div>
+              <el-empty v-else description="暂无需要处理的消息" :image-size="52" />
+              <button class="notification-center-footer" type="button" @click="openAllNotifications">查看全部消息<el-icon><ArrowRight /></el-icon></button>
+            </div>
+          </el-popover>
           <button class="icon-button" title="回到控制台" type="button" @click="navigate('dashboard')"><el-icon><House /></el-icon></button>
           <button class="icon-button" title="清除本地演示缓存" type="button" @click="clearDemoCache"><el-icon><Delete /></el-icon></button>
           <button class="icon-button" title="切换全屏" type="button" @click="toggleFullscreen"><el-icon><FullScreen /></el-icon></button>
@@ -99,7 +128,6 @@
             <span class="profile-avatar">{{ initials }}</span>
             <span>{{ user?.displayName || 'Admin1' }}</span>
           </button>
-          <button class="icon-button" title="常规管理" type="button" @click="navigate('common')"><el-icon><Setting /></el-icon></button>
         </div>
       </header>
       <main class="content-area"><slot /></main>
@@ -109,15 +137,32 @@
       <p class="dialog-copy">当前后台已覆盖门店、房源、订单、会员、内容、财务和权限管理。生产环境还需要配置微信支付、高德地图、对象存储和数据库账号。</p>
       <template #footer><el-button type="primary" @click="helpVisible = false">知道了</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="firstNoticeVisible" title="待处理消息" width="540px" class="first-notification-dialog">
+      <div class="first-notification-intro">以下事项需要管理人员处理，控制台待办和右上角消息提醒会同步更新。</div>
+      <div class="first-notification-list">
+        <button v-for="item in notificationItems.slice(0, 12)" :key="item.id" type="button" class="first-notification-entry" @click="openNotification(item)">
+          <span class="notification-entry-icon" :class="item.tone"><el-icon><component :is="notificationIcon(item.type)" /></el-icon></span>
+          <span class="notification-entry-copy"><strong>{{ item.title }}</strong><small>{{ item.description }}</small></span>
+          <el-icon class="notification-entry-arrow"><ArrowRight /></el-icon>
+        </button>
+      </div>
+      <template #footer>
+        <el-button @click="firstNoticeVisible = false">稍后处理</el-button>
+        <el-button type="primary" @click="openAllNotifications">进入消息中心</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { ElMessage, ElNotification } from 'element-plus'
 import {
   ArrowDown,
+  ArrowRight,
   Bell,
+  BellFilled,
   CollectionTag,
   Delete,
   Document,
@@ -126,14 +171,16 @@ import {
   FullScreen,
   House,
   Location,
+  Menu,
   MoreFilled,
   Operation,
+  Refresh,
   Search,
-  Setting,
   Tickets,
   UserFilled,
   Wallet
 } from '@element-plus/icons-vue'
+import { refreshNotifications, useAdminNotifications } from '../notifications'
 
 const props = defineProps({
   user: { type: Object, default: null },
@@ -144,8 +191,14 @@ const collapsed = ref(false)
 const menuQuery = ref('')
 const profileVisible = ref(false)
 const helpVisible = ref(false)
-const expandedGroups = ref({ core: true, property: true, storeManagement: true, config: false, discovery: false, finance: false, system: false })
+const notificationVisible = ref(false)
+const firstNoticeVisible = ref(false)
+const knownNotificationIds = ref(new Set())
+const notificationInitialized = ref(false)
+const expandedGroups = ref({ core: true, property: true, storeManagement: true, storePermissions: false, config: false, finance: false, system: false })
 const menuSearching = computed(() => Boolean(menuQuery.value.trim()))
+const { state: notificationState, items: notificationItems, pendingCount: notificationCount } = useAdminNotifications()
+let notificationTimer
 
 const groups = [
   { key: 'core', label: '工作台', items: [
@@ -156,8 +209,6 @@ const groups = [
     label: '民宿管理',
     items: [
       { key: 'members', label: '会员管理', icon: UserFilled },
-      { key: 'commonConfig', label: '通用配置', icon: Setting },
-      { key: 'storePermissions', label: '门店权限', icon: UserFilled }
     ],
     children: [
       { key: 'storeManagement', label: '门店管理', items: [
@@ -165,34 +216,29 @@ const groups = [
         { key: 'stores', label: '门店管理', icon: Location },
         { key: 'roomManagement', label: '房间管理', icon: House },
       ] },
+      { key: 'storePermissions', label: '门店权限', items: [
+        { key: 'storeStaff', label: '门店员工', icon: UserFilled },
+        { key: 'permissionMenus', label: '权限菜单', icon: Menu }
+      ] },
       { key: 'config', label: '基础配置', items: [
         { key: 'facilities', label: '服务设施', icon: CollectionTag },
         { key: 'tags', label: '民宿标签', icon: CollectionTag },
         { key: 'regions', label: '地区管理', icon: Location },
-        { key: 'pages', label: '单页文章', icon: Document },
         { key: 'roomTypes', label: '房间类型', icon: House },
         { key: 'levels', label: '民宿等级', icon: CollectionTag }
       ] },
-      { key: 'discovery', label: '发现管理', items: [
-        { key: 'guideTypes', label: '攻略类型', icon: CollectionTag },
-        { key: 'guides', label: '攻略管理', icon: Document },
-        { key: 'search', label: '搜索记录', icon: Search }
-      ] },
       { key: 'finance', label: '财务管理', items: [
-        { key: 'orders', label: '订单运营', icon: Tickets },
         { key: 'financialOrders', label: '民宿订单', icon: Tickets },
         { key: 'refunds', label: '退款审核', icon: Wallet },
         { key: 'withdrawals', label: '门店提现', icon: Wallet },
-        { key: 'memberWithdrawals', label: '会员提现', icon: Wallet },
-        { key: 'distribution', label: '分销日志', icon: Tickets },
         { key: 'income', label: '门店收入', icon: Wallet }
       ] },
       { key: 'system', label: '系统管理', items: [
-        { key: 'common', label: '常规管理', icon: Setting },
         { key: 'users', label: '权限管理', icon: UserFilled },
-        { key: 'plugins', label: '插件管理', icon: Operation, badge: 'new' },
         { key: 'appCenter', label: '应用中心', icon: CollectionTag },
-        { key: 'messages', label: '消息管理', icon: Bell },
+        { key: 'messages', label: '消息提醒', icon: Bell },
+        { key: 'messageLogs', label: '消息日志', icon: Document },
+        { key: 'subscriptions', label: '订阅消息', icon: BellFilled },
         { key: 'audit', label: '操作审计', icon: Document }
       ] }
     ]
@@ -212,13 +258,13 @@ const filteredGroups = computed(() => {
 })
 const titleMap = {
   dashboard: '控制台', members: '会员管理', stores: '门店管理', catalog: '房源与库存',
-  roomManagement: '房间管理', orders: '订单运营', financialOrders: '民宿订单', refunds: '退款审核',
-  users: '权限管理', audit: '操作审计', commonConfig: '通用配置',
-  storePermissions: '门店权限', reviews: '评价管理', facilities: '服务设施', tags: '民宿标签',
-  regions: '地区管理', pages: '单页文章', roomTypes: '房间类型', levels: '民宿等级',
-  guideTypes: '攻略类型', guides: '攻略管理', search: '搜索记录', withdrawals: '门店提现',
-  memberWithdrawals: '会员提现', distribution: '分销日志', income: '门店收入', plugins: '插件管理',
-  appCenter: '应用中心', messages: '消息管理', common: '常规管理'
+  roomManagement: '房间管理', financialOrders: '民宿订单', refunds: '退款审核',
+  users: '权限管理', audit: '操作审计',
+  reviews: '评价管理', facilities: '服务设施', tags: '民宿标签',
+  regions: '地区管理', roomTypes: '房间类型', levels: '民宿等级',
+  storeStaff: '门店员工', permissionMenus: '权限菜单', withdrawals: '门店提现',
+  income: '门店收入', appCenter: '应用中心', messages: '消息提醒', messageLogs: '消息日志',
+  subscriptions: '订阅消息'
 }
 const currentTitle = computed(() => titleMap[props.activeView] || '控制台')
 const initials = computed(() => (props.user?.displayName || '管').slice(0, 1))
@@ -227,6 +273,56 @@ const todayLabel = computed(() => new Intl.DateTimeFormat('zh-CN', { year: 'nume
 
 function navigate(key) { emit('navigate', key); profileVisible.value = false }
 function toggleGroup(key) { expandedGroups.value[key] = !expandedGroups.value[key] }
+function notificationIcon(type) {
+  return ({ order: Tickets, refund: Wallet, store: Location, room: House, review: CollectionTag, withdrawal: Wallet })[type] || BellFilled
+}
+function formatNotificationTime(value) {
+  if (!value) return '刚刚'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '刚刚'
+  return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+function firstNoticeKey() {
+  return `tcpms.admin.notifications.first.${props.user?.id || props.user?.username || 'current'}`
+}
+function openNotification(item) {
+  notificationVisible.value = false
+  firstNoticeVisible.value = false
+  navigate(item.view)
+}
+function openAllNotifications() {
+  notificationVisible.value = false
+  firstNoticeVisible.value = false
+  navigate('messages')
+}
+async function syncNotifications() {
+  const previousIds = knownNotificationIds.value
+  const payload = await refreshNotifications({ silent: true })
+  if (!payload) return
+
+  const currentItems = notificationItems.value
+  if (!notificationInitialized.value) {
+    notificationInitialized.value = true
+    knownNotificationIds.value = new Set(currentItems.map((item) => item.id))
+    if (currentItems.length && !sessionStorage.getItem(firstNoticeKey())) {
+      sessionStorage.setItem(firstNoticeKey(), '1')
+      window.setTimeout(() => { firstNoticeVisible.value = true }, 220)
+    }
+    return
+  }
+
+  const newItems = currentItems.filter((item) => !previousIds.has(item.id))
+  knownNotificationIds.value = new Set(currentItems.map((item) => item.id))
+  if (newItems.length && document.visibilityState !== 'hidden') {
+    ElNotification({
+      title: '新的待处理提醒',
+      message: newItems.length === 1 ? newItems[0].title : `新增 ${newItems.length} 项待处理事项`,
+      type: 'warning',
+      duration: 5000,
+      onClick: () => openNotification(newItems[0])
+    })
+  }
+}
 function clearDemoCache() {
   Object.keys(localStorage).filter((key) => key.startsWith('tcpms.admin.demo.') || key === 'tcpms.admin.members').forEach((key) => localStorage.removeItem(key))
   ElMessage.success('演示数据缓存已清除，刷新页面后恢复初始数据')
@@ -235,4 +331,15 @@ function toggleFullscreen() {
   if (!document.fullscreenElement) document.documentElement.requestFullscreen?.()
   else document.exitFullscreen?.()
 }
+
+onMounted(async () => {
+  await syncNotifications()
+  notificationTimer = window.setInterval(syncNotifications, 60000)
+  window.addEventListener('tcpms:notifications-refresh', syncNotifications)
+})
+
+onBeforeUnmount(() => {
+  if (notificationTimer) window.clearInterval(notificationTimer)
+  window.removeEventListener('tcpms:notifications-refresh', syncNotifications)
+})
 </script>

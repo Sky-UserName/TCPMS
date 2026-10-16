@@ -185,6 +185,9 @@
 							setTimeout(() => uni.navigateBack({ delta: 1 }), 400)
 							return
 						}
+						this.submitting = false
+						showToast(error?.message || '评价未提交，请检查网络后重试')
+						return
 					}
 				}
 				if (!savedRemotely) {
@@ -192,7 +195,7 @@
 				}
 				updateOrder(this.order.id, { hasReview: true })
 				this.submitting = false
-				showToast('评价已提交')
+				showToast(savedRemotely ? '评价已提交' : '演示评价仅保存在本机')
 				setTimeout(() => {
 					uni.navigateBack({
 						delta: 1,

@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -23,9 +24,15 @@ var swaggerEnabled = builder.Configuration.GetValue(
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.Configure<AmapOptions>(builder.Configuration.GetSection("Amap"));
+builder.Services.Configure<WeChatOptions>(builder.Configuration.GetSection("WeChat"));
 builder.Services.AddHttpClient<AmapService>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(5);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("TCPMS/1.0");
+});
+builder.Services.AddHttpClient<WeChatPayService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("TCPMS/1.0");
 });
 
@@ -165,6 +172,28 @@ if (swaggerEnabled)
 var api = app.MapGroup("/api/v1")
     .WithTags("公共接口");
 
+api.MapGet("/merchant/permission-menus", async (
+    AppDbContext db,
+    CancellationToken cancellationToken) =>
+{
+    var menus = await db.PermissionMenus.AsNoTracking()
+        .Where(x => x.Status == "normal")
+        .OrderBy(x => x.Weight)
+        .ThenBy(x => x.Title)
+        .Select(x => new PermissionMenuItem(
+            x.Key,
+            x.Title,
+            x.IconKey,
+            x.IconUrl,
+            x.Route,
+            x.Weight,
+            x.Status,
+            x.CreatedAt,
+            x.UpdatedAt))
+        .ToListAsync(cancellationToken);
+    return Results.Ok(menus);
+}).WithTags("用户端");
+
 api.MapGet("/health", (IConfiguration configuration) =>
 {
     return Results.Ok(new
@@ -211,20 +240,43 @@ auth.MapPost("/miniapp-login", async (
     MiniappLoginRequest request,
     AppDbContext db,
     TokenService tokenService,
-    IConfiguration configuration,
+    IHostEnvironment environment,
+    WeChatPayService weChatPayService,
     CancellationToken cancellationToken) =>
 {
-    if (!string.IsNullOrWhiteSpace(request.Code) &&
-        !string.IsNullOrWhiteSpace(configuration["WeChat:MiniProgramAppId"]))
+    WeChatCode2Session? weChatSession = null;
+    if (!string.IsNullOrWhiteSpace(request.Code))
     {
-        return Results.BadRequest(new ApiError(
-            "wechat_login_not_configured",
-            "生产环境需要实现微信 code2Session 和手机号解密流程"));
+        if (!weChatPayService.IsMiniProgramConfigured)
+        {
+            return Results.BadRequest(new ApiError(
+                "wechat_login_not_configured",
+                "微信小程序 AppID 和 Secret 尚未配置"));
+        }
+        try
+        {
+            weChatSession = await weChatPayService.ExchangeCodeAsync(
+                request.Code.Trim(),
+                cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new ApiError("wechat_login_failed", ex.Message));
+        }
     }
 
-    var openId = string.IsNullOrWhiteSpace(request.DevOpenId)
-        ? $"dev-{Guid.NewGuid():N}"
-        : request.DevOpenId.Trim();
+    if (weChatSession is null &&
+        !environment.IsDevelopment())
+    {
+        return Results.BadRequest(new ApiError(
+            "wechat_code_required",
+            "生产环境必须使用微信登录凭证"));
+    }
+
+    var openId = weChatSession?.OpenId
+        ?? (string.IsNullOrWhiteSpace(request.DevOpenId)
+            ? $"dev-{Guid.NewGuid():N}"
+            : request.DevOpenId.Trim());
     var user = await db.WxUsers.SingleOrDefaultAsync(x => x.OpenId == openId, cancellationToken);
     if (user is null)
     {
@@ -234,6 +286,7 @@ auth.MapPost("/miniapp-login", async (
             OpenId = openId,
             Nickname = request.Nickname ?? "演示用户",
             AvatarUrl = request.AvatarUrl,
+            UnionId = weChatSession?.UnionId,
             LastLoginAt = DateTime.UtcNow
         };
         db.WxUsers.Add(user);
@@ -242,6 +295,7 @@ auth.MapPost("/miniapp-login", async (
     {
         user.Nickname = request.Nickname ?? user.Nickname;
         user.AvatarUrl = request.AvatarUrl ?? user.AvatarUrl;
+        user.UnionId = weChatSession?.UnionId ?? user.UnionId;
         user.UpdatedAt = DateTime.UtcNow;
         user.LastLoginAt = DateTime.UtcNow;
     }
@@ -260,6 +314,77 @@ api.MapGet("/map/config", (IOptions<AmapOptions> options) =>
         miniProgramKey = value.MiniProgramKey,
         defaultRadiusKm = value.DefaultRadiusKm
     });
+});
+
+api.MapPost("/payments/wechat/notify", async (
+    HttpRequest request,
+    AppDbContext db,
+    WeChatPayService weChatPayService,
+    CancellationToken cancellationToken) =>
+{
+    using var reader = new StreamReader(request.Body);
+    var body = await reader.ReadToEndAsync(cancellationToken);
+    var headers = request.Headers.ToDictionary(
+        item => item.Key,
+        item => (string?)item.Value.ToString(),
+        StringComparer.OrdinalIgnoreCase);
+
+    WeChatPaymentNotification notification;
+    try
+    {
+        notification = weChatPayService.VerifyAndDecryptNotification(headers, body);
+    }
+    catch (CryptographicException)
+    {
+        return Results.Json(
+            new { code = "FAIL", message = "签名校验失败" },
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+    catch (InvalidOperationException)
+    {
+        return Results.Json(
+            new { code = "FAIL", message = "支付回调配置不完整" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    if (!string.Equals(notification.TradeState, "SUCCESS", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.Ok(new { code = "SUCCESS", message = "已接收非成功状态通知" });
+    }
+
+    var order = await db.BookingOrders.SingleOrDefaultAsync(
+        item => item.OrderNumber == notification.OutTradeNumber,
+        cancellationToken);
+    if (order is null)
+    {
+        return Results.Json(
+            new { code = "FAIL", message = "订单不存在" },
+            statusCode: StatusCodes.Status404NotFound);
+    }
+    if (notification.TotalAmountCents != order.TotalAmountCents)
+    {
+        return Results.Json(
+            new { code = "FAIL", message = "支付金额校验失败" },
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    try
+    {
+        await PaymentOrderService.MarkOrderPaidAsync(
+            db,
+            order,
+            notification.TransactionId,
+            body,
+            cancellationToken);
+    }
+    catch (InvalidOperationException)
+    {
+        return Results.Json(
+            new { code = "FAIL", message = "微信交易号已关联其他订单" },
+            statusCode: StatusCodes.Status409Conflict);
+    }
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new { code = "SUCCESS", message = "成功" });
 });
 
 var stores = api.MapGroup("/stores")
@@ -288,10 +413,17 @@ stores.MapGet("/", async (
     }
 
     var storesData = await query
+        .Include(x => x.RoomTypes)
         .OrderBy(x => x.SortOrder)
         .ThenBy(x => x.Name)
         .ToListAsync(cancellationToken);
-    var data = storesData.Select(x => ToStoreListItem(x, null)).ToList();
+    var reviewCounts = await LoadPublishedReviewCountsAsync(
+        db,
+        storesData.Select(x => x.Id).ToArray(),
+        cancellationToken);
+    var data = storesData
+        .Select(x => ToStoreListItem(x, null, reviewCounts.GetValueOrDefault(x.Id)))
+        .ToList();
     return Results.Ok(data);
 });
 
@@ -316,8 +448,13 @@ stores.MapGet("/nearby", async (
 
     var candidates = await db.Stores
         .AsNoTracking()
+        .Include(x => x.RoomTypes)
         .Where(x => x.Status == StoreStatuses.Active && x.Latitude.HasValue && x.Longitude.HasValue)
         .ToListAsync(cancellationToken);
+    var reviewCounts = await LoadPublishedReviewCountsAsync(
+        db,
+        candidates.Select(x => x.Id).ToArray(),
+        cancellationToken);
 
     var data = candidates
         .Select(store =>
@@ -328,7 +465,7 @@ stores.MapGet("/nearby", async (
         .Where(x => x.distance <= maxDistance)
         .OrderBy(x => x.distance)
         .ThenBy(x => x.store.SortOrder)
-        .Select(x => ToStoreListItem(x.store, Math.Round(x.distance, 2)))
+        .Select(x => ToStoreListItem(x.store, Math.Round(x.distance, 2), reviewCounts.GetValueOrDefault(x.store.Id)))
         .ToList();
     return Results.Ok(data);
 });
@@ -347,7 +484,12 @@ stores.MapGet("/{id:guid}", async (
         return Results.NotFound(new ApiError("store_not_found", "门店不存在或已下架"));
     }
 
-    var summary = ToStoreListItem(store, null);
+    var reviewCount = await db.Reviews
+        .AsNoTracking()
+        .CountAsync(x => x.StoreId == store.Id &&
+                         (x.Moderation == null || x.Moderation.Status == ReviewStatuses.Published),
+            cancellationToken);
+    var summary = ToStoreListItem(store, null, reviewCount);
     var roomTypes = store.RoomTypes
         .Where(x => x.IsPublished)
         .OrderBy(x => x.BasePriceCents)
@@ -729,14 +871,18 @@ roomTypes.MapGet("/{id:guid}/reviews", async (
 
     var ratingData = await db.Reviews
         .AsNoTracking()
-        .Where(x => x.RoomTypeId == id)
+        .Where(x => x.RoomTypeId == id &&
+                    (x.Moderation == null ||
+                     x.Moderation.Status == ReviewStatuses.Published))
         .Select(x => new { x.RoomRating, x.StoreRating })
         .ToListAsync(cancellationToken);
     var reviewData = await db.Reviews
         .AsNoTracking()
         .Include(x => x.User)
         .Include(x => x.Order)
-        .Where(x => x.RoomTypeId == id)
+        .Where(x => x.RoomTypeId == id &&
+                    (x.Moderation == null ||
+                     x.Moderation.Status == ReviewStatuses.Published))
         .OrderByDescending(x => x.CreatedAt)
         .Take(Math.Clamp(limit ?? 50, 1, 50))
         .ToListAsync(cancellationToken);
@@ -948,12 +1094,75 @@ orders.MapPost("/{id:guid}/cancel", async (
     return Results.Ok(ToOrderListItem(order, null, null));
 });
 
+orders.MapPost("/{id:guid}/pay", async (
+    Guid id,
+    AppDbContext db,
+    ClaimsPrincipal principal,
+    WeChatPayService weChatPayService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = GetUserId(principal);
+    if (userId is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var order = await db.BookingOrders.SingleOrDefaultAsync(
+        item => item.Id == id && item.WxUserId == userId.Value,
+        cancellationToken);
+    if (order is null)
+    {
+        return Results.NotFound(new ApiError("order_not_found", "订单不存在"));
+    }
+    if (order.Status != OrderStatuses.PendingPayment)
+    {
+        return Results.BadRequest(new ApiError("order_not_payable", "订单当前不可支付"));
+    }
+    if (order.PaymentExpiresAt <= DateTime.UtcNow)
+    {
+        return Results.BadRequest(new ApiError("order_payment_expired", "订单支付时间已过，请重新下单"));
+    }
+
+    var openId = principal.FindFirst("openid")?.Value;
+    if (string.IsNullOrWhiteSpace(openId))
+    {
+        return Results.BadRequest(new ApiError("wechat_openid_missing", "当前登录态缺少微信用户标识，请重新登录"));
+    }
+
+    try
+    {
+        var payment = await weChatPayService.CreateJsapiPaymentAsync(
+            order,
+            openId,
+            cancellationToken);
+        return Results.Ok(payment);
+    }
+    catch (InvalidOperationException)
+    {
+        return Results.Json(
+            new ApiError("wechat_pay_not_configured", "微信支付尚未完成服务端配置"),
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    catch (HttpRequestException)
+    {
+        return Results.Json(
+            new ApiError("wechat_pay_unavailable", "微信支付接口暂时不可用"),
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
+
 orders.MapPost("/{id:guid}/mock-pay", async (
     Guid id,
     AppDbContext db,
     ClaimsPrincipal principal,
+    IHostEnvironment environment,
     CancellationToken cancellationToken) =>
 {
+    if (!environment.IsDevelopment())
+    {
+        return Results.StatusCode(StatusCodes.Status404NotFound);
+    }
+
     var userId = GetUserId(principal);
     var order = await db.BookingOrders.SingleOrDefaultAsync(
         x => x.Id == id && x.WxUserId == userId,
@@ -967,28 +1176,12 @@ orders.MapPost("/{id:guid}/mock-pay", async (
         return Results.BadRequest(new ApiError("order_not_payable", "订单当前不可支付"));
     }
 
-    var inventories = await db.InventoryDailies
-        .Where(x => x.RoomTypeId == order.RoomTypeId &&
-                    x.Date >= order.CheckIn &&
-                    x.Date < order.CheckOut)
-        .ToListAsync(cancellationToken);
-    foreach (var inventory in inventories)
-    {
-        inventory.LockedQuantity = Math.Max(0, inventory.LockedQuantity - order.Quantity);
-        inventory.SoldQuantity += order.Quantity;
-    }
-    order.Status = OrderStatuses.PaidPendingConfirmation;
-    order.PaymentStatus = "Paid";
-    order.UpdatedAt = DateTime.UtcNow;
-    db.PaymentRecords.Add(new PaymentRecord
-    {
-        Id = Guid.NewGuid(),
-        OrderId = order.Id,
-        TransactionNumber = $"MOCK{DateTime.UtcNow:yyyyMMddHHmmssfff}",
-        AmountCents = order.TotalAmountCents,
-        Status = "Paid",
-        PaidAt = DateTime.UtcNow
-    });
+    await PaymentOrderService.MarkOrderPaidAsync(
+        db,
+        order,
+        $"MOCK{DateTime.UtcNow:yyyyMMddHHmmssfff}",
+        null,
+        cancellationToken);
     await db.SaveChangesAsync(cancellationToken);
     return Results.Ok(ToOrderListItem(order, null, null));
 });
@@ -1074,6 +1267,12 @@ orders.MapPost("/{id:guid}/review", async (
         User = await db.WxUsers.SingleOrDefaultAsync(x => x.Id == userId.Value, cancellationToken)
     };
     db.Reviews.Add(review);
+    db.ReviewModerations.Add(new ReviewModeration
+    {
+        ReviewId = review.Id,
+        Status = ReviewStatuses.Pending,
+        UpdatedAt = DateTime.UtcNow
+    });
     db.AuditLogs.Add(CreateAudit(principal, "review.create", "Review", review.Id.ToString(), order.OrderNumber));
     await db.SaveChangesAsync(cancellationToken);
     return Results.Created($"/api/v1/orders/{id}/review", ToReviewItem(review));
@@ -1270,8 +1469,20 @@ adminOrders.MapPost("/{id:guid}/check-out", async (
 AdminEndpoints.Map(admin);
 MiniappOrderEndpoints.Map(orders);
 
-static StoreListItem ToStoreListItem(Store store, double? distanceKm)
+static StoreListItem ToStoreListItem(Store store, double? distanceKm, int reviewCount = 0)
 {
+    var featuredRoom = store.RoomTypes
+        .Where(x => x.IsPublished)
+        .OrderBy(x => x.BasePriceCents)
+        .ThenBy(x => x.SortOrder)
+        .FirstOrDefault();
+    var tags = store.RoomTypes
+        .Where(x => x.IsPublished)
+        .SelectMany(x => ParseImageUrls(x.TagsJson))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Take(8)
+        .ToArray();
+
     return new StoreListItem(
         store.Id,
         store.Name,
@@ -1285,7 +1496,17 @@ static StoreListItem ToStoreListItem(Store store, double? distanceKm)
         store.OwnerName,
         store.OwnerPhone,
         store.OwnerAvatarUrl,
-        store.Rating);
+        store.Rating,
+        store.City,
+        store.CoverImageUrl,
+        store.DoorImageUrl,
+        store.RoomImageUrlsJson,
+        featuredRoom?.BasePriceCents,
+        featuredRoom?.Id,
+        featuredRoom?.Name,
+        reviewCount,
+        tags,
+        store.Description);
 }
 
 static RoomTypeSummary ToRoomTypeSummary(RoomType roomType)
@@ -1300,7 +1521,32 @@ static RoomTypeSummary ToRoomTypeSummary(RoomType roomType)
         roomType.MaxGuests,
         roomType.BasePriceCents,
         roomType.Description,
-        roomType.IsPublished);
+        roomType.IsPublished,
+        roomType.ImageUrlsJson,
+        roomType.FacilitiesJson,
+        roomType.TagsJson,
+        roomType.ServicesJson,
+        roomType.Area,
+        roomType.RoomCount);
+}
+
+static async Task<Dictionary<Guid, int>> LoadPublishedReviewCountsAsync(
+    AppDbContext db,
+    IReadOnlyCollection<Guid> storeIds,
+    CancellationToken cancellationToken)
+{
+    if (storeIds.Count == 0)
+    {
+        return new Dictionary<Guid, int>();
+    }
+
+    return await db.Reviews
+        .AsNoTracking()
+        .Where(x => storeIds.Contains(x.StoreId) &&
+                    (x.Moderation == null || x.Moderation.Status == ReviewStatuses.Published))
+        .GroupBy(x => x.StoreId)
+        .Select(group => new { StoreId = group.Key, Count = group.Count() })
+        .ToDictionaryAsync(x => x.StoreId, x => x.Count, cancellationToken);
 }
 
 static OrderListItem ToOrderListItem(

@@ -1,7 +1,7 @@
 <template>
   <div class="view-stack">
     <section class="page-heading">
-      <div><span class="eyebrow">ORDER OPERATIONS</span><h2>订单运营</h2><p>统一处理订单确认、入住核验、离店和异常取消。</p></div>
+      <div><p>统一处理订单确认、入住核验、离店和异常取消。</p></div>
       <el-button :icon="Refresh" :loading="loading" @click="load">刷新订单</el-button>
     </section>
 
@@ -23,8 +23,6 @@
       <div class="table-toolbar"><div><strong>订单列表</strong><span class="toolbar-count">{{ filteredOrders.length }} 条记录</span></div><div class="toolbar-actions"><el-tag type="warning" effect="light">待确认 {{ pendingCount }}</el-tag><el-button text :icon="Download" :disabled="!selectedRows.length" @click="exportSelected">导出选中</el-button><el-button text :icon="Refresh" @click="load">刷新</el-button></div></div>
       <el-table v-loading="loading" :data="pagedOrders" class="clean-table admin-data-table" row-key="id" @selection-change="selectedRows = $event">
         <el-table-column type="selection" width="48" fixed="left" />
-        <el-table-column prop="id" label="ID" width="74" />
-        <el-table-column label="用户 ID" width="150"><template #default="{ row }">{{ row.wxUserId || row.id.slice(0, 12) }}</template></el-table-column>
         <el-table-column label="订单号" min-width="180"><template #default="{ row }"><button class="link-button" @click="openDetail(row)">{{ row.orderNumber }}</button><small class="table-sub">{{ formatDate(row.createdAt) }} 创建</small></template></el-table-column>
         <el-table-column label="门店 / 房型" min-width="220"><template #default="{ row }"><strong>{{ row.storeName }}</strong><small class="table-sub">{{ row.roomTypeName }}</small></template></el-table-column>
         <el-table-column label="入住日期" width="178"><template #default="{ row }">{{ formatDate(row.checkIn) }} - {{ formatDate(row.checkOut) }}</template></el-table-column>
@@ -62,6 +60,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Refresh, Search } from '@element-plus/icons-vue'
 import { formatDate, get, money, post } from '../api'
+import { requestNotificationRefresh } from '../notifications'
 
 const loading = ref(false)
 const orders = ref([])
@@ -156,6 +155,7 @@ async function runAction(row, label, path, body) {
     await ElMessageBox.confirm(`确定要${label}“${row.orderNumber}”吗？`, '确认操作', { type: label === '取消订单' ? 'warning' : 'info' })
     await post(path, body)
     ElMessage.success(`${label}成功`)
+    requestNotificationRefresh()
     await load()
     if (drawer.visible && drawer.data?.id === row.id) drawer.data = await get(`/admin/orders/${row.id}`)
   } catch (error) { if (error !== 'cancel') ElMessage.error(error.message || '操作失败') }

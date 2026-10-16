@@ -120,7 +120,7 @@
 				<view class="popular-heading">
 					<view class="popular-title-group">
 						<text class="popular-title">本地热门精选</text>
-						<text class="popular-badge">实时好房</text>
+						<text class="popular-badge">{{ catalogState === 'demo' ? '演示数据' : catalogState === 'loading' ? '正在同步' : '实时好房' }}</text>
 					</view>
 					<button class="sort-button" hover-class="none" @tap="sortStores">
 						<text>{{ sortLabel }}</text>
@@ -388,44 +388,46 @@
 	const normalizeStoreImages = (store = {}, fallback = {}) => {
 		const candidates = [store.images, store.imageUrls, store.gallery, store.photos]
 			.find((images) => Array.isArray(images) && images.length)
-		const fallbackImages = Array.isArray(fallback.images) && fallback.images.length
+		const fallbackImages = !store.isRemote && Array.isArray(fallback.images) && fallback.images.length
 			? fallback.images
-			: [fallback.image].filter(Boolean)
+			: (!store.isRemote ? [fallback.image].filter(Boolean) : [])
 		const toImageUrl = (item) => {
 			if (typeof item === 'string') return item
 			if (!item || typeof item !== 'object') return ''
 			return item.url || item.imageUrl || item.src || item.path || ''
 		}
 		const images = (candidates || fallbackImages).map(toImageUrl).filter(Boolean)
-		if (!images.length && (store.image || fallback.image)) {
-			images.push(store.image || fallback.image)
+		if (!images.length && store.image) {
+			images.push(store.image)
+		} else if (!images.length && !store.isRemote && fallback.image) {
+			images.push(fallback.image)
 		}
 		return images.slice(0, 3)
 	}
 
 	const toHomeStore = (store, index = 0) => {
-		const fallback = demoStores[index] || demoStores[0]
+		const fallback = store.isRemote ? {} : (demoStores[index] || demoStores[0])
 		const storeRooms = Array.isArray(store.rooms) ? store.rooms : []
 		return {
 			...fallback,
 			...store,
 			id: store.id || fallback.id,
 			name: store.name || fallback.name,
-			subtitle: store.address || fallback.address,
-			address: store.address || store.subtitle || fallback.address,
-			room: store.room || fallback.room || '品质房型 · 独立卫浴 · 采光飘窗',
-			featuredRoomId: store.featuredRoomId || store.roomId || (storeRooms[0] && storeRooms[0].id) || fallback.featuredRoomId || demoRooms[0].id,
-			badge: store.badge || fallback.badge || (index === 0 ? '官方直营' : '品质优选'),
+			subtitle: store.address || fallback.address || '',
+			address: store.address || store.subtitle || fallback.address || '',
+			room: store.room || fallback.room || '',
+			featuredRoomId: store.featuredRoomId || store.roomId || (storeRooms[0] && storeRooms[0].id) || (store.isRemote ? null : fallback.featuredRoomId || demoRooms[0].id),
+			badge: store.badge || fallback.badge || (store.isRemote ? '营业门店' : (index === 0 ? '官方直营' : '品质优选')),
 			badgeTone: store.badgeTone || (index % 2 ? 'badge-secondary' : 'badge-primary'),
-			status: store.status || fallback.status,
-			rating: store.rating || fallback.rating,
-			reviews: store.reviews || fallback.reviews,
-			stock: store.stock || '今日可预订',
+			status: store.status || fallback.status || '',
+			rating: store.rating ?? fallback.rating ?? '暂无评分',
+			reviews: store.reviews ?? fallback.reviews ?? 0,
+			stock: store.stock || (store.isRemote ? '查询实时房态' : '今日可预订'),
 			stockTone: store.stockTone || 'stock-success',
-			tags: store.tags && store.tags.length ? store.tags : fallback.tags,
-			price: store.price || fallback.price,
+			tags: store.tags && store.tags.length ? store.tags : (fallback.tags || []),
+			price: store.price ?? fallback.price ?? '--',
 			unit: store.unit || '晚',
-			image: store.image || fallback.image,
+			image: store.image || fallback.image || '',
 			images: normalizeStoreImages(store, fallback)
 		}
 	}
@@ -450,6 +452,7 @@
 				region: booking.region || '',
 				searchKeyword: booking.searchKeyword || '',
 				storeCount: demoStores.length,
+				catalogState: 'loading',
 				selectedStoreId: booking.storeId || demoStores[0].id,
 				checkIn: booking.checkIn,
 				checkOut: booking.checkOut,
@@ -624,8 +627,9 @@
 				}
 				const stores = this.stores.filter((store) => {
 					const cityMatch = storeMatchesCity(store, this.city)
-					const price = Number(store.price || 0)
-					const priceMatch = price >= Number(this.preferenceDraft.priceMin || 0) && price <= Number(this.preferenceDraft.priceMax || 500)
+					const price = Number(store.price)
+					const priceMatch = store.price === '--' || Number.isNaN(price)
+						|| (price >= Number(this.preferenceDraft.priceMin || 0) && price <= Number(this.preferenceDraft.priceMax || 500))
 					const text = `${store.name} ${store.room} ${(store.tags || []).join(' ')}`
 					const featureMatch = this.selectedFilters.every((filter) => {
 						if (filter === '独立房间') return text.indexOf('房') >= 0 && text.indexOf('床位') < 0
@@ -660,7 +664,12 @@
 			async loadStores() {
 				try {
 					const remoteStores = await fetchStores()
-					if (!remoteStores.length) return
+					this.catalogState = 'synced'
+					if (!remoteStores.length) {
+						this.stores = []
+						this.storeCount = 0
+						return
+					}
 					this.stores = remoteStores.map((store, index) => toHomeStore(store, index))
 					if (!this.stores.some((store) => storeMatchesCity(store, this.city))) {
 						this.city = this.stores[0].city || '全部城市'
@@ -672,7 +681,7 @@
 					this.selectedStoreId = selected ? selected.id : this.stores[0].id
 					if (!selected) this.persistBooking(this.stores[0])
 				} catch (error) {
-					// Keep the bundled catalog available when the API is offline.
+					this.catalogState = 'demo'
 				}
 			},
 			applyBooking(booking) {
@@ -924,6 +933,12 @@
 			},
 			bookStore(store) {
 				if (!store) return
+				if (store.isRemote && !store.featuredRoomId) {
+					this.persistBooking(store)
+					showToast('该门店尚未配置可预订房型')
+					goPage(`/pages/room/list?storeId=${encodeURIComponent(store.id)}`)
+					return
+				}
 				this.selectedStoreId = store.id
 				this.persistBooking(store)
 				const roomId = store.featuredRoomId || store.roomId || demoRooms[0].id
@@ -956,7 +971,7 @@
 			},
 			resetSearch() {
 				const hasZhengzhou = this.stores.some((store) => storeMatchesCity(store, '郑州市'))
-				this.city = hasZhengzhou ? '郑州市' : (this.stores[0].city || '全部城市')
+				this.city = hasZhengzhou ? '郑州市' : (this.stores[0] && this.stores[0].city || '全部城市')
 				this.region = ''
 				this.searchKeyword = ''
 				this.storeCount = this.stores.filter((store) => storeMatchesCity(store, this.city)).length

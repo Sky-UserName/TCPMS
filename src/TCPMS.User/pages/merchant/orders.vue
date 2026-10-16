@@ -5,7 +5,7 @@
 		<scroll-view class="merchant-order-tabs" scroll-x :show-scrollbar="false">
 			<text v-for="tab in tabs" :key="tab.key" :class="{ active: activeTab === tab.key }" @tap="activeTab = tab.key">{{ tab.label }}</text>
 		</scroll-view>
-		<view class="merchant-order-summary"><view><text class="merchant-order-summary-value">{{ filteredOrders.length }}</text><text>笔订单</text></view><view><ProtoIcon name="check-circle" :size="22" /><text>本地数据已同步</text></view></view>
+		<view class="merchant-order-summary"><view><text class="merchant-order-summary-value">{{ filteredOrders.length }}</text><text>笔订单</text></view><view><ProtoIcon name="info" :size="22" /><text>本地演示数据</text></view></view>
 		<ProtoEmptyState v-if="!filteredOrders.length" title="暂无订单数据" description="住客下单后，订单会显示在这里" />
 		<view v-else class="merchant-order-list">
 			<view v-for="order in filteredOrders" :key="order.id" class="merchant-order-card proto-card">
@@ -59,7 +59,7 @@
 				const updated = updateMerchantOrder(order.id, { statusKey: nextStatusKey, status: statusMap[nextStatusKey] || order.status })
 				if (updated) {
 					this.orders = getMerchantOrders()
-					showToast(`订单已更新为${updated.status}`)
+					showToast(`演示订单已在本机更新为${updated.status}`)
 				}
 			},
 			showOrderNote(order) {

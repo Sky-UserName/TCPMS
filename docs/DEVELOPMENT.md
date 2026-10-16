@@ -52,7 +52,7 @@ npm run dev
 1. 使用 HBuilderX 打开 src/TCPMS.User。
 2. 运行到微信开发者工具。
 3. 开发阶段允许“不校验合法域名”。
-4. 确认 common/api.js 默认地址或 tcpms.apiBaseUrl 指向后端。
+4. 开发联调可在设备存储中设置 `tcpms.apiBaseUrl`；构建环境也可设置 `VITE_API_BASE_URL`。生产小程序须使用 HTTPS 并配置微信 request 合法域名。
 5. 修改页面后重新编译，不要编辑 unpackage/dist。
 
 ## 5. 本地 MySQL
@@ -72,9 +72,38 @@ dotnet run --project src/backend/TCPMS.Api --urls http://localhost:5180
 
 生产环境必须替换默认密码、JWT 密钥、数据库连接、微信支付证书和高德 Key。
 
-生产环境可通过 `Swagger__Enabled=false` 关闭公开文档，或在内网/网关后启用后再提供给前端联调人员。
+生产配置默认开启 Swagger，接口文档地址为 `/swagger`，OpenAPI JSON 地址为 `/swagger/v1/swagger.json`。如需关闭公网访问，将 `Swagger__Enabled` 设为 `false`，或在网关层限制访问来源。
 
-## 6. 常用验证
+### 5.1 微信支付与高德地图配置
+
+管理后台“系统管理 > 应用中心”会读取服务端配置并显示脱敏状态，密钥不会写入后台前端或小程序包。配置可以写入 `appsettings.Production.json`，也可以使用同名环境变量：
+
+| 配置 | 用途 |
+| --- | --- |
+| `WeChat__MiniProgramAppId` / `WeChat__MiniProgramSecret` | 微信小程序登录和支付使用的 AppID、AppSecret |
+| `WeChat__MerchantId` | 微信支付商户号 |
+| `WeChat__MerchantSerialNumber` | 商户 API 证书序列号 |
+| `WeChat__ApiV3Key` | 微信支付 API v3 Key，必须是 32 字节 |
+| `WeChat__MerchantPrivateKeyPath` | `apiclient_key.pem` 的服务端文件路径；也可直接填写 `MerchantPrivateKeyPem` |
+| `WeChat__PlatformCertificatePath` | 微信支付平台证书 PEM 文件路径；也可直接填写 `PlatformCertificatePem` |
+| `WeChat__NotifyBaseUrl` | 后端公网基地址，例如 `https://api.example.com`；服务会拼接支付回调路径 |
+| `Amap__ServerKey` | 高德 Web 服务 API Key，用于地址解析、逆解析和门店坐标维护 |
+| `Amap__MiniProgramKey` | 高德小程序端 Key，供小程序侧地图能力使用 |
+| `Amap__DefaultRadiusKm` | 附近门店默认搜索半径，单位为公里 |
+
+微信支付回调地址最终为 `/api/v1/payments/wechat/notify`，必须使用公网 HTTPS，并在微信商户平台配置为与服务端一致的地址。应用中心的“测试商户连接”会调用微信支付商户 API 的证书接口；“测试地址解析”会调用高德地理编码接口。生产环境要求真实微信登录凭证，开发用 `devOpenId` 和 `mock-pay` 不会生效。
+
+## 6. 生成发布包
+
+在项目根目录执行：
+
+~~~powershell
+.\scripts\publish.ps1 -ApiBaseUrl "https://api.example.com/api/v1"
+~~~
+
+脚本会编译管理后台、发布后端并在 `release/` 下生成目录和 `.zip` 压缩包。`release/` 与压缩包已加入 `.gitignore`，不会提交到 Git。完整部署步骤见 [发布说明](RELEASE.md)。
+
+## 7. 常用验证
 
 ~~~powershell
 dotnet build src/backend/TCPMS.Api/TCPMS.Api.csproj
@@ -90,7 +119,7 @@ npm run build
 - 日期、人数、房型弹层关闭和确认后状态正确回填。
 - API 不可用时本地回退只用于开发联调。
 
-## 7. 常见问题
+## 8. 常见问题
 
 | 现象 | 排查 |
 | --- | --- |
@@ -101,10 +130,10 @@ npm run build
 | 顶部或底部被遮挡 | 检查 ProtoHeader、.proto-page 和重复固定导航 |
 | 图片不显示 | 检查 static/prototype 资源路径 |
 
-## 8. 上线前清单
+## 9. 上线前清单
 
-- 接入微信 code2Session、手机号授权和隐私协议。
-- 接入微信支付 JSAPI、支付回调、退款和回调幂等。
+- 在微信公众平台、微信商户平台和高德开放平台填写生产配置，并完成真实支付、退款、回调联调。
+- 接入手机号授权和隐私协议。
 - 配置 HTTPS 合法域名、对象存储和图片审核。
 - 完成 MySQL 迁移、备份、恢复和定时任务。
 - 关闭生产环境 mock-pay 和不受控本地演示回退。

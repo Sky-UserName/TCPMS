@@ -27,6 +27,7 @@
 			<button class="filter-tab" hover-class="none" @tap="filterVisible = true"><text>价格/人数</text><ProtoIcon name="chevron-down" :size="17" /></button>
 			<button class="filter-tab" :class="{ active: featureFilter }" hover-class="none" @tap="filterVisible = true"><text>筛选</text><ProtoIcon name="chevron-down" :size="17" /></button>
 		</view>
+		<view v-if="catalogState === 'demo'" class="catalog-sync-notice">接口暂不可用，当前展示演示数据</view>
 
 		<ProtoEmptyState v-if="!filteredStores.length" />
 
@@ -38,14 +39,14 @@
 						<image :src="storeThumb(store, 1)" mode="aspectFill"></image>
 						<image :src="storeThumb(store, 2)" mode="aspectFill"></image>
 					</view>
-					<view class="store-rating"><ProtoIcon name="star" :size="19" /><text>{{ store.rating }} 超棒</text><text class="rating-muted">{{ store.reviews }}条评价</text></view>
+					<view class="store-rating"><ProtoIcon name="star" :size="19" /><text>{{ store.rating || '暂无评分' }}</text><text class="rating-muted">{{ store.reviews || 0 }}条评价</text></view>
 				</view>
 				<view class="store-card-body">
 					<view class="store-name-row"><text class="store-name">{{ store.name }}</text></view>
 					<scroll-view class="store-tags" scroll-x show-scrollbar="false"><text v-for="tag in store.tags" :key="tag">{{ tag }}</text></scroll-view>
-					<view class="store-meta"><text>{{ store.tags[0] || '品质民宿' }}</text><text>·</text><text>{{ store.tags[1] || '独立房间' }}</text><text>·</text><text>整套{{ store.tags.length + 26 }}㎡</text></view>
+						<view class="store-meta"><text>{{ store.room || store.tags[0] || '门店房型' }}</text><text v-if="store.tags[1]">·</text><text v-if="store.tags[1]">{{ store.tags[1] }}</text></view>
 					<view class="store-address"><ProtoIcon name="location" :size="21" /><text>{{ store.address }}</text><text class="store-distance">{{ store.distance }}</text></view>
-					<view class="store-price-row"><text class="store-price">¥{{ store.price }}</text><text class="price-unit">/晚起</text><button class="store-detail-button" hover-class="none" @tap.stop="goDetail(store)">查看房型</button></view>
+					<view class="store-price-row"><text class="store-price">{{ store.price === null || store.price === undefined ? '暂无报价' : `¥${store.price}` }}</text><text v-if="store.price !== null && store.price !== undefined" class="price-unit">/晚起</text><button class="store-detail-button" hover-class="none" @tap.stop="goDetail(store)">查看房型</button></view>
 				</view>
 			</view>
 		</view>
@@ -96,6 +97,7 @@
 		data() {
 			return {
 				stores: demoStores,
+				catalogState: 'loading',
 				booking: getBooking(),
 				city: '郑州市',
 				searchText: '',
@@ -157,6 +159,9 @@
 				goPage('/pages/booking/date')
 			},
 			storeThumb(store, offset = 1) {
+				if (store.isRemote) {
+					return (store.images || [store.image]).filter(Boolean)[offset] || store.image
+				}
 				const index = this.stores.findIndex((item) => item.id === store.id)
 				const next = this.stores[(index + offset) % this.stores.length]
 				return (next && next.image) || store.image
@@ -164,8 +169,9 @@
 			async loadStores() {
 				try {
 					const stores = await fetchStores()
-					if (!stores.length) return
+					this.catalogState = 'synced'
 					this.stores = stores
+					if (!stores.length) return
 					const hasCurrentCity = stores.some((store) =>
 						store.city === this.city || (store.address || '').indexOf(this.city) >= 0
 					)
@@ -174,7 +180,7 @@
 						this.locationText = `已加载 ${stores.length} 家在线门店，当前展示全部城市`
 					}
 				} catch (error) {
-					// Keep the local catalog available when the API is offline.
+					this.catalogState = 'demo'
 				}
 			},
 			goDetail(store) {
@@ -582,6 +588,15 @@
 	.store-list-page .proto-header {
 		background: #2aa9a9 !important;
 		border-bottom-color: rgba(255, 255, 255, 0.18);
+	}
+
+	.catalog-sync-notice {
+		margin: 0 24rpx 12rpx;
+		padding: 12rpx 16rpx;
+		color: #7a4f00;
+		background: #fff4d6;
+		border-radius: 8rpx;
+		font-size: 22rpx;
 	}
 
 	.store-search-panel {

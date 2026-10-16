@@ -32,6 +32,13 @@ import UsersView from './views/UsersView.vue'
 import AuditView from './views/AuditView.vue'
 import MembersView from './views/MembersView.vue'
 import DemoManagerView from './views/DemoManagerView.vue'
+import RegionManagerView from './views/RegionManagerView.vue'
+import StoreStaffView from './views/StoreStaffView.vue'
+import PermissionMenusView from './views/PermissionMenusView.vue'
+import MessagesView from './views/MessagesView.vue'
+import MessageLogsView from './views/MessageLogsView.vue'
+import SubscriptionMessagesView from './views/SubscriptionMessagesView.vue'
+import AppCenterView from './views/AppCenterView.vue'
 
 const activeView = ref('dashboard')
 const session = reactive({
@@ -43,7 +50,6 @@ const views = {
   dashboard: DashboardView,
   stores: StoresView,
   catalog: CatalogView,
-  orders: OrdersView,
   refunds: RefundsView,
   users: UsersView,
   audit: AuditView,
@@ -55,22 +61,16 @@ const views = {
   roomTypes: DemoManagerView,
   facilities: DemoManagerView,
   tags: DemoManagerView,
-  regions: DemoManagerView,
-  commonConfig: DemoManagerView,
-  pages: DemoManagerView,
+  regions: RegionManagerView,
   reviews: DemoManagerView,
-  guideTypes: DemoManagerView,
-  guides: DemoManagerView,
-  search: DemoManagerView,
   withdrawals: DemoManagerView,
-  memberWithdrawals: DemoManagerView,
-  distribution: DemoManagerView,
   income: DemoManagerView,
-  messages: DemoManagerView,
-  plugins: DemoManagerView,
-  appCenter: DemoManagerView,
-  storePermissions: DemoManagerView,
-  common: DemoManagerView
+  messages: MessagesView,
+  messageLogs: MessageLogsView,
+  appCenter: AppCenterView,
+  subscriptions: SubscriptionMessagesView,
+  storeStaff: StoreStaffView,
+  permissionMenus: PermissionMenusView
 }
 
 function handleLogin(payload) {

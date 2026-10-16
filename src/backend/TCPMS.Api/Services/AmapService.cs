@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Globalization;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using TCPMS.Api.Contracts;
@@ -18,6 +19,9 @@ public sealed class AmapService(HttpClient httpClient, IOptions<AmapOptions> opt
     private readonly AmapOptions _options = options.Value;
 
     public bool IsConfigured => !string.IsNullOrWhiteSpace(_options.ServerKey);
+    public bool HasServerKey => !string.IsNullOrWhiteSpace(_options.ServerKey);
+    public bool HasMiniProgramKey => !string.IsNullOrWhiteSpace(_options.MiniProgramKey);
+    public double DefaultRadiusKm => _options.DefaultRadiusKm;
 
     public async Task<GeoResult?> GeocodeAsync(string address, string? city, CancellationToken cancellationToken)
     {
@@ -34,6 +38,10 @@ public sealed class AmapService(HttpClient httpClient, IOptions<AmapOptions> opt
             ["output"] = "json"
         };
         var payload = await GetAsync<AmapGeocodeResponse>("v3/geocode/geo", query, cancellationToken);
+        if (payload?.Status != "1")
+        {
+            throw new InvalidOperationException(payload?.Info ?? "高德地理编码接口调用失败");
+        }
         var geocode = payload?.Geocodes?.FirstOrDefault();
         if (geocode?.Location is null || !TryParseLocation(geocode.Location, out var longitude, out var latitude))
         {
@@ -66,6 +74,10 @@ public sealed class AmapService(HttpClient httpClient, IOptions<AmapOptions> opt
             ["output"] = "json"
         };
         var payload = await GetAsync<AmapReverseGeocodeResponse>("v3/geocode/regeo", query, cancellationToken);
+        if (payload?.Status != "1" || payload.Regeocode is null)
+        {
+            throw new InvalidOperationException(payload?.Info ?? "高德逆地理编码接口调用失败");
+        }
         var component = payload?.Regeocode?.AddressComponent;
         return new GeoResult(
             longitude,
@@ -119,14 +131,17 @@ public sealed class AmapService(HttpClient httpClient, IOptions<AmapOptions> opt
         latitude = 0;
         var parts = location.Split(',', StringSplitOptions.TrimEntries);
         return parts.Length == 2
-            && decimal.TryParse(parts[0], out longitude)
-            && decimal.TryParse(parts[1], out latitude);
+            && decimal.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out longitude)
+            && decimal.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out latitude);
     }
 
     private sealed class AmapGeocodeResponse
     {
         [JsonPropertyName("status")]
         public string? Status { get; set; }
+
+        [JsonPropertyName("info")]
+        public string? Info { get; set; }
 
         [JsonPropertyName("geocodes")]
         public List<AmapGeocode>? Geocodes { get; set; }
@@ -160,6 +175,9 @@ public sealed class AmapService(HttpClient httpClient, IOptions<AmapOptions> opt
     {
         [JsonPropertyName("status")]
         public string? Status { get; set; }
+
+        [JsonPropertyName("info")]
+        public string? Info { get; set; }
 
         [JsonPropertyName("regeocode")]
         public AmapRegeocode? Regeocode { get; set; }

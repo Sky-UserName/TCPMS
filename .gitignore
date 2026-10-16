@@ -6,12 +6,15 @@
 **/node_modules/
 **/dist/
 **/.vite/
+**/.cache-region/
 coverage/
 
 # Local logs and generated exports
 .run-logs/
 output/
+release/
 *.log
+*.zip
 
 # Local configuration and secrets
 .env

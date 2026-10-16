@@ -53,13 +53,15 @@
 - 自动附加 Authorization: Bearer <token>。
 - 过滤空查询参数。
 - 将后端 DTO 映射为页面模型。
-- 在开发期 API 不可用时回退到演示数据。
+- 仅本地演示记录使用演示兜底；服务端 GUID 记录不会用样例价格、图片、评分或房型补全。
 
-默认 API 地址是 http://localhost:5180/api/v1。开发者工具中可设置：
+默认 API 地址是 http://localhost:5180/api/v1。构建时可通过 `VITE_API_BASE_URL` 配置；开发者工具中也可按设备覆盖：
 
 ~~~js
 uni.setStorageSync('tcpms.apiBaseUrl', 'http://localhost:5180/api/v1')
 ~~~
+
+微信小程序正式版必须配置 HTTPS API 域名，并在公众平台加入 request 合法域名。`tcpms.apiBaseUrl` 优先于构建变量，适合开发联调；上线前检查设备存储中没有旧的测试地址。
 
 后端字段与页面字段不一定相同，例如：
 

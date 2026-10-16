@@ -54,7 +54,14 @@
 					<view class="guest-meta-line"><ProtoIcon name="document" :size="19" /><text>身份证 {{ guest.identity }}</text></view>
 					<view class="guest-meta-line"><ProtoIcon name="phone" :size="19" /><text>手机号 {{ guest.phone }}</text></view>
 				</view>
-				<view class="guest-edit-button" @tap="goGuests"><ProtoIcon class="guest-edit" name="edit" :size="22" /></view>
+				<view class="guest-actions">
+					<view class="guest-edit-button" aria-label="编辑入住人" @tap="goGuests">
+						<ProtoIcon class="guest-edit" name="edit" :size="22" />
+					</view>
+					<view class="guest-delete-button" aria-label="删除入住人" @tap="deleteGuest(guest)">
+						<ProtoIcon name="trash" :size="22" />
+					</view>
+				</view>
 			</view>
 			<view v-if="guests.length < booking.guestCount" class="confirm-error">当前仅登记 {{ guests.length }} 位入住人，请补齐实名信息后继续。</view>
 			<button v-if="guests.length < booking.guestCount" class="proto-ghost-button" hover-class="none" @tap="goGuests">
@@ -76,6 +83,8 @@
 				<text>实付总计</text>
 				<text class="strong">¥{{ total }}</text>
 			</view>
+			<view v-if="isApiBooking && quoteError" class="confirm-error">报价暂不可用：{{ quoteError }}</view>
+			<view v-else-if="!isApiBooking" class="confirm-error">当前房源为本地演示数据，连接真实服务端房源后才能提交订单。</view>
 		</view>
 
 		<view class="confirm-policy proto-card">
@@ -87,7 +96,7 @@
 				<text>入住日前1天18:00前可免费取消，逾期按规则收取费用</text>
 				<view class="proto-link"><text>查看详情</text><ProtoIcon name="chevron-right" :size="20" /></view>
 			</view>
-			<view class="proto-check" @tap="toggleRuleAgreement">
+			<view class="proto-check agreement-check" hover-class="agreement-check-hover" @tap="toggleRuleAgreement">
 				<view class="proto-check-box" :class="{ checked: ruleAgreed }"><ProtoIcon v-if="ruleAgreed" name="check" :size="18" tone="white" /></view>
 				<text>我已阅读并完全同意《订房退改规则与入离守则》与《人身财产安全保障协议》</text>
 			</view>
@@ -103,7 +112,7 @@
 				<text class="strong">{{ total }}</text>
 				<view class="pay-total-detail"><text>明细</text><ProtoIcon name="chevron-up" :size="18" /></view>
 			</view>
-			<button class="proto-primary-button" hover-class="none" @tap="submitOrder"><ProtoIcon name="shield" tone="white" :size="21" /><text>{{ submitStatus === 'locking' ? '正在锁定库存...' : '提交订单' }}</text></button>
+			<button class="proto-primary-button" hover-class="none" :disabled="submitStatus === 'locking' || !isApiBooking || quoteLoading || quoteCents === null" @tap="submitOrder"><ProtoIcon name="shield" tone="white" :size="21" /><text>{{ submitStatus === 'locking' ? '正在锁定库存...' : quoteLoading ? '正在核对价格...' : '提交订单' }}</text></button>
 		</view>
 	</view>
 </template>
@@ -112,10 +121,11 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { goPage, showToast } from '@/common/prototype.js'
-	import { createOrder, getBooking, getGuests } from '@/common/app-store.js'
-	import { createRemoteOrder } from '@/common/api.js'
+	import { getBooking, getGuests, saveBooking } from '@/common/app-store.js'
+	import { createRemoteOrder, previewRemoteOrder } from '@/common/api.js'
 
 	const weekdayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+	const isGuid = (value) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(value || ''))
 
 	const getWeekday = (isoDate) => {
 		const date = new Date(isoDate)
@@ -125,11 +135,16 @@
 	export default {
 		components: { ProtoHeader, ProtoIcon },
 		data() {
+			const booking = getBooking()
 			return {
-				booking: getBooking(),
-				guests: getGuests(),
+				booking,
+				guests: Array.isArray(booking.guests) ? booking.guests : getGuests(),
 				ruleAgreed: false,
-				submitStatus: 'idle'
+				submitStatus: 'idle',
+				quoteCents: null,
+				quoteLoading: false,
+				quoteError: '',
+				quoteRequestId: 0
 			}
 		},
 		computed: {
@@ -139,6 +154,9 @@
 			checkOutWeekday() {
 				return getWeekday(this.booking.isoCheckOut)
 			},
+			isApiBooking() {
+				return isGuid(this.booking.storeId) && isGuid(this.booking.roomId)
+			},
 			roomSubtotal() {
 				return Number(this.booking.roomPrice || 0) * Number(this.booking.roomCount || 1) * Number(this.booking.nights || 1)
 			},
@@ -146,6 +164,7 @@
 				return Math.min(60, Math.round(this.roomSubtotal * 0.15))
 			},
 			total() {
+				if (this.isApiBooking) return this.quoteCents === null ? '0.00' : (this.quoteCents / 100).toFixed(2)
 				return Math.max(0, this.roomSubtotal - this.discount)
 			},
 			roomTags() {
@@ -153,6 +172,12 @@
 				return (tags.length ? tags : ['私家花园', '近商圈', '近地铁']).slice(0, 4)
 			},
 			feeItems() {
+				if (this.isApiBooking) {
+					return [{
+						label: `服务端报价（${this.booking.roomCount}间 × ${this.booking.nights}晚）`,
+						value: this.quoteCents === null ? (this.quoteLoading ? '计算中' : '待计算') : `¥${(this.quoteCents / 100).toFixed(2)}`
+					}]
+				}
 				return [
 					{ label: `客房房费（${this.booking.roomCount}间 × ${this.booking.nights}晚）`, value: `¥${this.roomSubtotal}` },
 					{ label: '平台初秋连住立减', value: `-¥${this.discount}`, discount: true },
@@ -171,7 +196,30 @@
 		methods: {
 			refreshData() {
 				this.booking = getBooking()
-				this.guests = getGuests()
+				this.guests = Array.isArray(this.booking.guests) ? this.booking.guests : getGuests()
+				this.quoteCents = null
+				this.quoteError = ''
+				this.loadQuote()
+			},
+			async loadQuote() {
+				const requestId = ++this.quoteRequestId
+				if (!this.isApiBooking) {
+					this.quoteLoading = false
+					return
+				}
+				this.quoteLoading = true
+				try {
+					const quote = await previewRemoteOrder(this.booking)
+					if (requestId !== this.quoteRequestId) return
+					this.quoteCents = Number(quote.totalAmountCents)
+					this.quoteError = ''
+				} catch (error) {
+					if (requestId !== this.quoteRequestId) return
+					this.quoteCents = null
+					this.quoteError = error?.message || '请检查登录状态、库存或网络后重试'
+				} finally {
+					if (requestId === this.quoteRequestId) this.quoteLoading = false
+				}
 			},
 			toggleRuleAgreement() {
 				this.ruleAgreed = !this.ruleAgreed
@@ -186,6 +234,17 @@
 			},
 			async submitOrder() {
 				if (this.submitStatus === 'locking') return
+				if (!this.isApiBooking) {
+					showToast('演示房源不支持真实下单')
+					return
+				}
+				if (this.quoteLoading || this.quoteCents === null) {
+					await this.loadQuote()
+					if (this.quoteCents === null) {
+						showToast(this.quoteError || '暂时无法获取服务端报价')
+						return
+					}
+				}
 				if (this.guests.length < Number(this.booking.guestCount || 1)) {
 					showToast('请补齐入住人实名信息')
 					return
@@ -201,20 +260,36 @@
 					total: this.total
 				}
 				let order
-				if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(booking.storeId))
-					&& /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(booking.roomId))) {
-					try {
-						order = await createRemoteOrder(booking)
-					} catch (error) {
-						order = null
-					}
+				try {
+					order = await createRemoteOrder(booking)
+				} catch (error) {
+					this.submitStatus = 'idle'
+					showToast(error?.message || '订单未提交，请检查网络后重试')
+					return
 				}
-				if (!order) order = createOrder(booking)
 				setTimeout(() => {
 					if (this.submitStatus === 'locking') {
 						goPage(`/pages/pay/result?orderId=${order.id}`)
 					}
 				}, 700)
+			},
+			deleteGuest(guest) {
+				uni.showModal({
+					title: '确认移除该入住人？',
+					content: '仅从本次订单的入住人列表移除，不会删除常用入住人资料。',
+					success: (res) => {
+						if (!res.confirm) return
+						this.guests = this.guests.filter((item) => item.id !== guest.id)
+						if (!this.guests.some((item) => item.isDefault) && this.guests[0]) {
+							this.guests[0].isDefault = true
+						}
+						this.booking = saveBooking({
+							...this.booking,
+							guests: this.guests
+						})
+						showToast('已从本次订单移除')
+					}
+				})
 			},
 			goGuests() {
 				goPage('/pages/me/guests')
@@ -728,18 +803,42 @@
 		color: var(--booking-green-deep);
 	}
 
-	.booking-confirm-page .guest-row > .guest-edit-button {
+	.booking-confirm-page .guest-actions {
+		display: flex;
+		align-items: center;
+		flex: 0 0 auto;
+		gap: 8rpx;
+	}
+
+	.booking-confirm-page .guest-row > .guest-actions {
+		flex: 0 0 auto;
+	}
+
+	.booking-confirm-page .guest-edit-button,
+	.booking-confirm-page .guest-delete-button {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		flex: 0 0 44rpx;
 		width: 44rpx;
 		height: 44rpx;
+		flex: 0 0 44rpx;
+		padding: 0;
+		border: 1rpx solid transparent;
 		border-radius: 50%;
+	}
+
+	.booking-confirm-page .guest-edit-button {
+		background: var(--booking-green-tint);
+		border-color: rgba(42, 169, 169, 0.08);
 	}
 
 	.booking-confirm-page .guest-edit-button .guest-edit {
 		color: var(--booking-green-deep);
+	}
+
+	.booking-confirm-page .guest-delete-button {
+		border-color: rgba(180, 35, 24, 0.12);
+		background: #fff0ee;
 	}
 
 	.booking-confirm-page .confirm-policy {
@@ -788,19 +887,44 @@
 		display: flex;
 		align-items: flex-start;
 		gap: 10rpx;
+		min-height: 64rpx;
 		margin: 14rpx 0 0;
+		padding: 10rpx 12rpx;
+		background: #f7fbfb;
+		border: 1rpx solid rgba(42, 169, 169, 0.14);
+		border-radius: 14rpx;
 	}
 
 	.booking-confirm-page .confirm-policy .proto-check > text {
 		min-width: 0;
 		flex: 1;
-		color: var(--proto-muted);
-		font-size: 18rpx;
+		color: #3f5d60;
+		font-size: 20rpx;
 		line-height: 1.5;
 	}
 
 	.booking-confirm-page .confirm-policy .proto-check-box {
-		flex: 0 0 34rpx;
-		margin-top: 2rpx;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 48rpx;
+		height: 48rpx;
+		flex: 0 0 48rpx;
+		margin-top: 0;
+		color: #ffffff;
+		background: #ffffff;
+		border: 4rpx solid var(--booking-green-deep);
+		border-radius: 10rpx;
+		box-shadow: 0 2rpx 5rpx rgba(0, 106, 106, 0.12);
+	}
+
+	.booking-confirm-page .confirm-policy .proto-check-box.checked {
+		background: var(--booking-green);
+		border-color: var(--booking-green);
+		box-shadow: none;
+	}
+
+	.booking-confirm-page .agreement-check-hover {
+		opacity: 0.78;
 	}
 </style>

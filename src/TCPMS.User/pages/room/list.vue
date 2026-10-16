@@ -56,6 +56,8 @@
 				<text>{{ activeTab === 'all' ? '筛选' : activeRoomTypeLabel }}</text><ProtoIcon name="chevron-down" :size="16" />
 			</button>
 		</view>
+		<view v-if="catalogState === 'demo'" class="catalog-sync-notice">接口暂不可用，当前展示演示房型</view>
+		<view v-if="loadError" class="catalog-sync-notice">{{ loadError }}</view>
 
 		<ProtoEmptyState v-if="!filteredRooms.length" />
 
@@ -63,7 +65,7 @@
 			<view class="room-list-heading">
 				<view>
 					<text class="room-list-heading-title">为你推荐</text>
-					<text class="room-list-heading-sub">实拍房源 · 到店可订</text>
+					<text class="room-list-heading-sub">{{ catalogState === 'demo' ? '演示房型' : '选择日期查询房态' }}</text>
 				</view>
 				<text class="room-list-heading-sort">{{ roomSort === 'price' ? '价格优先' : '综合排序' }}</text>
 			</view>
@@ -87,7 +89,7 @@
 						<text class="room-card-title">{{ room.name }}</text>
 						<text class="room-card-price">¥{{ room.price }}<text class="small">/晚起</text></text>
 					</view>
-					<text class="room-card-spec">{{ room.capacity }} · {{ room.beds }} · {{ room.area }} · 独立采光飘窗</text>
+					<text class="room-card-spec">{{ [room.capacity, room.beds, room.area, ...(room.tags || []).slice(0, 2)].filter(Boolean).join(' · ') }}</text>
 					<view class="room-tag-row">
 						<text v-for="tag in room.tags" :key="tag">{{ tag }}</text>
 					</view>
@@ -144,6 +146,8 @@
 		data() {
 			return {
 				rooms: demoRooms,
+				catalogState: 'demo',
+				loadError: '',
 				storeId: getBooking().storeId || '',
 				store: demoStores[0],
 				booking: getBooking(),
@@ -165,15 +169,19 @@
 			if (localStore) {
 				this.store = localStore
 			}
-			if (this.storeId && !/^\d+$/.test(String(this.storeId))) {
+			const isRemoteStore = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(this.storeId || ''))
+			if (isRemoteStore) {
+				this.store = { id: this.storeId, name: '门店房型', isRemote: true }
+				this.rooms = []
+				this.catalogState = 'loading'
 				try {
 					const result = await fetchStoreDetail(this.storeId)
-					if (result.store) {
-						this.store = result.store
-					}
-					if (result.rooms.length) this.rooms = result.rooms
+					this.store = result.store || this.store
+					this.rooms = result.rooms
+					this.catalogState = 'synced'
 				} catch (error) {
-					// Keep the bundled room catalog available when the API is offline.
+					this.catalogState = 'synced'
+					this.loadError = '门店房型同步失败，请检查网络或稍后重试。'
 				}
 			}
 			this.booking = saveBooking({
@@ -297,6 +305,15 @@
 <style lang="scss" scoped>
 	.room-list-page {
 		background: #f3f9fb;
+	}
+
+	.catalog-sync-notice {
+		margin: 0 24rpx 12rpx;
+		padding: 12rpx 16rpx;
+		color: #7a4f00;
+		background: #fff4d6;
+		border-radius: 8rpx;
+		font-size: 22rpx;
 	}
 
 	.date-card {

@@ -55,7 +55,7 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { demoOrders, goPage, goRoot, prototypeImages, showToast } from '@/common/prototype.js'
 	import { findOrder, getOrders, updateOrder } from '@/common/app-store.js'
-	import { payRemoteOrder } from '@/common/api.js'
+	import { fetchRemoteOrder, payRemoteOrder, requestRemotePayment } from '@/common/api.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
@@ -87,9 +87,38 @@
 				let order
 				if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(this.order.id))) {
 					try {
-						order = await payRemoteOrder(this.order.id)
+						const payment = await requestRemotePayment(this.order.id)
+						await new Promise((resolve, reject) => {
+							uni.requestPayment({
+								provider: 'wxpay',
+								timeStamp: payment.timeStamp,
+								nonceStr: payment.nonceStr,
+								package: payment.package,
+								signType: payment.signType,
+								paySign: payment.paySign,
+								success: resolve,
+								fail: reject
+							})
+						})
+						for (let attempt = 0; attempt < 5; attempt += 1) {
+							order = await fetchRemoteOrder(this.order.id, this.order)
+							if (order?.paymentStatus === 'Paid' || order?.statusKey === 'stay') break
+							await new Promise((resolve) => setTimeout(resolve, 600))
+						}
 					} catch (error) {
-						order = null
+						if (error?.code === 'wechat_pay_not_configured') {
+							try {
+								order = await payRemoteOrder(this.order.id)
+							} catch (fallbackError) {
+								this.status = 'pending'
+								showToast(fallbackError?.message || '微信支付尚未配置')
+								return
+							}
+						} else {
+							this.status = 'pending'
+							showToast(error?.errMsg?.includes('cancel') ? '已取消支付' : error?.message || '微信支付失败')
+							return
+						}
 					}
 				}
 				if (!order) {

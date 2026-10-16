@@ -152,7 +152,17 @@ public sealed record StoreListItem(
     string? OwnerName = null,
     string? OwnerPhone = null,
     string? OwnerAvatarUrl = null,
-    decimal? Rating = null);
+    decimal? Rating = null,
+    string? City = null,
+    string? CoverImageUrl = null,
+    string? DoorImageUrl = null,
+    string? RoomImageUrlsJson = null,
+    int? StartingPriceCents = null,
+    Guid? FeaturedRoomId = null,
+    string? FeaturedRoomName = null,
+    int ReviewCount = 0,
+    IReadOnlyList<string>? Tags = null,
+    string? Description = null);
 
 public sealed record RoomTypeSummary(
     Guid Id,
@@ -164,7 +174,13 @@ public sealed record RoomTypeSummary(
     int MaxGuests,
     int BasePriceCents,
     string? Description,
-    bool IsPublished);
+    bool IsPublished,
+    string? ImageUrlsJson = null,
+    string? FacilitiesJson = null,
+    string? TagsJson = null,
+    string? ServicesJson = null,
+    decimal? Area = null,
+    int RoomCount = 0);
 
 public sealed record StoreDetail(
     StoreListItem Store,

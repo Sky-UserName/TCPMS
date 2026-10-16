@@ -1,7 +1,7 @@
 import { demoRooms, demoStores, prototypeImages } from './prototype.js'
-import { getApiToken, getBooking, saveApiToken, upsertOrder } from './app-store.js'
+import { getApiToken, getBooking, saveApiToken, saveOrders, upsertOrder } from './app-store.js'
 
-const defaultApiBaseUrl = 'http://localhost:5180/api/v1'
+const defaultApiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5180/api/v1'
 
 const getApiBaseUrl = () => {
 	try {
@@ -52,49 +52,99 @@ const findRoomFallback = (room) => {
 		|| demoRooms[0]
 }
 
+const isRemoteRecord = (value) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(value || ''))
+
+const parseImageList = (value) => {
+	if (Array.isArray(value)) return value.filter((item) => typeof item === 'string' && item)
+	if (typeof value !== 'string' || !value.trim()) return []
+	try {
+		const parsed = JSON.parse(value)
+		return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string' && item) : []
+	} catch (error) {
+		return []
+	}
+}
+
 export const mapStore = (store, index = 0) => {
-	const fallback = findStoreFallback(store)
+	const isRemote = isRemoteRecord(store.id)
+	const fallback = isRemote ? {} : findStoreFallback(store)
 	const distance = store.distanceKm === null || store.distanceKm === undefined
-		? fallback.distance
+		? (isRemote ? '距离未知' : fallback.distance)
 		: `${Number(store.distanceKm).toFixed(2)}km`
-	const images = [store.images, store.imageUrls, store.gallery, store.photos]
-		.find((items) => Array.isArray(items) && items.length)
+	const images = [
+		store.coverImageUrl,
+		store.doorImageUrl,
+		...parseImageList(store.images),
+		...parseImageList(store.imageUrls),
+		...parseImageList(store.gallery),
+		...parseImageList(store.photos),
+		...parseImageList(store.roomImageUrlsJson)
+	].filter((item) => typeof item === 'string' && item)
+	const image = store.coverImageUrl || store.doorImageUrl || store.image || images[0] || fallback.image || (isRemote ? '' : prototypeImages.storeOne)
+	const startingPrice = store.startingPriceCents === null || store.startingPriceCents === undefined
+		? (isRemote ? null : fallback.price)
+		: (Number(store.startingPriceCents) / 100).toFixed(2).replace(/\.00$/, '')
 	return {
 		...fallback,
+		isRemote,
 		id: store.id || fallback.id,
 		name: store.name || fallback.name,
 		shortName: store.name || fallback.shortName,
 		status: store.status === 'Active' ? '营业中' : store.status || fallback.status,
 		city: store.city || fallback.city || '',
-		address: store.address || fallback.address,
-		phone: store.phone || fallback.phone,
-		latitude: store.latitude || fallback.latitude,
-		longitude: store.longitude || fallback.longitude,
+		address: store.address || fallback.address || '',
+		phone: store.phone || fallback.phone || '',
+		latitude: store.latitude ?? fallback.latitude ?? null,
+		longitude: store.longitude ?? fallback.longitude ?? null,
 		distance,
-		unknownDistance: store.distanceKm === null || store.distanceKm === undefined ? fallback.unknownDistance : false,
-		image: store.image || fallback.image || prototypeImages.storeOne,
-		...(images ? { images: images.slice(0, 3) } : {}),
+		unknownDistance: store.distanceKm === null || store.distanceKm === undefined ? (isRemote ? true : fallback.unknownDistance) : false,
+		image,
+		images: images.length ? images.slice(0, 3) : (fallback.images || []),
+		featuredRoomId: store.featuredRoomId || (isRemote ? null : fallback.featuredRoomId),
+		featuredRoomName: store.featuredRoomName || '',
+		room: store.featuredRoomName || (isRemote ? '' : fallback.room),
+		description: store.description || '',
+		price: startingPrice,
+		rating: store.rating ?? (isRemote ? null : fallback.rating),
+		reviews: store.reviewCount ?? (isRemote ? null : fallback.reviews),
+		tags: Array.isArray(store.tags) ? store.tags : (isRemote ? [] : fallback.tags || []),
 		sortIndex: index
 	}
 }
 
 export const mapRoom = (room, index = 0) => {
-	const fallback = findRoomFallback(room)
+	const isRemote = isRemoteRecord(room.id)
+	const fallback = isRemote ? {} : findRoomFallback(room)
 	const isBed = room.kind === 'Bed' || room.kind === 'Dormitory' || room.kind === 'Bedspace' || fallback.type === '多人间床位'
+	const images = parseImageList(room.imageUrlsJson)
+	const tags = parseImageList(room.tagsJson)
+	const facilities = parseImageList(room.facilitiesJson)
+	const services = parseImageList(room.servicesJson)
+	const priceCents = room.basePriceCents === null || room.basePriceCents === undefined
+		? null
+		: Number(room.basePriceCents)
 	return {
 		...fallback,
+		isRemote,
 		id: room.id || fallback.id,
 		storeId: room.storeId || fallback.storeId,
 		name: room.name || fallback.name,
 		type: isBed ? '多人间床位' : '独立房间',
-		gender: room.gender || fallback.gender,
-		capacity: room.maxGuests ? `可住${room.maxGuests}人` : fallback.capacity,
-		beds: room.bedCount ? `${room.bedCount}张床` : fallback.beds,
-		price: String(Math.round(Number(room.basePriceCents || 0) / 100) || Number(fallback.price)),
-		originalPrice: fallback.originalPrice,
-		description: room.description || fallback.description,
+		gender: room.gender || fallback.gender || '',
+		capacity: room.maxGuests ? `可住${room.maxGuests}人` : (isRemote ? '' : fallback.capacity),
+		beds: room.bedCount ? `${room.bedCount}张床` : (isRemote ? '' : fallback.beds),
+		price: priceCents === null ? (isRemote ? null : String(fallback.price)) : (priceCents / 100).toFixed(2).replace(/\.00$/, ''),
+		originalPrice: isRemote ? null : fallback.originalPrice,
+		description: room.description || fallback.description || '',
+		area: room.area ? `${room.area}㎡` : (isRemote ? '' : fallback.area),
+		roomCount: room.roomCount || 0,
+		tags: tags.length ? tags : (isRemote ? facilities.concat(services) : fallback.tags || []),
+		facilities,
+		services,
 		isPublished: room.isPublished !== false,
-		image: fallback.image || prototypeImages.roomOne,
+		availability: isRemote ? '选择日期查询房态' : fallback.availability,
+		image: images[0] || room.imageUrl || fallback.image || (isRemote ? '' : prototypeImages.roomOne),
+		images,
 		sortIndex: index
 	}
 }
@@ -175,16 +225,45 @@ const mapReviewResponse = (data = {}) => ({
 })
 
 export const miniappLogin = async () => {
-	const data = await apiRequest({
-		path: '/auth/miniapp-login',
-		method: 'POST',
-		data: {
-			code: null,
-			devOpenId: 'dev-user-001',
-			nickname: '张三',
-			avatarUrl: prototypeImages.avatar
-		}
-	})
+	let code = null
+	try {
+		const loginResult = await new Promise((resolve, reject) => {
+			uni.login({
+				provider: 'weixin',
+				success: resolve,
+				fail: reject
+			})
+		})
+		code = loginResult?.code || null
+	} catch (error) {
+		code = null
+	}
+
+	let data
+	try {
+		data = await apiRequest({
+			path: '/auth/miniapp-login',
+			method: 'POST',
+			data: {
+				code,
+				devOpenId: code ? null : 'dev-user-001',
+				nickname: '张三',
+				avatarUrl: prototypeImages.avatar
+			}
+		})
+	} catch (error) {
+		if (!code || error?.code !== 'wechat_login_not_configured') throw error
+		data = await apiRequest({
+			path: '/auth/miniapp-login',
+			method: 'POST',
+			data: {
+				code: null,
+				devOpenId: 'dev-user-001',
+				nickname: '张三',
+				avatarUrl: prototypeImages.avatar
+			}
+		})
+	}
 	if (data && data.token) saveApiToken(data.token)
 	return data
 }
@@ -192,6 +271,11 @@ export const miniappLogin = async () => {
 export const fetchStores = async (keyword = '') => {
 	const data = await apiRequest({ path: '/stores/', query: { keyword, status: 'Active' } })
 	return Array.isArray(data) ? data.map(mapStore) : []
+}
+
+export const fetchMerchantPermissionMenus = async () => {
+	const data = await apiRequest({ path: '/merchant/permission-menus' })
+	return Array.isArray(data) ? data : []
 }
 
 export const fetchNearbyStores = async (latitude, longitude, radiusKm = 50) => {
@@ -234,9 +318,27 @@ export const createRemoteOrder = async (booking) => {
 	return upsertOrder(mapped)
 }
 
+export const previewRemoteOrder = async (booking) => {
+	const defaultBooking = getBooking()
+	return apiRequest({
+		path: '/orders/preview',
+		method: 'POST',
+		data: {
+			storeId: booking.storeId,
+			roomTypeId: booking.roomId,
+			checkIn: booking.isoCheckIn || defaultBooking.isoCheckIn,
+			checkOut: booking.isoCheckOut || defaultBooking.isoCheckOut,
+			quantity: Number(booking.roomCount || 1),
+			guestCount: Number(booking.guestCount || 1)
+		}
+	})
+}
+
 export const fetchRemoteOrders = async () => {
 	const data = await apiRequest({ path: '/orders/me' })
-	return Array.isArray(data) ? data.map((item) => mapOrder(item)) : []
+	const orders = Array.isArray(data) ? data.map((item) => mapOrder(item)) : []
+	saveOrders(orders)
+	return orders
 }
 
 export const fetchRemoteOrder = async (id, context = {}) => {
@@ -282,6 +384,10 @@ export const payRemoteOrder = async (id) => {
 	const data = await apiRequest({ path: `/orders/${id}/mock-pay`, method: 'POST' })
 	const mapped = mapOrder(data)
 	return upsertOrder(mapped)
+}
+
+export const requestRemotePayment = async (id) => {
+	return apiRequest({ path: `/orders/${id}/pay`, method: 'POST' })
 }
 
 export const refundRemoteOrder = async (id, amount, reason, context = {}) => {

@@ -47,7 +47,7 @@ Authorization: Bearer <JWT>
 | --- | --- | --- | --- |
 | GET | /api/v1/health | 无 | 返回服务、环境、数据库提供程序和 UTC 时间 |
 | POST | /api/v1/auth/login | 无 | 后台账号登录，Body 为 LoginRequest |
-| POST | /api/v1/auth/miniapp-login | 无 | 小程序开发登录，Body 为 MiniappLoginRequest |
+| POST | /api/v1/auth/miniapp-login | 无 | 小程序登录，生产环境传微信 login code，Body 为 MiniappLoginRequest |
 | GET | /api/v1/map/config | 无 | 返回高德小程序 Key 是否启用和默认附近半径 |
 
 登录请求模型：
@@ -56,7 +56,7 @@ Authorization: Bearer <JWT>
 - MiniappLoginRequest：code、devOpenId、nickname、avatarUrl。
 - 成功响应 TokenResponse：token、expiresAt、userType、displayName。
 
-开发环境可以传 devOpenId。生产环境必须实现微信 code2Session，不能把开发 openId 当真实身份方案。
+开发环境可以传 devOpenId。生产环境由后端调用微信 code2Session 换取 openid，不能把开发 openId 当真实身份方案。
 
 开发种子管理员账号（密码均为 `Admin@123456`）：
 
@@ -119,6 +119,7 @@ AvailabilityItem 字段：date、totalQuantity、lockedQuantity、soldQuantity�
 | GET | /api/v1/orders/me | 当前用户订单列表 |
 | GET | /api/v1/orders/{id} | 当前用户订单详情 |
 | POST | /api/v1/orders/{id}/cancel | 仅待支付订单可取消 |
+| POST | /api/v1/orders/{id}/pay | 创建微信小程序 JSAPI 支付参数 |
 | POST | /api/v1/orders/{id}/mock-pay | 开发环境模拟支付 |
 | POST | /api/v1/orders/{id}/refunds | CreateRefundRequest，创建退款申请 |
 | GET | /api/v1/orders/{id}/refunds | 当前用户退款记录 |
@@ -128,6 +129,19 @@ AvailabilityItem 字段：date、totalQuantity、lockedQuantity、soldQuantity�
 - OrderQuoteRequest：storeId、roomTypeId、checkIn、checkOut、quantity、guestCount。
 - CreateOrderRequest：以上字段加 guestSnapshotJson。
 - CreateRefundRequest：amountCents、reason。
+
+微信支付回调：
+
+| 方法 | 路径 | 鉴权 | 说明 |
+| --- | --- | --- | --- |
+| POST | /api/v1/payments/wechat/notify | 微信支付签名 | 校验平台证书签名、解密 API v3 通知并幂等更新订单 |
+
+管理后台应用配置：
+
+| 方法 | 路径 | 鉴权 | 说明 |
+| --- | --- | --- | --- |
+| GET | /api/v1/admin/integrations | admin | 返回微信支付和高德地图脱敏配置状态 |
+| POST | /api/v1/admin/integrations/{provider}/test | admin | `provider` 为 `wechat` 或 `amap`，测试外部服务连接 |
 
 OrderQuote 包含 nights、quantity、guestCount、totalAmountCents、dailyItems。OrderListItem 包含 id、orderNumber、storeId、roomTypeId、storeName、roomTypeName、checkIn、checkOut、quantity、totalAmountCents、status、paymentStatus、createdAt、hasReview。
 
@@ -214,6 +228,8 @@ ReviewRefundRequest：approved、comment。批准后退款记录写入审核信�
 | POST | /api/v1/admin/users | AdminUserRequest，新建管理员 |
 | PUT | /api/v1/admin/users/{id} | AdminUserRequest，更新管理员 |
 | GET | /api/v1/admin/metrics | 门店、订单、销售和退款指标 |
+| GET | /api/v1/admin/stats/income | 按门店和日期统计订单实收、退款和可结算金额 |
+| GET | /api/v1/admin/notifications | 按角色和门店范围返回订单、退款、门店、房间、评价和提现审核提醒 |
 | GET | /api/v1/admin/stats/trend | from、to、storeId，最多 90 天 |
 | GET | /api/v1/admin/stats/store-rank | from、to，最多 90 天 |
 | GET | /api/v1/admin/audit-logs | keyword，最多返回最近 200 条 |
@@ -221,3 +237,26 @@ ReviewRefundRequest：approved、comment。批准后退款记录写入审核信�
 AdminUserRequest：username、displayName、password、phoneNumber、storeId、isEnabled、roleIds。
 
 角色代码和权限由后端 RoleCodes 控制。总部角色可跨门店；门店角色只能访问 JWT 中 store_id 对应门店；账号新增和角色绑定只允许系统管理员。
+
+后台消息提醒响应 `AdminNotificationCenter` 包含 `pendingCount`、各类待处理数量、`generatedAt` 和 `items`。通知类型包括：
+
+- `order`：已支付待确认或已确认待入住订单。
+- `refund`：待审核退款申请。
+- `store`：待审核门店资料。
+- `room`：待审核房间资料。
+- `review`：待审核住客评价。
+- `withdrawal`：待审核门店提现。
+
+## 11. 后台扩展管理
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET/PUT/DELETE | /api/v1/admin/reviews、/api/v1/admin/reviews/{id} | 评价查询、编辑、上架/隐藏和删除 |
+| GET/POST/PUT/DELETE | /api/v1/admin/store-staff、/api/v1/admin/store-staff/{id} | 门店员工账号、门店归属和权限菜单 |
+| GET/POST/PUT/DELETE | /api/v1/admin/permission-menus、/api/v1/admin/permission-menus/{key} | 用户端民宿管理入口维护 |
+| POST | /api/v1/admin/permission-menus/sync | 从用户端 merchantEntries 同步权限菜单 |
+| GET/POST/PUT/DELETE | /api/v1/admin/managed-items/{resourceType} | 装修、等级、设施、标签等配置型页面的持久化 JSON 记录 |
+| GET/POST/PUT/DELETE | /api/v1/admin/withdrawals、/api/v1/admin/withdrawals/{id} | 门店提现申请和记录 |
+| POST | /api/v1/admin/withdrawals/{id}/review | 批准或驳回提现 |
+
+评价、提现审核完成后，`/api/v1/admin/notifications` 会返回最新待办数量；管理后台右上角消息中心和控制台待办共用该接口。

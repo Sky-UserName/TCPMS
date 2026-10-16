@@ -18,8 +18,8 @@
 		</view>
 
 		<view class="me-panel order-panel">
-			<view class="me-panel-heading"><view class="me-heading-title"><text>我的订单</text><text class="me-heading-caption">实时同步</text></view><view @tap="goOrders"><text>查看更多</text><ProtoIcon name="chevron-right" :size="22" /></view></view>
-			<view class="me-order-summary"><view><text class="me-order-total">{{ orders.length }}</text><text>笔订单</text></view><text>状态实时更新，入住更安心</text></view>
+			<view class="me-panel-heading"><view class="me-heading-title"><text>我的订单</text><text class="me-heading-caption">{{ ordersSyncError ? '同步失败' : '实时同步' }}</text></view><view @tap="goOrders"><text>查看更多</text><ProtoIcon name="chevron-right" :size="22" /></view></view>
+			<view class="me-order-summary"><view><text class="me-order-total">{{ orders.length }}</text><text>笔订单</text></view><text>{{ ordersSyncError ? '当前显示本机缓存' : '状态实时更新，入住更安心' }}</text></view>
 			<view class="me-order-grid">
 				<view v-for="item in orderShortcuts" :key="item.key" class="me-order-entry" @tap="goOrders">
 					<view class="me-order-icon"><ProtoIcon :name="item.icon" :size="36" /></view>
@@ -39,11 +39,12 @@
 			</view>
 			<view class="merchant-grid">
 				<view v-for="item in merchantEntries" :key="item.key" class="merchant-entry" :class="{ disabled: item.disabled }" @tap="handleMerchantEntry(item)">
-					<view class="merchant-entry-icon"><ProtoIcon :name="item.icon" :size="38" /></view>
+					<view class="merchant-entry-icon"><image v-if="item.iconUrl" :src="item.iconUrl" mode="aspectFit" /><ProtoIcon v-else :name="item.icon" :size="38" /></view>
 					<text class="merchant-entry-title">{{ item.title }}</text>
 					<text v-if="item.disabled" class="merchant-entry-status">待开放</text>
 				</view>
 			</view>
+			<view v-if="merchantMenuError" class="merchant-menu-error" @tap="loadMerchantEntries">管理入口同步失败，点击重试</view>
 		</view>
 
 		<view class="me-panel function-panel">
@@ -64,7 +65,8 @@
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { goPage, goRoot, prototypeImages, showToast } from '@/common/prototype.js'
-	import { getFavorites, getGuests, getMerchantProfile, getOrders, getProfile, saveMerchantProfile } from '@/common/app-store.js'
+	import { getFavorites, getGuests, getMerchantProfile, getOrders, getProfile } from '@/common/app-store.js'
+	import { fetchMerchantPermissionMenus, fetchRemoteOrders } from '@/common/api.js'
 
 	export default {
 		components: { ProtoBottomNav, ProtoIcon },
@@ -87,6 +89,7 @@
 				},
 				avatar: prototypeImages.avatar,
 				orders: [],
+				ordersSyncError: false,
 				merchant: getMerchantProfile(),
 				guests: [],
 				favoriteCount: 0,
@@ -102,20 +105,8 @@
 					{ title: '在线客服', icon: 'support', route: '/pages/service/contact' },
 					{ title: '退出登录', icon: 'refresh', action: 'logout' }
 				],
-				merchantEntries: [
-					{ key: 'finance', title: '财务统计', icon: 'wallet', route: '/pages/merchant/finance' },
-					{ key: 'rooms', title: '房间管理', icon: 'house', route: '/pages/merchant/rooms' },
-					{ key: 'orders', title: '订单管理', icon: 'receipt', route: '/pages/merchant/orders' },
-					{ key: 'verify', title: '扫码核销', icon: 'qr', route: '/pages/merchant/verify' },
-					{ key: 'records', title: '核销记录', icon: 'document', route: '/pages/merchant/records' },
-					{ key: 'staff', title: '员工管理', icon: 'group', route: '/pages/merchant/staff' },
-					{ key: 'property', title: '民宿管理', icon: 'store', route: '/pages/merchant/index' },
-					{ key: 'publish', title: '发布房源', icon: 'plus', route: '/pages/merchant/publish' },
-					{ key: 'reviews', title: '评价管理', icon: 'star', route: '/pages/merchant/reviews' },
-					{ key: 'coupon', title: '优惠券管理', icon: 'document', route: '/pages/merchant/coupons' },
-					{ key: 'settings', title: '民宿设置', icon: 'settings', route: '/pages/merchant/settings' },
-					{ key: 'subscriptions', title: '订阅消息', icon: 'document', route: '/pages/merchant/messages' }
-				],
+				merchantEntries: [],
+				merchantMenuError: false,
 				travelEntries: [
 					{ title: '常用入住人', desc: '已登记2位常住人信息，免重复输入', icon: 'group', route: '/pages/me/guests' },
 					{ title: '我的发票抬头', desc: '增值税电子普通/专用发票抬头管理', icon: 'document', action: 'invoice' }
@@ -156,13 +147,36 @@
 		},
 		onShow() {
 			this.refreshData()
+			this.loadMerchantEntries()
+			this.refreshRemoteOrders()
 		},
 		methods: {
-			refreshData() {
+			async refreshRemoteOrders() {
+				if (!this.loggedIn) return
+				try {
+					this.refreshData(await fetchRemoteOrders())
+					this.ordersSyncError = false
+				} catch (error) {
+					this.ordersSyncError = true
+				}
+			},
+			async loadMerchantEntries() {
+				this.merchantMenuError = false
+				try {
+					const items = await fetchMerchantPermissionMenus()
+					this.merchantEntries = items
+						.filter((item) => item.key && item.title && /^\/pages\/[A-Za-z0-9/_-]+$/.test(item.route || ''))
+						.map((item) => ({ ...item, icon: item.iconKey || 'store', iconUrl: item.iconUrl || '' }))
+				} catch (error) {
+					this.merchantEntries = []
+					this.merchantMenuError = true
+				}
+			},
+			refreshData(remoteOrders = null) {
 				this.profile = getProfile()
 				this.loggedIn = Boolean(this.profile.loggedIn)
 				this.avatar = this.profile.avatar || prototypeImages.avatar
-				this.orders = getOrders()
+				this.orders = Array.isArray(remoteOrders) ? remoteOrders : getOrders()
 				this.merchant = getMerchantProfile()
 				this.guests = getGuests()
 				this.favoriteCount = getFavorites().length
@@ -194,25 +208,7 @@
 					this.goLogin()
 					return
 				}
-				uni.showModal({
-					title: '申请入驻商家',
-					content: '提交后将创建演示民宿“天空之蓝”，审核通过后可使用民宿管理功能。',
-					confirmText: '提交申请',
-					success: ({ confirm }) => {
-						if (!confirm) return
-						saveMerchantProfile({
-							enabled: true,
-							status: 'approved',
-							storeId: 'store-001',
-							storeName: '天空之蓝',
-							role: '店主',
-							roomCount: 0,
-							pendingOrderCount: 0
-						})
-						this.refreshData()
-						showToast('入驻成功，民宿管理已开放')
-					}
-				})
+				showToast('商家入驻申请接口尚未接入，请联系平台处理')
 			},
 			handleMerchantEntry(item) {
 				if (item.disabled) {
@@ -1041,6 +1037,18 @@
 		background: #e9f7f7;
 		border: 1rpx solid #d3eeee;
 		border-radius: 20rpx;
+	}
+
+	.merchant-entry-icon image {
+		width: 42rpx;
+		height: 42rpx;
+	}
+
+	.merchant-menu-error {
+		margin-top: 14rpx;
+		color: #8a4b13;
+		font-size: 18rpx;
+		text-align: center;
 	}
 
 	.merchant-entry-title {

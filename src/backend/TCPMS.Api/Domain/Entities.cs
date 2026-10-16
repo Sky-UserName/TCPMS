@@ -27,6 +27,13 @@ public static class StoreStatuses
     public const string Disabled = "Disabled";
 }
 
+public static class RegionLevels
+{
+    public const string Province = "Province";
+    public const string City = "City";
+    public const string District = "District";
+}
+
 public static class OrderStatuses
 {
     public const string PendingPayment = "PendingPayment";
@@ -38,6 +45,21 @@ public static class OrderStatuses
     public const string Refunding = "Refunding";
     public const string Refunded = "Refunded";
     public const string RefundFailed = "RefundFailed";
+}
+
+public static class ReviewStatuses
+{
+    public const string Pending = "Pending";
+    public const string Published = "Published";
+    public const string Hidden = "Hidden";
+}
+
+public static class WithdrawalStatuses
+{
+    public const string PendingReview = "PendingReview";
+    public const string Approved = "Approved";
+    public const string Rejected = "Rejected";
+    public const string Completed = "Completed";
 }
 
 public static class RoomTypeKinds
@@ -80,6 +102,7 @@ public class AdminUser
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public Store? Store { get; set; }
     public ICollection<AdminUserRole> UserRoles { get; set; } = new List<AdminUserRole>();
+    public StoreStaffProfile? StoreStaffProfile { get; set; }
 }
 
 public class Role
@@ -134,6 +157,27 @@ public class Store
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public ICollection<RoomType> RoomTypes { get; set; } = new List<RoomType>();
+}
+
+public class Region
+{
+    /// <summary>
+    /// 6 位行政区划代码。省、市、区县统一使用字符串保存，避免前导零丢失。
+    /// </summary>
+    public string Code { get; set; } = string.Empty;
+    public string? ParentCode { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+    public string ShortName { get; set; } = string.Empty;
+    public string Level { get; set; } = RegionLevels.Province;
+    public string? Initial { get; set; }
+    public bool IsHot { get; set; }
+    public bool IsEnabled { get; set; } = true;
+    public int SortOrder { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public Region? Parent { get; set; }
+    public ICollection<Region> Children { get; set; } = new List<Region>();
 }
 
 public class RoomType
@@ -293,6 +337,96 @@ public class Review
     public WxUser? User { get; set; }
     public Store? Store { get; set; }
     public RoomType? RoomType { get; set; }
+    public ReviewModeration? Moderation { get; set; }
+}
+
+public class ReviewModeration
+{
+    public Guid ReviewId { get; set; }
+    public string Status { get; set; } = ReviewStatuses.Pending;
+    public Guid? ReviewedByAdminId { get; set; }
+    public string? ReviewComment { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public Review? Review { get; set; }
+}
+
+public class AdminManagedItem
+{
+    public Guid Id { get; set; }
+    public string ResourceType { get; set; } = string.Empty;
+    public string DataJson { get; set; } = "{}";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class PermissionMenu
+{
+    public string Key { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string IconKey { get; set; } = string.Empty;
+    public string? IconUrl { get; set; }
+    public string Route { get; set; } = string.Empty;
+    public int Weight { get; set; }
+    public string Status { get; set; } = "normal";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class MiniProgramSubscriptionTemplate
+{
+    public Guid Id { get; set; }
+    public string Type { get; set; } = "MiniProgramSubscriptionMessage";
+    public string Identifier { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string TemplateId { get; set; } = string.Empty;
+    public string ParametersJson { get; set; } = "[]";
+    public bool IsEnabled { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public ICollection<MiniProgramMessageLog> MessageLogs { get; set; } = new List<MiniProgramMessageLog>();
+}
+
+public class MiniProgramMessageLog
+{
+    public Guid Id { get; set; }
+    public Guid? SubscriptionTemplateId { get; set; }
+    public string TemplateName { get; set; } = string.Empty;
+    public string TemplateId { get; set; } = string.Empty;
+    public Guid? MemberId { get; set; }
+    public string? OpenId { get; set; }
+    public string? TemplateDataJson { get; set; }
+    public string? SendResultJson { get; set; }
+    public string SendStatus { get; set; } = "Unknown";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public MiniProgramSubscriptionTemplate? SubscriptionTemplate { get; set; }
+    public WxUser? Member { get; set; }
+}
+
+public class StoreStaffProfile
+{
+    public Guid AdminUserId { get; set; }
+    public string Gender { get; set; } = "未知";
+    public string PermissionKeysJson { get; set; } = "[]";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public AdminUser? AdminUser { get; set; }
+}
+
+public class WithdrawalRecord
+{
+    public Guid Id { get; set; }
+    public Guid StoreId { get; set; }
+    public string Account { get; set; } = string.Empty;
+    public int AmountCents { get; set; }
+    public string Status { get; set; } = WithdrawalStatuses.PendingReview;
+    public Guid? ReviewedByAdminId { get; set; }
+    public string? ReviewComment { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ReviewedAt { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public Store? Store { get; set; }
 }
 
 public class AuditLog

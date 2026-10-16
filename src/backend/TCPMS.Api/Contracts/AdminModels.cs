@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace TCPMS.Api.Contracts;
 
 public sealed record RoomTypeRequest(
@@ -56,7 +58,8 @@ public sealed record BulkPriceRequest(
     DateTime From,
     DateTime To,
     int PriceCents,
-    string? Source);
+    string? Source,
+    int? TotalQuantity = null);
 
 public sealed record InventoryAdjustRequest(
     Guid RoomTypeId,
@@ -130,11 +133,202 @@ public sealed record AdminMemberRequest(
     Guid? ParentUserId,
     bool IsEnabled);
 
+public sealed record AdminReviewItem(
+    Guid Id,
+    Guid OrderId,
+    Guid StoreId,
+    Guid RoomTypeId,
+    string User,
+    string Store,
+    string Room,
+    string? Image,
+    IReadOnlyList<string> Images,
+    string Content,
+    int Score,
+    string Status,
+    DateTime CreatedAt,
+    DateTime? ReviewedAt,
+    string? ReviewComment);
+
+public sealed record AdminReviewRequest(
+    string? Content,
+    int? Score,
+    string? Status,
+    string? ReviewComment);
+
+public sealed record ManagedItemRequest(JsonElement Data);
+
+public sealed record PermissionMenuRequest(
+    string Key,
+    string Title,
+    string IconKey,
+    string? IconUrl,
+    string Route,
+    int Weight,
+    string Status);
+
+public sealed record PermissionMenuItem(
+    string Key,
+    string Title,
+    string IconKey,
+    string? IconUrl,
+    string Route,
+    int Weight,
+    string Status,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public sealed record PermissionMenuSyncRequest(
+    IReadOnlyList<PermissionMenuRequest> Items);
+
+public sealed record SubscriptionTemplateParameter(
+    string Description,
+    string Field,
+    string MappingField);
+
+public sealed record SubscriptionTemplateRequest(
+    string? Type,
+    string Identifier,
+    string Name,
+    string TemplateId,
+    IReadOnlyList<SubscriptionTemplateParameter>? Parameters,
+    bool IsEnabled = true);
+
+public sealed record SubscriptionTemplateItem(
+    Guid Id,
+    string Type,
+    string Identifier,
+    string Name,
+    string TemplateId,
+    IReadOnlyList<SubscriptionTemplateParameter> Parameters,
+    bool IsEnabled,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public sealed record MessageLogRequest(
+    Guid? SubscriptionTemplateId,
+    string? TemplateName,
+    string TemplateId,
+    Guid? MemberId,
+    string? OpenId,
+    JsonElement? Template,
+    JsonElement? SendResult,
+    string? SendStatus);
+
+public sealed record MessageLogItem(
+    Guid Id,
+    Guid? SubscriptionTemplateId,
+    string TemplateName,
+    string TemplateId,
+    Guid? MemberId,
+    string? OpenId,
+    string? Template,
+    string? SendResult,
+    string SendStatus,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public sealed record MessageLogPage(
+    IReadOnlyList<MessageLogItem> Items,
+    int Total,
+    int Page,
+    int PageSize);
+
+public sealed record StoreStaffRequest(
+    string Username,
+    string? Gender,
+    string? Phone,
+    string Status,
+    Guid? StoreId,
+    IReadOnlyList<string>? Permissions);
+
+public sealed record StoreStaffItem(
+    Guid Id,
+    string Username,
+    string DisplayName,
+    string Gender,
+    string? Phone,
+    string Status,
+    Guid? StoreId,
+    string? StoreName,
+    IReadOnlyList<string> Permissions,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public sealed record WithdrawalRequest(
+    Guid? StoreId,
+    string? Store,
+    string Account,
+    int AmountCents,
+    string? Status);
+
+public sealed record ReviewWithdrawalRequest(
+    bool Approved,
+    string? Comment);
+
+public sealed record AdminWithdrawalItem(
+    Guid Id,
+    Guid StoreId,
+    string Store,
+    string Account,
+    int Amount,
+    string Status,
+    DateTime CreatedAt,
+    DateTime? ReviewedAt,
+    string? ReviewComment);
+
+public sealed record AdminIncomeItem(
+    string Id,
+    Guid StoreId,
+    string Store,
+    int Orders,
+    int Income,
+    int Refund,
+    int Settlement,
+    DateTime Date);
+
 public sealed record RoleItem(
     Guid Id,
     string Name,
     string Code,
     int UserCount);
+
+public sealed record AdminRegionItem(
+    string Code,
+    string? ParentCode,
+    string Name,
+    string ShortName,
+    string FullName,
+    string Level,
+    string? Initial,
+    bool IsHot,
+    bool IsEnabled,
+    int SortOrder);
+
+public sealed record RegionRequest(
+    string? Code,
+    string? ParentCode,
+    string? Name,
+    string? ShortName,
+    string? FullName,
+    string? Level,
+    string? Initial,
+    bool IsHot = false,
+    bool IsEnabled = true,
+    int SortOrder = 0);
+
+public sealed record AdminRegionTreeItem(
+    string Code,
+    string? ParentCode,
+    string Name,
+    string ShortName,
+    string FullName,
+    string Level,
+    string? Initial,
+    bool IsHot,
+    bool IsEnabled,
+    int SortOrder,
+    IReadOnlyList<AdminRegionTreeItem> Children);
 
 public sealed record RoomUnitItem(
     Guid Id,
@@ -276,3 +470,26 @@ public sealed record DashboardStoreRankItem(
     string StoreName,
     int OrderCount,
     int SalesCents);
+
+public sealed record AdminNotificationItem(
+    string Id,
+    string Type,
+    string Title,
+    string Description,
+    string View,
+    string Tone,
+    DateTime CreatedAt,
+    Guid? ResourceId,
+    string? ResourceNumber,
+    string? StoreName);
+
+public sealed record AdminNotificationCenter(
+    int PendingCount,
+    int PendingOrderCount,
+    int PendingRefundCount,
+    int PendingStoreReviewCount,
+    int PendingRoomReviewCount,
+    int PendingReviewCount,
+    int PendingWithdrawalCount,
+    DateTime GeneratedAt,
+    IReadOnlyList<AdminNotificationItem> Items);

@@ -19,29 +19,6 @@
 			</view>
 		</view>
 
-		<view v-if="status === 'stay'" class="door-card proto-card">
-			<view class="door-heading">
-				<view class="door-icon"><ProtoIcon name="lock" :size="28" /></view>
-				<view>
-					<text class="door-title">智能门锁入住凭据</text>
-					<text class="door-desc">客房号系统自动分配 · 密码即开</text>
-				</view>
-				<text class="proto-pill info">已自动同步门锁</text>
-			</view>
-			<view class="door-code-row">
-				<view>
-					<text>门锁临时访问密码（入户专用）</text>
-					<view class="door-code-value"><text class="strong">820619</text><ProtoIcon name="key" :size="22" /></view>
-					<text class="small">有效期：{{ doorValidity }}</text>
-				</view>
-				<view class="qr-placeholder">
-					<ProtoIcon name="qr" :size="54" />
-					<text class="small">扫码开门/梯控</text>
-				</view>
-			</view>
-			<view class="door-safe"><ProtoIcon name="shield" :size="20" /><text>凭证包含隐私权限，请勿截图外传。到店后若遇门锁未响应，可直接按门铃联动管家协助。</text></view>
-		</view>
-
 		<view class="detail-store proto-card">
 			<view class="store-heading">
 				<view class="store-mark"><ProtoIcon name="store" :size="28" /></view>
@@ -102,7 +79,7 @@
 		</view>
 
 		<view class="detail-cancel proto-card">
-			<view class="card-heading"><view class="card-heading-title"><ProtoIcon name="shield" :size="21" /><text>退订与取消保障</text></view><text class="proto-link">开票指引</text></view>
+			<view class="card-heading"><view class="card-heading-title"><ProtoIcon name="shield" :size="21" /><text>退订与取消保障</text></view></view>
 			<view class="cancel-tip">
 				<view class="cancel-tip-title"><ProtoIcon name="clock" :size="19" /><text>限时无损全额取消</text></view>
 				<text>入住日前1天18:00前申请取消订单，享无手续费极速全额原路退款；若逾期申请取消，将依法扣除首晚房费。</text>
@@ -176,11 +153,6 @@
 			paymentId() {
 				return this.order.paidAt ? `WX${String(this.order.id).slice(-12)}` : '待支付'
 			},
-			doorValidity() {
-				const checkIn = this.order.checkIn || (this.order.date || '').split(' - ')[0] || '入住日'
-				const checkOut = this.order.checkOut || (this.order.date || '').split(' - ')[1] || '离店日'
-				return `${checkIn} 14:00 至 ${checkOut} 12:00`
-			}
 		},
 		onLoad(options) {
 			this.loadOrder(options && options.id)

@@ -1,7 +1,7 @@
 <template>
   <div class="view-stack">
     <section class="page-heading">
-      <div><span class="eyebrow">REFUND CONTROL</span><h2>退款审核</h2><p>审核用户退款申请，保留完整的退款原因和处理流水。</p></div>
+      <div><p>审核用户退款申请，保留完整的退款原因和处理流水。</p></div>
       <el-button :icon="Refresh" :loading="loading" @click="load">刷新申请</el-button>
     </section>
     <el-card class="panel-card filter-card" shadow="never"><div class="filter-row"><el-select v-model="status" clearable placeholder="退款状态" @change="load"><el-option label="全部状态" value="" /><el-option label="待审核" value="PendingReview" /><el-option label="已退款" value="Refunded" /><el-option label="已驳回" value="Rejected" /></el-select><el-button type="primary" @click="load">查询</el-button></div></el-card>
@@ -27,6 +27,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { formatDate, get, money, post } from '../api'
+import { requestNotificationRefresh } from '../notifications'
 
 const refunds = ref([])
 const loading = ref(false)
@@ -48,7 +49,7 @@ async function review(row, approved) {
   } else {
     try { await ElMessageBox.confirm(`确认审核通过 ${row.refundNumber}，并发起退款吗？`, '退款审核', { type: 'warning' }) } catch { return }
   }
-  try { await post(`/admin/refunds/${row.id}/review`, { approved, comment }); ElMessage.success(approved ? '退款已处理' : '申请已驳回'); await load() } catch (error) { ElMessage.error(error.message) }
+  try { await post(`/admin/refunds/${row.id}/review`, { approved, comment }); ElMessage.success(approved ? '退款已处理' : '申请已驳回'); requestNotificationRefresh(); await load() } catch (error) { ElMessage.error(error.message) }
 }
 onMounted(load)
 </script>

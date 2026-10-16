@@ -2,8 +2,6 @@
   <div class="view-stack">
     <section class="page-heading">
       <div>
-        <span class="eyebrow">ROOMS · RATES · INVENTORY</span>
-        <h2>房间管理</h2>
         <p>审核用户发布的房间，也可以由后台直接新增房型、设置价格和库存。</p>
       </div>
       <el-button v-if="activeTab === 'rooms'" type="primary" :icon="Plus" @click="openRoomCreate">新增房间</el-button>
@@ -56,12 +54,11 @@
           </div>
           <el-button text :icon="Refresh" title="刷新房间" :loading="loading" @click="loadRooms">刷新</el-button>
         </div>
-        <el-table v-loading="loading" :data="filteredRooms" class="clean-table admin-data-table room-table" row-key="id" @selection-change="selectedRows = $event">
+        <el-table v-loading="loading" :data="pagedRooms" class="clean-table admin-data-table room-table" row-key="id" @selection-change="selectedRows = $event">
           <el-table-column type="selection" width="48" fixed="left" />
-          <el-table-column label="Id" width="88" fixed="left"><template #default="{ row }">{{ shortId(row.id) }}</template></el-table-column>
           <el-table-column label="长名称" min-width="190" fixed="left"><template #default="{ row }">{{ row.longName || row.name || '—' }}</template></el-table-column>
           <el-table-column label="房间名" min-width="160"><template #default="{ row }">{{ row.name || '—' }}</template></el-table-column>
-          <el-table-column label="门店ID" min-width="160"><template #default="{ row }">{{ row.storeName || shortId(row.storeId) }}</template></el-table-column>
+          <el-table-column label="门店" min-width="160"><template #default="{ row }">{{ row.storeName || '—' }}</template></el-table-column>
           <el-table-column label="房间照片" min-width="150">
             <template #default="{ row }">
               <div class="room-cell">
@@ -96,6 +93,10 @@
             </template>
           </el-table-column>
         </el-table>
+        <div class="list-footer">
+          <span>显示第 {{ filteredRooms.length ? (roomPage - 1) * roomPageSize + 1 : 0 }} 到 {{ Math.min(roomPage * roomPageSize, filteredRooms.length) }} 个房间，共 {{ filteredRooms.length }} 个</span>
+          <el-pagination v-model:current-page="roomPage" v-model:page-size="roomPageSize" :page-sizes="[10, 20, 50]" layout="sizes, prev, pager, next, jumper" :total="filteredRooms.length" background />
+        </div>
       </el-card>
     </template>
 
@@ -105,56 +106,26 @@
           <el-select v-model="selectedRoomId" placeholder="选择房型" style="min-width: 260px" @change="loadSchedule">
             <el-option v-for="room in rooms" :key="room.id" :label="`${room.storeName} · ${room.name}`" :value="room.id" />
           </el-select>
-          <template v-if="activeTab === 'prices'">
-            <el-button :icon="ArrowLeft" @click="shiftMonth(-1)">上个月</el-button>
-            <strong class="month-picker-label">{{ calendarMonthLabel }}</strong>
-            <el-button :icon="ArrowRight" @click="shiftMonth(1)">下个月</el-button>
-            <el-button :icon="Refresh" @click="loadSchedule">刷新日历</el-button>
-          </template>
-          <template v-else>
-            <el-date-picker v-model="scheduleRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" @change="loadSchedule" />
-            <el-button :icon="Refresh" @click="loadSchedule">刷新库存</el-button>
-          </template>
+          <el-date-picker v-model="scheduleRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" @change="loadSchedule" />
+          <el-button :icon="Refresh" @click="loadSchedule">刷新库存</el-button>
         </div>
       </el-card>
 
-      <template v-if="activeTab === 'prices'">
-        <el-card class="panel-card calendar-card" shadow="never">
-          <template #header>
-            <div class="panel-header">
-              <div><strong>价格设置</strong><span>按日维护单价、总库存和剩余库存</span></div>
-              <el-button type="primary" plain size="small" @click="priceDialog = true">批量调价</el-button>
-            </div>
-          </template>
-          <div v-loading="scheduleLoading" class="calendar-wrap">
-            <div class="calendar-week"><span v-for="day in weekLabels" :key="day">{{ day }}</span></div>
-            <div class="calendar-grid">
-              <div v-for="day in calendarDays" :key="day.key" class="calendar-day" :class="{ outside: !day.currentMonth, weekend: day.weekend, today: day.today }">
-                <div class="calendar-day-head"><b>{{ day.number }}</b><small v-if="day.holiday">{{ day.holiday }}</small></div>
-                <div class="calendar-metrics">
-                  <div><span>单价</span><strong>{{ day.priceCents !== null ? `${centsToYuan(day.priceCents)} 元` : '—' }}</strong></div>
-                  <div><span>总数</span><strong>{{ day.totalQuantity ?? '—' }}</strong></div>
-                  <div><span>剩余</span><strong :class="{ 'danger-text': day.availableQuantity !== null && day.availableQuantity <= 1, 'success-text': day.availableQuantity !== null && day.availableQuantity > 1 }">{{ day.availableQuantity ?? '—' }}</strong></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </el-card>
-      </template>
-
-      <template v-else>
-        <el-card class="panel-card" shadow="never">
-          <template #header><div class="panel-header"><div><strong>房态库存</strong><span>剩余 = 总库存 - 锁定 - 已售</span></div><el-button type="primary" plain size="small" @click="inventoryDialog = true">调整库存</el-button></div></template>
-          <el-table v-loading="scheduleLoading" :data="inventoryItems" class="clean-table admin-data-table" size="small">
-            <el-table-column prop="date" label="日期" width="150"><template #default="{ row }">{{ dateOnly(row.date) }}</template></el-table-column>
-            <el-table-column prop="totalQuantity" label="总量" width="100" />
-            <el-table-column prop="lockedQuantity" label="锁定" width="100" />
-            <el-table-column prop="soldQuantity" label="已售" width="100" />
-            <el-table-column label="剩余" width="100"><template #default="{ row }"><strong :class="row.availableQuantity <= 1 ? 'danger-text' : 'success-text'">{{ row.availableQuantity }}</strong></template></el-table-column>
-            <el-table-column prop="updatedAt" label="更新时间" min-width="180" />
-          </el-table>
-        </el-card>
-      </template>
+      <el-card class="panel-card" shadow="never">
+        <template #header><div class="panel-header"><div><strong>房态库存</strong><span>剩余 = 总库存 - 锁定 - 已售</span></div><el-button type="primary" plain size="small" @click="inventoryDialog = true">调整库存</el-button></div></template>
+        <el-table v-loading="scheduleLoading" :data="pagedInventoryItems" class="clean-table admin-data-table" size="small">
+          <el-table-column prop="date" label="日期" width="150"><template #default="{ row }">{{ dateOnly(row.date) }}</template></el-table-column>
+          <el-table-column prop="totalQuantity" label="总量" width="100" />
+          <el-table-column prop="lockedQuantity" label="锁定" width="100" />
+          <el-table-column prop="soldQuantity" label="已售" width="100" />
+          <el-table-column label="剩余" width="100"><template #default="{ row }"><strong :class="row.availableQuantity <= 1 ? 'danger-text' : 'success-text'">{{ row.availableQuantity }}</strong></template></el-table-column>
+          <el-table-column prop="updatedAt" label="更新时间" min-width="180" />
+        </el-table>
+        <div class="list-footer">
+          <span>显示第 {{ inventoryItems.length ? (inventoryPage - 1) * inventoryPageSize + 1 : 0 }} 到 {{ Math.min(inventoryPage * inventoryPageSize, inventoryItems.length) }} 条库存记录，共 {{ inventoryItems.length }} 条</span>
+          <el-pagination v-model:current-page="inventoryPage" v-model:page-size="inventoryPageSize" :page-sizes="[10, 20, 50]" layout="sizes, prev, pager, next, jumper" :total="inventoryItems.length" background />
+        </div>
+      </el-card>
     </template>
 
     <el-dialog v-model="roomDialog" :title="roomForm.id ? '编辑房间' : '新增房间'" width="820px" destroy-on-close>
@@ -221,11 +192,53 @@
       <template #footer><el-button @click="roomDialog = false">取消</el-button><el-button type="primary" :loading="roomSaving" @click="saveRoom">保存房间</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="priceDialog" title="批量设置价格" width="480px">
+    <el-dialog v-model="priceSettingsDialog" :title="`${selectedRoom?.name || '房间'} · 价格设置`" width="1120px" top="4vh" destroy-on-close @closed="resetCalendarEdit">
+      <div class="price-settings-dialog">
+        <div class="price-settings-summary">
+          <div class="price-settings-summary-copy">
+            <strong>{{ selectedRoom?.storeName || '当前房间' }}</strong>
+            <span>默认价格 ¥{{ selectedRoom ? centsToYuan(selectedRoom.basePriceCents) : '—' }} · 默认库存 {{ selectedRoom ? defaultInventoryForRoom(selectedRoom) : '—' }}</span>
+          </div>
+          <div class="price-settings-controls">
+            <el-button :icon="ArrowLeft" title="上个月" @click="shiftMonth(-1)" />
+            <strong class="month-picker-label">{{ calendarMonthLabel }}</strong>
+            <el-button :icon="ArrowRight" title="下个月" @click="shiftMonth(1)" />
+            <el-button type="primary" plain @click="priceDialog = true">批量改价</el-button>
+          </div>
+        </div>
+        <div v-loading="scheduleLoading" class="calendar-wrap">
+          <div class="calendar-week"><span v-for="day in weekLabels" :key="day">{{ day }}</span></div>
+          <div class="calendar-grid">
+            <div v-for="day in calendarDays" :key="day.key" class="calendar-day" :class="{ outside: !day.currentMonth, weekend: day.weekend, today: day.today, holiday: day.holiday }">
+              <div class="calendar-day-head"><b>{{ day.number }}</b><small v-if="day.holiday">{{ day.holiday }}</small></div>
+              <div class="calendar-metrics">
+                <div class="calendar-metric">
+                  <span>单价</span>
+                  <el-input v-if="isCalendarEditing(day, 'price')" v-model="calendarEdit.value" class="calendar-edit-input" type="number" size="small" :min="0.01" :disabled="calendarCellSavingKey === calendarEditKey(day, 'price')" @change="commitCalendarEdit(day, 'price')" @keyup.enter="commitCalendarEdit(day, 'price')" />
+                  <button v-else type="button" class="calendar-edit-value" :disabled="!day.currentMonth || scheduleLoading" @click="startCalendarEdit(day, 'price')">{{ day.priceCents !== null ? `${centsToYuan(day.priceCents)} 元` : '—' }}</button>
+                </div>
+                <div class="calendar-metric">
+                  <span>总数</span>
+                  <el-input v-if="isCalendarEditing(day, 'total')" v-model="calendarEdit.value" class="calendar-edit-input" type="number" size="small" :min="0" :step="1" :disabled="calendarCellSavingKey === calendarEditKey(day, 'total')" @change="commitCalendarEdit(day, 'total')" @keyup.enter="commitCalendarEdit(day, 'total')" />
+                  <button v-else type="button" class="calendar-edit-value" :disabled="!day.currentMonth || scheduleLoading" @click="startCalendarEdit(day, 'total')">{{ day.totalQuantity ?? '—' }}</button>
+                </div>
+                <div class="calendar-metric">
+                  <span>剩余</span>
+                  <el-input v-if="isCalendarEditing(day, 'available')" v-model="calendarEdit.value" class="calendar-edit-input" type="number" size="small" :min="0" :step="1" :disabled="calendarCellSavingKey === calendarEditKey(day, 'available')" @change="commitCalendarEdit(day, 'available')" @keyup.enter="commitCalendarEdit(day, 'available')" />
+                  <button v-else type="button" class="calendar-edit-value" :disabled="!day.currentMonth || scheduleLoading" :class="{ 'danger-text': day.availableQuantity !== null && day.availableQuantity <= 1, 'success-text': day.availableQuantity !== null && day.availableQuantity > 1 }" @click="startCalendarEdit(day, 'available')">{{ day.availableQuantity ?? '—' }}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
+
+    <el-dialog v-model="priceDialog" title="批量改价" width="480px">
       <el-form :model="priceForm" label-width="88px" class="dialog-form">
         <el-form-item label="日期范围"><el-date-picker v-model="priceForm.range" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" /></el-form-item>
         <el-form-item label="每日价格"><el-input-number v-model="priceForm.priceYuan" :min="0" :precision="2" :step="1" controls-position="right"><template #suffix>元</template></el-input-number></el-form-item>
-        <el-form-item label="价格来源"><el-input v-model="priceForm.source" placeholder="例如：节假日、手工调价" /></el-form-item>
+        <el-form-item label="每日库存"><el-input-number v-model="priceForm.inventoryQuantity" :min="0" :precision="0" :step="1" controls-position="right"><template #suffix>间</template></el-input-number></el-form-item>
       </el-form>
       <template #footer><el-button @click="priceDialog = false">取消</el-button><el-button type="primary" :loading="scheduleSaving" @click="savePrices">保存价格</el-button></template>
     </el-dialog>
@@ -253,11 +266,15 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, ArrowRight, Delete, House, Money, Plus, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import { del, get, post, put } from '../api'
+import { requestNotificationRefresh } from '../notifications'
+
+const props = defineProps({
+  storeId: { type: [String, Number], default: '' }
+})
 
 const activeTab = ref('rooms')
 const tabs = computed(() => [
   { key: 'rooms', label: '房间审核', count: rooms.value.length },
-  { key: 'prices', label: '价格设置', count: selectedRoomId.value ? priceItems.value.length : 0 },
   { key: 'inventory', label: '房态库存', count: selectedRoomId.value ? inventoryItems.value.length : 0 }
 ])
 const roomStatusTabs = [
@@ -281,11 +298,16 @@ const scheduleLoading = ref(false)
 const scheduleSaving = ref(false)
 const roomSaving = ref(false)
 const roomDialog = ref(false)
+const priceSettingsDialog = ref(false)
 const priceDialog = ref(false)
 const inventoryDialog = ref(false)
 const unitsVisible = ref(false)
 const selectedRoomId = ref('')
 const selectedRows = ref([])
+const roomPage = ref(1)
+const roomPageSize = ref(10)
+const inventoryPage = ref(1)
+const inventoryPageSize = ref(10)
 const unitRoom = ref(null)
 const units = ref([])
 const roomStatusTab = ref('all')
@@ -295,9 +317,11 @@ const scheduleRange = ref([dateOnly(new Date()), dateOnly(addDays(new Date(), 7)
 const priceItems = ref([])
 const inventoryItems = ref([])
 const roomForm = reactive(emptyRoom())
-const priceForm = reactive({ range: [dateOnly(new Date()), dateOnly(addDays(new Date(), 7))], priceYuan: 268, source: 'Manual' })
+const priceForm = reactive({ range: [dateOnly(new Date()), dateOnly(addDays(new Date(), 7))], priceYuan: 268, inventoryQuantity: 1 })
 const inventoryForm = reactive({ range: [dateOnly(new Date()), dateOnly(addDays(new Date(), 7))], delta: 1, reason: '' })
 const unitForm = reactive({ visible: false, id: '', code: '', status: 'Available' })
+const calendarEdit = reactive({ key: '', field: '', value: '' })
+const calendarCellSavingKey = ref('')
 
 const filteredRooms = computed(() => rooms.value.filter((row) => {
   const text = roomFilters.keyword.trim().toLowerCase()
@@ -312,6 +336,8 @@ const filteredRooms = computed(() => rooms.value.filter((row) => {
     (roomFilters.published === '' || row.isPublished === roomFilters.published) &&
     (!text || `${row.name} ${row.longName || ''} ${row.storeName || ''} ${row.cancellationRule || ''}`.toLowerCase().includes(text))
 }))
+const pagedRooms = computed(() => filteredRooms.value.slice((roomPage.value - 1) * roomPageSize.value, roomPage.value * roomPageSize.value))
+const pagedInventoryItems = computed(() => inventoryItems.value.slice((inventoryPage.value - 1) * inventoryPageSize.value, inventoryPage.value * inventoryPageSize.value))
 
 const priceByDate = computed(() => new Map(priceItems.value.map((item) => [dateOnly(item.date), item])))
 const inventoryByDate = computed(() => new Map(inventoryItems.value.map((item) => [dateOnly(item.date), item])))
@@ -328,19 +354,48 @@ const calendarDays = computed(() => {
     const price = priceByDate.value.get(key)
     const inventory = inventoryByDate.value.get(key)
     const currentMonth = date.getFullYear() === monthStart.getFullYear() && date.getMonth() === monthStart.getMonth()
+    const defaultInventory = selectedRoom.value ? defaultInventoryForRoom(selectedRoom.value) : null
+    const totalQuantity = inventory?.totalQuantity ?? defaultInventory
+    const lockedQuantity = inventory?.lockedQuantity ?? 0
+    const soldQuantity = inventory?.soldQuantity ?? 0
     return {
       key,
       number: date.getDate(),
       currentMonth,
       weekend: date.getDay() === 0 || date.getDay() === 6,
       today: key === dateOnly(new Date()),
-      holiday: date.getDay() === 0 ? '休息日' : date.getDay() === 6 ? '周末' : '',
-      priceCents: currentMonth ? (price?.priceCents ?? (selectedRoom.value?.basePriceCents || 0)) : null,
-      totalQuantity: currentMonth ? (inventory?.totalQuantity ?? (selectedRoom.value?.defaultInventory || null)) : null,
-      availableQuantity: currentMonth ? (inventory ? inventory.availableQuantity : (selectedRoom.value?.defaultInventory || null)) : null
+      holiday: festivalLabel(date),
+      priceCents: currentMonth ? (price?.priceCents ?? selectedRoom.value?.basePriceCents ?? null) : null,
+      totalQuantity: currentMonth ? totalQuantity : null,
+      lockedQuantity: currentMonth ? lockedQuantity : null,
+      soldQuantity: currentMonth ? soldQuantity : null,
+      availableQuantity: currentMonth && totalQuantity !== null
+        ? Math.max(0, totalQuantity - lockedQuantity - soldQuantity)
+        : null
     }
   })
 })
+
+// The admin calendar has no holiday API yet. Keep the visual calendar useful
+// with recurring statutory holidays plus the lunar dates used by the current
+// demo year. The API can replace this map later without changing the view.
+const recurringFestivals = {
+  '01-01': '元旦',
+  '04-05': '清明节',
+  '05-01': '劳动节',
+  '10-01': '国庆节'
+}
+const yearFestivals = {
+  2025: { '01-29': '春节', '05-31': '端午节', '10-06': '中秋节' },
+  2026: { '02-17': '春节', '06-19': '端午节', '09-25': '中秋节', '10-08': '寒露', '10-23': '霜降' },
+  2027: { '02-06': '春节', '06-09': '端午节', '09-15': '中秋节' }
+}
+
+function festivalLabel(date) {
+  const key = dateOnly(date)
+  const yearMap = yearFestivals[date.getFullYear()] || {}
+  return yearMap[key.slice(5)] || recurringFestivals[key.slice(5)] || ''
+}
 
 function dateOnly(value) {
   const date = new Date(value)
@@ -351,6 +406,11 @@ function addDateString(value, count) { return dateOnly(addDays(new Date(`${value
 function monthRange(value) {
   const start = new Date(value.getFullYear(), value.getMonth(), 1)
   const end = new Date(value.getFullYear(), value.getMonth() + 1, 1)
+  return [dateOnly(start), dateOnly(end)]
+}
+function monthPickerRange(value) {
+  const start = new Date(value.getFullYear(), value.getMonth(), 1)
+  const end = new Date(value.getFullYear(), value.getMonth() + 1, 0)
   return [dateOnly(start), dateOnly(end)]
 }
 function emptyRoom() {
@@ -379,6 +439,11 @@ function jsonArray(value) { return JSON.stringify((value || []).filter(Boolean))
 function yuanToCents(value) { return Math.max(0, Math.round((Number(value) || 0) * 100)) }
 function centsToYuan(value) { return Number(((Number(value) || 0) / 100).toFixed(2)) }
 function shortId(value) { return value ? String(value).slice(0, 8) : '—' }
+function defaultInventoryForRoom(room) {
+  if (!room) return null
+  if (Number(room.defaultInventory) > 0) return Number(room.defaultInventory)
+  return room.kind === 'Bed' ? Math.max(Number(room.bedCount) || 1, 1) : 8
+}
 function formatDateTime(value) {
   if (!value) return '—'
   const date = new Date(value)
@@ -416,14 +481,23 @@ async function loadStores() { stores.value = await get('/admin/stores') }
 async function loadRooms() {
   loading.value = true
   try {
-    rooms.value = await get('/admin/room-types?includeUnpublished=true')
-    if (!selectedRoomId.value || !rooms.value.some((room) => room.id === selectedRoomId.value)) selectedRoomId.value = rooms.value[0]?.id || ''
-    if (selectedRoom.value) priceForm.priceYuan = centsToYuan(selectedRoom.value.basePriceCents)
+    const query = new URLSearchParams({ includeUnpublished: 'true' })
+    if (roomFilters.storeId) query.set('storeId', roomFilters.storeId)
+    rooms.value = await get(`/admin/room-types?${query.toString()}`)
+    const availableRooms = filteredRooms.value
+    if (!selectedRoomId.value || !availableRooms.some((room) => room.id === selectedRoomId.value)) {
+      selectedRoomId.value = availableRooms[0]?.id || (!roomFilters.storeId ? rooms.value[0]?.id || '' : '')
+    }
+    roomPage.value = 1
+    if (selectedRoom.value) {
+      priceForm.priceYuan = centsToYuan(selectedRoom.value.basePriceCents)
+      priceForm.inventoryQuantity = defaultInventoryForRoom(selectedRoom.value)
+    }
   } catch (error) { ElMessage.error(error.message) } finally { loading.value = false }
 }
-async function loadSchedule() {
+async function loadSchedule(mode = activeTab.value) {
   if (!selectedRoomId.value) return
-  const [from, to] = activeTab.value === 'prices' ? monthRange(calendarDate.value) : (scheduleRange.value || [])
+  const [from, to] = mode === 'prices' ? monthRange(calendarDate.value) : (scheduleRange.value || [])
   if (!from || !to) return
   scheduleLoading.value = true
   try {
@@ -431,11 +505,12 @@ async function loadSchedule() {
     const [prices, inventory] = await Promise.all([get(`/admin/prices?${query}`), get(`/admin/inventory?${query}`)])
     priceItems.value = prices
     inventoryItems.value = inventory
+    inventoryPage.value = 1
   } catch (error) { ElMessage.error(error.message) } finally { scheduleLoading.value = false }
 }
 function shiftMonth(delta) {
   calendarDate.value = new Date(calendarDate.value.getFullYear(), calendarDate.value.getMonth() + delta, 1)
-  loadSchedule()
+  loadSchedule('prices')
 }
 function openRoomCreate() { Object.assign(roomForm, emptyRoom(), { storeId: stores.value[0]?.id || '' }); roomDialog.value = true }
 function openRoomEdit(row) {
@@ -477,7 +552,7 @@ async function saveRoom() {
     delete payload.basePriceYuan
     if (roomForm.id) await put(`/admin/room-types/${roomForm.id}`, payload)
     else await post('/admin/room-types', payload)
-    ElMessage.success('房间已保存'); roomDialog.value = false; await loadRooms()
+    ElMessage.success('房间已保存'); requestNotificationRefresh(); roomDialog.value = false; await loadRooms()
   } catch (error) { ElMessage.error(error.message) } finally { roomSaving.value = false }
 }
 async function reviewRoom(row, approved) {
@@ -493,6 +568,7 @@ async function reviewRoom(row, approved) {
   try {
     await post(`/admin/room-types/${row.id}/review`, { approved, rejectionReason })
     ElMessage.success(approved ? '房间审核已通过' : '房间已拒绝')
+    requestNotificationRefresh()
     await loadRooms()
   } catch (error) { ElMessage.error(error.message) }
 }
@@ -501,10 +577,12 @@ async function togglePublish(row) {
 }
 function openPriceSettings(row) {
   selectedRoomId.value = row.id
-  activeTab.value = 'prices'
   calendarDate.value = new Date()
-  priceForm.range = monthRange(calendarDate.value)
+  priceForm.range = monthPickerRange(calendarDate.value)
   priceForm.priceYuan = centsToYuan(row.basePriceCents)
+  priceForm.inventoryQuantity = defaultInventoryForRoom(row)
+  priceSettingsDialog.value = true
+  loadSchedule('prices')
 }
 async function approveSelected() {
   const rows = selectedRows.value.filter((row) => ['Draft', 'PendingReview', 'Rejected'].includes(row.approvalStatus))
@@ -513,6 +591,7 @@ async function approveSelected() {
     await ElMessageBox.confirm(`确定通过选中的 ${rows.length} 个房间并允许上架吗？`, '批量审核通过', { type: 'success' })
     for (const row of rows) await post(`/admin/room-types/${row.id}/review`, { approved: true, rejectionReason: null })
     ElMessage.success(`已通过 ${rows.length} 个房间`)
+    requestNotificationRefresh()
     selectedRows.value = []
     await loadRooms()
   } catch (error) {
@@ -532,11 +611,88 @@ async function removeRows(rows) {
   }
 }
 function removeSelected() { return removeRows(selectedRows.value) }
+function calendarEditKey(day, field) { return `${day.key}:${field}` }
+function isCalendarEditing(day, field) { return calendarEdit.key === calendarEditKey(day, field) }
+function resetCalendarEdit() {
+  Object.assign(calendarEdit, { key: '', field: '', value: '' })
+  calendarCellSavingKey.value = ''
+}
+function startCalendarEdit(day, field) {
+  if (!day.currentMonth || !selectedRoomId.value) return
+  const value = field === 'price'
+    ? centsToYuan(day.priceCents ?? selectedRoom.value?.basePriceCents ?? 0)
+    : field === 'total'
+      ? day.totalQuantity ?? defaultInventoryForRoom(selectedRoom.value)
+      : day.availableQuantity ?? defaultInventoryForRoom(selectedRoom.value)
+  Object.assign(calendarEdit, { key: calendarEditKey(day, field), field, value: String(value ?? '') })
+}
+async function commitCalendarEdit(day, field) {
+  const editKey = calendarEditKey(day, field)
+  if (calendarEdit.key !== editKey || calendarCellSavingKey.value) return
+  const rawValue = Number(calendarEdit.value)
+  if (!Number.isFinite(rawValue) || rawValue < 0 || (field !== 'price' && !Number.isInteger(rawValue))) {
+    return ElMessage.warning(field === 'price' ? '请输入有效的价格' : '请输入大于等于 0 的整数')
+  }
+
+  calendarCellSavingKey.value = editKey
+  try {
+    if (field === 'price') {
+      if (rawValue <= 0) return ElMessage.warning('价格必须大于 0')
+      await put('/admin/prices/bulk', {
+        roomTypeId: selectedRoomId.value,
+        from: day.key,
+        to: addDateString(day.key, 1),
+        priceCents: yuanToCents(rawValue)
+      })
+    } else {
+      const lockedQuantity = Number(day.lockedQuantity) || 0
+      const soldQuantity = Number(day.soldQuantity) || 0
+      const currentTotal = Number(day.totalQuantity ?? defaultInventoryForRoom(selectedRoom.value) ?? 0)
+      const nextTotal = field === 'total' ? rawValue : rawValue + lockedQuantity + soldQuantity
+      if (nextTotal < lockedQuantity + soldQuantity) {
+        return ElMessage.warning('库存不能低于锁定和已售数量')
+      }
+      const delta = nextTotal - currentTotal
+      if (delta !== 0) {
+        await post('/admin/inventory/adjust', {
+          roomTypeId: selectedRoomId.value,
+          from: day.key,
+          to: addDateString(day.key, 1),
+          delta,
+          reason: field === 'total' ? '日历修改总库存' : '日历修改剩余库存'
+        })
+      }
+    }
+    await loadSchedule('prices')
+    resetCalendarEdit()
+    ElMessage.success(field === 'price' ? '单价已更新' : '库存已更新')
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    if (calendarCellSavingKey.value === editKey) calendarCellSavingKey.value = ''
+  }
+}
 async function savePrices() {
   const [from, to] = priceForm.range || []
-  if (!selectedRoomId.value || !from || !to || priceForm.priceYuan === null || priceForm.priceYuan === undefined) return ElMessage.warning('请填写完整的价格范围和金额')
+  const inventoryQuantity = Number(priceForm.inventoryQuantity)
+  if (!selectedRoomId.value || !from || !to || Number(priceForm.priceYuan) <= 0 || !Number.isInteger(inventoryQuantity) || inventoryQuantity < 0) return ElMessage.warning('请填写完整的价格范围、金额和库存')
   scheduleSaving.value = true
-  try { await put('/admin/prices/bulk', { roomTypeId: selectedRoomId.value, from, to: addDateString(to, 1), priceCents: yuanToCents(priceForm.priceYuan), source: priceForm.source }); ElMessage.success('价格日历已更新'); priceDialog.value = false; await loadSchedule() } catch (error) { ElMessage.error(error.message) } finally { scheduleSaving.value = false }
+  try {
+    await put('/admin/prices/bulk', {
+      roomTypeId: selectedRoomId.value,
+      from,
+      to: addDateString(to, 1),
+      priceCents: yuanToCents(priceForm.priceYuan),
+      totalQuantity: inventoryQuantity
+    })
+    ElMessage.success('价格和库存已更新')
+    priceDialog.value = false
+    await loadSchedule('prices')
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    scheduleSaving.value = false
+  }
 }
 async function saveInventory() {
   const [from, to] = inventoryForm.range || []
@@ -555,9 +711,33 @@ async function saveUnit() {
     ElMessage.success('资源已保存'); unitForm.visible = false; units.value = await get(`/admin/room-types/${unitRoom.value.id}/units`)
   } catch (error) { ElMessage.error(error.message) }
 }
+watch(() => props.storeId, (value) => {
+  if (value !== undefined && value !== null) roomFilters.storeId = String(value)
+  if (activeTab.value !== 'rooms') loadSchedule()
+})
+watch(() => roomFilters.storeId, () => {
+  const availableRooms = filteredRooms.value
+  if (availableRooms.length && !availableRooms.some((room) => room.id === selectedRoomId.value)) selectedRoomId.value = availableRooms[0].id
+})
+watch([roomStatusTab, () => roomFilters.storeId, () => roomFilters.kind, () => roomFilters.published, () => roomFilters.keyword, roomPageSize], () => { roomPage.value = 1 })
+watch(filteredRooms, () => {
+  const maxPage = Math.max(1, Math.ceil(filteredRooms.value.length / roomPageSize.value))
+  if (roomPage.value > maxPage) roomPage.value = maxPage
+})
+watch([inventoryItems, inventoryPageSize], () => {
+  const maxPage = Math.max(1, Math.ceil(inventoryItems.value.length / inventoryPageSize.value))
+  if (inventoryPage.value > maxPage) inventoryPage.value = maxPage
+})
 watch(activeTab, (value) => { if (value !== 'rooms') loadSchedule() })
 watch(selectedRoomId, () => { if (activeTab.value !== 'rooms') loadSchedule() })
-onMounted(async () => { try { await Promise.all([loadStores(), loadRooms()]) } catch (error) { ElMessage.error(error.message) } })
+onMounted(async () => {
+  try {
+    const storedStoreId = sessionStorage.getItem('tcpms.admin.room-store-filter')
+    roomFilters.storeId = String(props.storeId || storedStoreId || '')
+    sessionStorage.removeItem('tcpms.admin.room-store-filter')
+    await Promise.all([loadStores(), loadRooms()])
+  } catch (error) { ElMessage.error(error.message) }
+})
 </script>
 
 <style scoped>
@@ -595,6 +775,12 @@ onMounted(async () => { try { await Promise.all([loadStores(), loadRooms()]) } c
 .room-photo img{width:100%;height:100%;object-fit:cover}
 .room-photo.empty{border:1px dashed var(--admin-border)}
 .table-subline{display:block;color:var(--admin-muted);font-size:12px;margin-top:4px}
+.price-settings-dialog{display:grid;gap:16px}
+.price-settings-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 14px;border:1px solid var(--admin-border);border-radius:8px;background:var(--admin-surface-soft)}
+.price-settings-summary-copy{display:grid;gap:5px;min-width:0}
+.price-settings-summary-copy strong{overflow:hidden;color:var(--admin-text);font-size:14px;text-overflow:ellipsis;white-space:nowrap}
+.price-settings-summary-copy span{color:var(--admin-muted);font-size:12px}
+.price-settings-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .month-picker-label{min-width:128px;text-align:center;color:var(--admin-text)}
 .calendar-wrap{overflow:auto}
 .calendar-week,.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(130px,1fr));min-width:910px}
@@ -604,20 +790,30 @@ onMounted(async () => { try { await Promise.all([loadStores(), loadRooms()]) } c
 .calendar-day:hover{background:var(--admin-primary-soft)}
 .calendar-day.outside{opacity:.45;background:var(--admin-surface-soft)}
 .calendar-day.weekend{background:#f5fbfa}
-.calendar-day.today{box-shadow:inset 0 0 0 2px var(--primary)}
+.calendar-day.holiday{background:#fff2f2}
+.calendar-day.holiday .calendar-day-head b,
+.calendar-day.holiday .calendar-day-head small{color:#e5535d}
+.calendar-day.today{box-shadow:inset 0 0 0 2px var(--admin-primary)}
 .calendar-day-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
 .calendar-day-head b{font-size:16px}
 .calendar-day-head small{font-size:11px;color:var(--admin-muted)}
 .calendar-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
 .calendar-metrics div{display:flex;flex-direction:column;gap:5px;text-align:center}
+.calendar-metric{min-width:0}
 .calendar-metrics span{font-size:11px;color:var(--admin-muted)}
 .calendar-metrics strong{font-size:13px;color:var(--admin-text)}
 .calendar-metrics .success-text,.calendar-metrics .danger-text{font-weight:700}
+.calendar-edit-value{width:100%;min-height:24px;padding:2px 1px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--admin-text);cursor:pointer;font:inherit;font-weight:700;line-height:1.3;text-align:center}
+.calendar-edit-value:hover:not(:disabled){border-color:var(--admin-primary);background:#f7fffd}
+.calendar-edit-value:disabled{cursor:default}
+.calendar-edit-input{width:100%}
+.calendar-edit-input :deep(.el-input__wrapper){padding:0 4px}
+.calendar-edit-input :deep(.el-input__inner){padding:0;text-align:center}
 .form-section-title{font-size:14px;font-weight:700;color:var(--admin-text);padding:12px 0 8px;border-top:1px solid var(--admin-border);margin-top:4px}
 .form-section-title:first-child{border-top:0;padding-top:0}
 .room-form :deep(.el-form-item){margin-bottom:14px}
 .room-form :deep(.el-select),.room-form :deep(.el-input-number){width:100%}
 .form-grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
 @media (max-width: 900px){.form-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}.calendar-day{min-height:112px}}
-@media (max-width: 640px){.room-image-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.asset-field{align-items:stretch;flex-direction:column}.toolbar-left{width:100%}}
+@media (max-width: 640px){.room-image-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.asset-field{align-items:stretch;flex-direction:column}.toolbar-left{width:100%}.price-settings-summary{align-items:stretch;flex-direction:column}.price-settings-controls{justify-content:space-between}.month-picker-label{min-width:0;flex:1}}
 </style>

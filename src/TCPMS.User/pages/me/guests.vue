@@ -5,7 +5,7 @@
 		<view class="security-banner">
 			<view class="security-icon"><ProtoIcon name="check" tone="white" :size="25" /></view>
 			<view>
-				<text class="security-title">公安部实名联网认证　<text class="security-encrypt">AES-256 加密</text></text>
+				<text class="security-title">公安部实名联网认证</text>
 				<text class="security-desc">根据文旅部与公安部门实名制治安规定，入住酒店/民宿须提供真实有效身份证件。信息仅用于前台核验及报备。</text>
 			</view>
 		</view>
@@ -49,13 +49,13 @@
 					<button class="proto-close" hover-class="none" @tap="closeEditor"><ProtoIcon name="close" :size="24" /></button>
 				</view>
 				<text class="proto-form-label">真实姓名 <text class="required">*</text></text>
-				<input v-model="form.name" class="proto-input" placeholder="请输入2-15字真实中文姓名" />
+				<input v-model="form.name" class="proto-input" placeholder="请输入2-15字真实中文姓名" placeholder-class="editor-placeholder" />
 				<text class="proto-form-label">证件类型 <text class="required">*</text></text>
 				<view class="select-input"><text>居民身份证（中国大陆）</text><ProtoIcon name="chevron-down" :size="20" /></view>
 				<text class="proto-form-label">证件号码 <text class="required">*</text></text>
-				<input v-model="form.identity" class="proto-input" placeholder="请输入正确的18位二代身份证号码" />
+				<input v-model="form.identity" class="proto-input" placeholder="请输入正确的18位二代身份证号码" placeholder-class="editor-placeholder" />
 				<text class="proto-form-label">联系电话</text>
-				<input v-model="form.phone" class="proto-input" placeholder="请输入合法的11位手机号码" />
+				<input v-model="form.phone" class="proto-input" placeholder="请输入合法的11位手机号码" placeholder-class="editor-placeholder" />
 				<view class="default-toggle" @tap="form.isDefault = !form.isDefault">
 					<view class="proto-check-box" :class="{ checked: form.isDefault }"><ProtoIcon v-if="form.isDefault" name="check" tone="white" :size="22" /></view>
 					<text>设为默认入住人</text>
@@ -195,15 +195,6 @@
 		font-weight: 800;
 	}
 
-	.security-encrypt {
-		padding: 6rpx 10rpx;
-		color: var(--proto-primary-dark);
-		background: var(--proto-surface-tint);
-		border-radius: 14rpx;
-		font-size: 17rpx;
-		font-weight: 600;
-	}
-
 	.security-desc {
 		margin-top: 10rpx;
 		color: var(--proto-muted);
@@ -340,6 +331,43 @@
 
 	.editor-sheet {
 		max-height: 88vh;
+		background: #ffffff;
+		color: #20252b;
+		opacity: 1;
+		box-shadow: 0 -14rpx 36rpx rgba(32, 37, 43, 0.18);
+	}
+
+	.guests-page .proto-mask {
+		z-index: 90;
+		background: rgba(32, 37, 43, 0.5);
+	}
+
+	.guests-page .editor-sheet {
+		position: relative;
+		z-index: 91;
+		background-color: #ffffff;
+	}
+
+	.editor-sheet .proto-sheet-title,
+	.editor-sheet .proto-form-label,
+	.editor-sheet .default-toggle {
+		color: #20252b;
+	}
+
+	.editor-sheet .proto-input {
+		color: #20252b;
+		background-color: #f1f7f7;
+		border: 1rpx solid #d7e7e7;
+	}
+
+	.editor-sheet .select-input {
+		color: #20252b;
+		background-color: #f1f7f7;
+		border: 1rpx solid #d7e7e7;
+	}
+
+	.editor-placeholder {
+		color: #849398;
 	}
 
 	.required {

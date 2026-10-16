@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using TCPMS.Api.Contracts;
 using TCPMS.Api.Domain;
 
 namespace TCPMS.Api.Infrastructure;
@@ -13,6 +15,7 @@ public static class SeedData
         var passwordHasher = new PasswordHasher<AdminUser>();
 
         await db.Database.EnsureCreatedAsync();
+        await SeedRegionsAsync(db);
 
         var roleDefinitions = new[]
         {
@@ -417,7 +420,378 @@ public static class SeedData
                 refund: true);
         }
 
+        // 管理端演示数据依赖前面创建的微信用户和基础门店数据，先落库再生成订阅消息日志。
         await db.SaveChangesAsync();
+        await SeedAdminManagementDataAsync(db, shanghaiStoreId, hangzhouStoreId);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedAdminManagementDataAsync(
+        AppDbContext db,
+        Guid shanghaiStoreId,
+        Guid hangzhouStoreId)
+    {
+        var staffUsers = await db.AdminUsers
+            .Include(x => x.UserRoles)
+            .ThenInclude(x => x.Role)
+            .Where(x => x.StoreId.HasValue &&
+                        x.UserRoles.Any(link =>
+                            link.Role != null &&
+                            (link.Role.Code == RoleCodes.StoreAdmin ||
+                             link.Role.Code == RoleCodes.StoreStaff)))
+            .ToListAsync();
+        foreach (var user in staffUsers)
+        {
+            if (await db.StoreStaffProfiles.AnyAsync(x => x.AdminUserId == user.Id))
+            {
+                continue;
+            }
+
+            var permissions = user.Username.Equals("shanghai_admin", StringComparison.OrdinalIgnoreCase)
+                ? new[] { "rooms", "orders", "verify", "records" }
+                : new[] { "rooms", "verify" };
+            db.StoreStaffProfiles.Add(new StoreStaffProfile
+            {
+                AdminUserId = user.Id,
+                Gender = user.Username.Equals("hangzhou_staff", StringComparison.OrdinalIgnoreCase) ? "女" : "男",
+                PermissionKeysJson = JsonSerializer.Serialize(permissions)
+        });
+    }
+
+    async Task SeedSubscriptionMessageDataAsync(AppDbContext db)
+    {
+        var templateDefinitions = new[]
+        {
+            new
+            {
+                Identifier = "miniprogram_order_success",
+                Name = "预定民宿成功",
+                TemplateId = "demo_miniprogram_order_success",
+                Parameters = new[]
+                {
+                    new SubscriptionTemplateParameter("民宿名称", "thing6", "shop_name"),
+                    new SubscriptionTemplateParameter("民宿地址", "thing7", "shop_address"),
+                    new SubscriptionTemplateParameter("入离日期", "thing8", "start_end_date"),
+                    new SubscriptionTemplateParameter("住宿姓名", "thing9", "username"),
+                    new SubscriptionTemplateParameter("房型名称", "thing13", "room_name")
+                }
+            },
+            new
+            {
+                Identifier = "miniprogram_cancel",
+                Name = "预订取消成功通知",
+                TemplateId = "demo_miniprogram_cancel",
+                Parameters = new[]
+                {
+                    new SubscriptionTemplateParameter("订单单号", "character_string8", "order_sn"),
+                    new SubscriptionTemplateParameter("酒店名称", "thing1", "shop_name"),
+                    new SubscriptionTemplateParameter("入住户型", "thing7", "room_name"),
+                    new SubscriptionTemplateParameter("入住日期", "date3", "start_date")
+                }
+            },
+            new
+            {
+                Identifier = "miniprogram_leave_alert",
+                Name = "客人退房提醒",
+                TemplateId = "demo_miniprogram_leave_alert",
+                Parameters = new[]
+                {
+                    new SubscriptionTemplateParameter("民宿名称", "thing1", "shop_name"),
+                    new SubscriptionTemplateParameter("入住人", "name3", "username"),
+                    new SubscriptionTemplateParameter("入住日期", "date4", "start_date"),
+                    new SubscriptionTemplateParameter("到期日期", "time7", "end_date")
+                }
+            },
+            new
+            {
+                Identifier = "miniprogram_enter_alert",
+                Name = "预订入住提醒",
+                TemplateId = "demo_miniprogram_enter_alert",
+                Parameters = new[]
+                {
+                    new SubscriptionTemplateParameter("民宿名称", "thing1", "shop_name"),
+                    new SubscriptionTemplateParameter("入住时间", "time5", "start_time"),
+                    new SubscriptionTemplateParameter("备注", "thing4", "enter_remark")
+                }
+            },
+            new
+            {
+                Identifier = "miniprogram_withdraw_success",
+                Name = "提现审核通过",
+                TemplateId = "demo_miniprogram_withdraw_success",
+                Parameters = new[]
+                {
+                    new SubscriptionTemplateParameter("申请时间", "time1", "createtime"),
+                    new SubscriptionTemplateParameter("提现金额", "amount3", "money"),
+                    new SubscriptionTemplateParameter("处理时间", "time2", "checktime"),
+                    new SubscriptionTemplateParameter("提现状态", "phrase4", "state"),
+                    new SubscriptionTemplateParameter("备注", "thing5", "reason")
+                }
+            }
+        };
+
+        var existing = await db.SubscriptionTemplates
+            .ToDictionaryAsync(x => x.Identifier);
+        var now = DateTime.UtcNow;
+        foreach (var definition in templateDefinitions)
+        {
+            if (existing.ContainsKey(definition.Identifier))
+            {
+                continue;
+            }
+
+            var template = new MiniProgramSubscriptionTemplate
+            {
+                Id = Guid.NewGuid(),
+                Type = "MiniProgramSubscriptionMessage",
+                Identifier = definition.Identifier,
+                Name = definition.Name,
+                TemplateId = definition.TemplateId,
+                ParametersJson = JsonSerializer.Serialize(definition.Parameters),
+                IsEnabled = true,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            db.SubscriptionTemplates.Add(template);
+            existing[template.Identifier] = template;
+        }
+
+        if (await db.MessageLogs.AnyAsync())
+        {
+            return;
+        }
+
+        var demoUser = db.ChangeTracker
+            .Entries<WxUser>()
+            .Select(x => x.Entity)
+            .FirstOrDefault()
+            ?? await db.WxUsers
+                .OrderBy(x => x.CreatedAt)
+                .FirstOrDefaultAsync();
+        if (demoUser is null)
+        {
+            demoUser = new WxUser
+            {
+                Id = Guid.NewGuid(),
+                OpenId = "dev-message-user",
+                Nickname = "消息演示用户",
+                PhoneNumber = "13800000000",
+                CreatedAt = now,
+                LastLoginAt = now
+            };
+            db.WxUsers.Add(demoUser);
+        }
+
+        var sampleLogs = new[]
+        {
+            ("miniprogram_leave_alert", "Success", "{\"thing1\":\"上海人民广场店\",\"name3\":\"张三\",\"date4\":\"2026年10月10日\",\"time7\":\"12:00\"}", "{\"errcode\":0,\"errmsg\":\"ok\",\"msgid\":\"demo-001\"}"),
+            ("miniprogram_order_success", "Success", "{\"thing6\":\"上海人民广场店\",\"thing7\":\"上海市黄浦区人民广场演示路1号\",\"thing8\":\"2026年10月10日 至 2026年10月12日\",\"thing9\":\"张三\",\"thing13\":\"标准大床房\"}", "{\"errcode\":0,\"errmsg\":\"ok\",\"msgid\":\"demo-002\"}"),
+            ("miniprogram_order_success", "InsufficientQuota", "{\"thing6\":\"杭州西湖店\",\"thing7\":\"浙江省杭州市西湖演示路8号\",\"thing8\":\"2026年10月15日 至 2026年10月16日\",\"thing9\":\"张三\",\"thing13\":\"西湖景观房\"}", "{\"errcode\":45009,\"errmsg\":\"reach max api daily quota limit\"}"),
+            ("miniprogram_cancel", "Failed", "{\"character_string8\":\"TCP202610010001\",\"thing1\":\"上海人民广场店\",\"thing7\":\"标准大床房\",\"date3\":\"2026-10-10\"}", "{\"errcode\":40037,\"errmsg\":\"invalid template_id\"}"),
+            ("miniprogram_withdraw_success", "Success", "{\"time1\":\"2026-10-08 14:32\",\"amount3\":\"¥128.00\",\"time2\":\"2026-10-08 15:01\",\"phrase4\":\"审核通过\",\"thing5\":\"提现已到账\"}", "{\"errcode\":0,\"errmsg\":\"ok\",\"msgid\":\"demo-003\"}")
+        };
+
+        for (var index = 0; index < sampleLogs.Length; index++)
+        {
+            var sample = sampleLogs[index];
+            var template = existing[sample.Item1];
+            db.MessageLogs.Add(new MiniProgramMessageLog
+            {
+                Id = Guid.NewGuid(),
+                SubscriptionTemplateId = template.Id,
+                TemplateName = template.Name,
+                TemplateId = template.TemplateId,
+                MemberId = demoUser.Id,
+                OpenId = demoUser.OpenId,
+                TemplateDataJson = sample.Item3,
+                SendResultJson = sample.Item4,
+                SendStatus = sample.Item2,
+                CreatedAt = now.AddMinutes(-(index + 1)),
+                UpdatedAt = now.AddMinutes(-(index + 1))
+            });
+        }
+    }
+
+        if (!await db.PermissionMenus.AnyAsync())
+        {
+            var menuDefinitions = new[]
+            {
+                ("finance", "财务统计", "wallet", "/pages/merchant/finance"),
+                ("rooms", "房间管理", "house", "/pages/merchant/rooms"),
+                ("orders", "订单管理", "receipt", "/pages/merchant/orders"),
+                ("verify", "扫码核销", "qr", "/pages/merchant/verify"),
+                ("records", "核销记录", "document", "/pages/merchant/records"),
+                ("staff", "员工管理", "group", "/pages/merchant/staff"),
+                ("property", "民宿管理", "store", "/pages/merchant/index"),
+                ("publish", "发布房源", "plus", "/pages/merchant/publish"),
+                ("reviews", "评价管理", "star", "/pages/merchant/reviews"),
+                ("coupon", "优惠券管理", "document", "/pages/merchant/coupons"),
+                ("settings", "民宿设置", "settings", "/pages/merchant/settings"),
+                ("subscriptions", "订阅消息", "document", "/pages/merchant/messages")
+            };
+            for (var index = 0; index < menuDefinitions.Length; index++)
+            {
+                var definition = menuDefinitions[index];
+                db.PermissionMenus.Add(new PermissionMenu
+                {
+                    Key = definition.Item1,
+                    Title = definition.Item2,
+                    IconKey = definition.Item3,
+                    Route = definition.Item4,
+                    Weight = index + 1,
+                    Status = "normal"
+                });
+            }
+        }
+
+        await SeedManagedItemsAsync(db, "levels", new object[]
+        {
+            new { name = "无等级", description = "普通民宿", sort = 1, status = "active" },
+            new { name = "优质民宿", description = "服务和房源质量稳定", sort = 2, status = "active" },
+            new { name = "品牌推荐", description = "平台重点推荐门店", sort = 3, status = "active" }
+        });
+        await SeedManagedItemsAsync(db, "facilities", new object[]
+        {
+            new { name = "独立卫浴", category = "卫浴设施", status = "active", sort = 1 },
+            new { name = "无线网络", category = "基础设施", status = "active", sort = 2 },
+            new { name = "智能电视", category = "基础设施", status = "active", sort = 3 },
+            new { name = "行李寄存", category = "公共服务", status = "hidden", sort = 4 }
+        });
+        await SeedManagedItemsAsync(db, "tags", new object[]
+        {
+            new { name = "亲子友好", color = "#16b79a", usage = 12, status = "active" },
+            new { name = "近地铁", color = "#4387d6", usage = 8, status = "active" },
+            new { name = "可带宠物", color = "#e29a3c", usage = 3, status = "hidden" }
+        });
+        await SeedManagedItemsAsync(db, "roomTypes", new object[]
+        {
+            new { name = "电竞房", sort = 1, status = "active" },
+            new { name = "阁楼", sort = 2, status = "active" },
+            new { name = "江景房", sort = 3, status = "active" },
+            new { name = "山景房", sort = 4, status = "active" }
+        });
+        await SeedManagedItemsAsync(db, "common", new object[]
+        {
+            new { name = "默认入住时间", key = "checkin.time", value = "14:00", status = "enabled" },
+            new { name = "默认退房时间", key = "checkout.time", value = "12:00", status = "enabled" }
+        });
+
+        if (!await db.WithdrawalRecords.AnyAsync())
+        {
+            db.WithdrawalRecords.AddRange(
+                new WithdrawalRecord
+                {
+                    Id = Guid.NewGuid(),
+                    StoreId = shanghaiStoreId,
+                    Account = "微信商户号 · 0042",
+                    AmountCents = 128000,
+                    Status = WithdrawalStatuses.PendingReview,
+                    CreatedAt = DateTime.UtcNow.AddDays(-1)
+                },
+                new WithdrawalRecord
+                {
+                    Id = Guid.NewGuid(),
+                    StoreId = hangzhouStoreId,
+                    Account = "对公账户 · 8821",
+                    AmountCents = 86000,
+                    Status = WithdrawalStatuses.Approved,
+                    ReviewedAt = DateTime.UtcNow.AddDays(-3),
+                    CreatedAt = DateTime.UtcNow.AddDays(-3)
+                });
+        }
+        await SeedSubscriptionMessageDataAsync(db);
+    }
+
+    private static async Task SeedManagedItemsAsync(
+        AppDbContext db,
+        string resourceType,
+        IEnumerable<object> items)
+    {
+        if (await db.AdminManagedItems.AnyAsync(x => x.ResourceType == resourceType))
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var item in items)
+        {
+            db.AdminManagedItems.Add(new AdminManagedItem
+            {
+                Id = Guid.NewGuid(),
+                ResourceType = resourceType,
+                DataJson = JsonSerializer.Serialize(item),
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        }
+    }
+
+    private static async Task SeedRegionsAsync(AppDbContext db)
+    {
+        var existing = await db.Regions.ToDictionaryAsync(x => x.Code);
+        foreach (var seed in RegionSeedData.GetRegions())
+        {
+            if (!existing.TryGetValue(seed.Code, out var region))
+            {
+                region = new Region
+                {
+                    Code = seed.Code,
+                    ParentCode = seed.ParentCode,
+                    Name = seed.Name,
+                    ShortName = ToShortName(seed.Name),
+                    FullName = seed.FullName,
+                    Level = seed.Level,
+                    Initial = seed.Initial,
+                    IsEnabled = true,
+                    SortOrder = seed.SortOrder
+                };
+                db.Regions.Add(region);
+                existing.Add(region.Code, region);
+                continue;
+            }
+
+            // Keep editable flags such as hot/hidden intact while allowing a later
+            // seed refresh to correct names, hierarchy, initials and ordering.
+            region.ParentCode = seed.ParentCode;
+            region.Name = seed.Name;
+            region.ShortName = ToShortName(seed.Name);
+            region.FullName = seed.FullName;
+            region.Level = seed.Level;
+            region.Initial = seed.Initial;
+            region.SortOrder = seed.SortOrder;
+            region.UpdatedAt = DateTime.UtcNow;
+        }
+    }
+
+    private static string ToShortName(string name)
+    {
+        var suffixes = new[]
+        {
+            "特别行政区",
+            "维吾尔自治区",
+            "壮族自治区",
+            "回族自治区",
+            "自治区",
+            "自治州",
+            "自治县",
+            "省",
+            "市辖区",
+            "市",
+            "区",
+            "县",
+            "旗"
+        };
+
+        foreach (var suffix in suffixes)
+        {
+            if (name.EndsWith(suffix, StringComparison.Ordinal) &&
+                name.Length > suffix.Length)
+            {
+                return name[..^suffix.Length];
+            }
+        }
+
+        return name;
     }
 
     private static async Task AddDemoOrderAsync(

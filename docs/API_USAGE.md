@@ -46,7 +46,11 @@ common/api.js 会自动读取 tcpms.apiToken 并附加该请求头。
 | 后台订单 | /api/v1/admin/orders | 查询、确认、入住、离店、取消 |
 | 后台退款 | /api/v1/admin/refunds | 退款审核 |
 | 后台账号 | /api/v1/admin/users、/api/v1/admin/roles | 角色和管理员 |
-| 后台统计审计 | /api/v1/admin/stats、/api/v1/admin/audit-logs | 趋势、门店排行和日志 |
+| 后台审核 | /api/v1/admin/reviews、/api/v1/admin/withdrawals | 评价和门店提现审核 |
+| 后台员工权限 | /api/v1/admin/store-staff、/api/v1/admin/permission-menus | 门店员工和用户端管理入口 |
+| 后台基础配置 | /api/v1/admin/managed-items/{resourceType} | 配置型管理页面数据持久化 |
+| 后台统计审计 | /api/v1/admin/stats、/api/v1/admin/audit-logs | 趋势、门店排行、收入和日志 |
+| 后台消息提醒 | /api/v1/admin/notifications | 顶部铃铛、首次进入弹窗和控制台待办的统一数据源 |
 
 以上分组来自当前后端路由；具体操作、参数和 schema 请在 Swagger 中展开。
 

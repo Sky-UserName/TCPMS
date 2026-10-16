@@ -6,7 +6,7 @@
 			<button class="hero-back-button" hover-class="none" aria-label="返回" @tap="goBack">
 				<ProtoIcon name="back" tone="white" :size="38" />
 			</button>
-			<text class="hero-count">1 / 12 · 客房与环境</text>
+			<text class="hero-count">{{ store.images && store.images.length ? `1 / ${store.images.length}` : '门店图片' }} · 客房与环境</text>
 		</view>
 		<view v-if="showScrollHeader" class="store-scroll-header">
 			<ProtoHeader title="门店详情" title-align="center" theme="green" />
@@ -18,13 +18,13 @@
 					<text class="summary-name">{{ store.name }}</text>
 					<view class="summary-badges">
 						<text class="proto-pill success">{{ store.status }}</text>
-						<text class="proto-pill info">官方直营</text>
-						<text class="proto-pill info">品质认证</text>
+						<text v-if="!store.isRemote" class="proto-pill info">官方直营</text>
+						<text v-if="!store.isRemote" class="proto-pill info">品质认证</text>
 					</view>
 				</view>
-				<view class="summary-rating"><ProtoIcon name="star" :size="20" /><text>{{ store.rating }}</text><text class="small">超棒</text></view>
+				<view class="summary-rating"><ProtoIcon name="star" :size="20" /><text>{{ store.rating || '暂无评分' }}</text></view>
 			</view>
-			<view class="summary-review"><text>{{ store.reviews || 0 }} 条房客真实评价</text><ProtoIcon name="chevron-right" :size="20" /></view>
+			<view class="summary-review"><text>{{ store.reviews || 0 }} 条房客评价</text><ProtoIcon name="chevron-right" :size="20" /></view>
 			<view class="summary-location">
 				<ProtoIcon name="location" :size="24" />
 				<view>
@@ -35,6 +35,7 @@
 				<button hover-class="none" @tap="goMap">去这里</button>
 			</view>
 		</view>
+		<view v-if="loadError" class="catalog-sync-notice">{{ loadError }}</view>
 
 		<view class="date-summary proto-card" @tap="goDate">
 			<view class="date-summary-heading">
@@ -64,19 +65,19 @@
 				<view class="room-preview-card" @tap="goRoom(room)">
 				<view class="room-preview-image-wrap">
 					<image :src="room.image" mode="aspectFill"></image>
-					<text class="proto-pill primary room-image-label">{{ room.id === 1 ? '即时确认' : room.id === 2 ? '热门推荐' : '青年特惠' }}</text>
+					<text v-if="!room.isRemote" class="proto-pill primary room-image-label">{{ room.id === 1 ? '即时确认' : room.id === 2 ? '热门推荐' : '青年特惠' }}</text>
 				</view>
 				<view class="room-preview-body">
 					<view class="room-name-row">
 						<text class="room-name">{{ room.name }}</text>
-						<text class="proto-pill" :class="room.soldOut ? 'danger' : 'info'">{{ room.soldOut ? '已售罄' : '库存充足' }}</text>
+						<text class="proto-pill" :class="room.soldOut ? 'danger' : 'info'">{{ room.isRemote ? room.availability : (room.soldOut ? '已售罄' : '库存充足') }}</text>
 					</view>
-					<text class="room-spec">{{ room.beds }} · {{ room.area }} · 独立卫浴 · 有窗</text>
+					<text class="room-spec">{{ [room.beds, room.area, ...(room.tags || []).slice(0, 2)].filter(Boolean).join(' · ') || '房型信息以门店配置为准' }}</text>
 					<view class="room-tags">
 						<text v-for="tag in (room.tags || []).slice(0, 2)" :key="tag">{{ tag }}</text>
 					</view>
 					<view class="room-price-row">
-						<text class="room-price">¥{{ room.price }}<text class="small">/晚</text></text>
+						<text class="room-price">{{ room.price === null || room.price === undefined ? '暂无报价' : `¥${room.price}` }}<text v-if="room.price !== null && room.price !== undefined" class="small">/晚</text></text>
 						<button class="room-preview-book-button" :class="{ 'proto-button-disabled': room.soldOut }" hover-class="none" @tap.stop="bookRoom(room)">
 							<text>{{ room.soldOut ? '查看' : '订' }}</text>
 						</button>
@@ -105,12 +106,12 @@
 			</view>
 		</view>
 
-		<view class="proto-card store-feature-card">
+		<view v-if="store.description || !store.isRemote" class="proto-card store-feature-card">
 			<view class="card-heading"><text>房屋特色</text><text class="proto-caption">入住更安心</text></view>
-			<text class="feature-copy">南北通透，干净整洁，公共区域舒适，适合短住与周末放松。</text>
+			<text class="feature-copy">{{ store.description || '南北通透，干净整洁，公共区域舒适，适合短住与周末放松。' }}</text>
 		</view>
 
-		<view class="proto-card facility-card">
+		<view v-if="!store.isRemote" class="proto-card facility-card">
 			<view class="card-heading">
 				<text>服务设施</text>
 				<view class="proto-link"><text>全部设施 ({{ facilityCount }})</text><ProtoIcon name="chevron-right" :size="20" /></view>
@@ -123,7 +124,7 @@
 			</view>
 		</view>
 
-		<view class="proto-card notice-card">
+		<view v-if="!store.isRemote" class="proto-card notice-card">
 			<view class="card-heading">
 				<text>预订须知</text>
 				<view class="proto-link" @tap="goRule"><text>查看完整</text><ProtoIcon name="chevron-right" :size="20" /></view>
@@ -178,6 +179,7 @@
 			return {
 				store: demoStores[0],
 				rooms: demoRooms,
+				loadError: '',
 				favorite: false,
 				booking: getBooking(),
 				showScrollHeader: false,
@@ -201,21 +203,25 @@
 			}
 		},
 		async onLoad(options) {
-			if (options && options.id) {
-				this.store = demoStores.find((item) => String(item.id) === String(options.id)) || demoStores[0]
-			}
-			this.favorite = getFavorites().map(String).includes(`store-${this.store.id}`)
-			if (!options || !options.id || !/^\d+$/.test(String(options.id))) {
+			const requestedId = options && options.id
+			const localStore = demoStores.find((item) => String(item.id) === String(requestedId))
+			if (localStore) {
+				this.store = localStore
+			} else if (requestedId && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(requestedId))) {
+				this.store = { id: requestedId, name: '门店信息加载中', isRemote: true, images: [] }
+				this.rooms = []
 				try {
-					const result = await fetchStoreDetail(options && options.id ? options.id : this.store.id)
-					if (result.store) this.store = result.store
-					if (result.rooms.length) this.rooms = result.rooms
+					const result = await fetchStoreDetail(requestedId)
+					this.store = result.store || this.store
+					this.rooms = result.rooms
 					this.favorite = getFavorites().map(String).includes(`store-${this.store.id}`)
 				} catch (error) {
-					// Keep the bundled detail page available when the API is offline.
+					this.store = { id: requestedId, name: '门店信息暂不可用', isRemote: true, images: [] }
+					this.loadError = '门店数据同步失败，请检查网络或稍后重试。'
 				}
 			}
-			recordRecent({
+			this.favorite = getFavorites().map(String).includes(`store-${this.store.id}`)
+			if (this.store && this.store.id) recordRecent({
 				id: this.store.id,
 				type: 'store',
 				title: this.store.name,
@@ -852,6 +858,15 @@
 		--store-green-tint: #dff6f5;
 		background: var(--proto-page);
 		color: #20252b;
+	}
+
+	.catalog-sync-notice {
+		margin: 0 24rpx 12rpx;
+		padding: 12rpx 16rpx;
+		color: #7a4f00;
+		background: #fff4d6;
+		border-radius: 8rpx;
+		font-size: 22rpx;
 	}
 
 	.store-detail-page .detail-hero {

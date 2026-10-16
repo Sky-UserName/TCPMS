@@ -92,9 +92,10 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { ArrowRight, Bell, Calendar, DataAnalysis, Location, MoreFilled, Refresh, Tickets, Wallet } from '@element-plus/icons-vue'
+import { ArrowRight, Bell, Calendar, CollectionTag, DataAnalysis, Location, MoreFilled, Refresh, Tickets, Wallet } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { formatDate, get, money } from '../api'
+import { refreshNotifications, useAdminNotifications } from '../notifications'
 
 const emit = defineEmits(['navigate'])
 const props = defineProps({ user: { type: Object, default: null } })
@@ -105,6 +106,7 @@ const trend = ref([])
 const rank = ref([])
 const trendDays = ref(7)
 const displayName = computed(() => props.user?.displayName || '运营同学')
+const { state: notificationState } = useAdminNotifications()
 
 const metrics = computed(() => [
   { key: 'stores', label: '门店总数', value: metricsData.value.storeCount ?? '-', note: `${metricsData.value.activeStoreCount ?? 0} 家营业中`, tone: 'teal', icon: Location },
@@ -114,15 +116,18 @@ const metrics = computed(() => [
 ])
 
 const todos = computed(() => [
-  { title: '待确认订单', desc: '门店需要确认并备房', count: metricsData.value.pendingOrderCount || 0, view: 'orders', tone: 'teal', icon: Tickets },
-  { title: '退款审核', desc: '总部审核后进入微信退款', count: metricsData.value.pendingRefundCount || 0, view: 'refunds', tone: 'orange', icon: Wallet },
-  { title: '地图位置待补充', desc: '门店没有有效经纬度', count: 0, view: 'stores', tone: 'blue', icon: Location }
+  { title: '订单待处理', desc: '确认订单或办理入住', count: notificationState.pendingOrderCount, view: 'financialOrders', tone: 'teal', icon: Tickets },
+  { title: '退款审核', desc: '审核后进入退款流程', count: notificationState.pendingRefundCount, view: 'refunds', tone: 'orange', icon: Wallet },
+  { title: '门店审核', desc: '检查门店资料和资质', count: notificationState.pendingStoreReviewCount, view: 'stores', tone: 'red', icon: Location },
+  { title: '房间审核', desc: '审核房源资料和展示状态', count: notificationState.pendingRoomReviewCount, view: 'roomManagement', tone: 'blue', icon: Bell },
+  { title: '评价审核', desc: '审核用户评价后再上架', count: notificationState.pendingReviewCount, view: 'reviews', tone: 'purple', icon: CollectionTag },
+  { title: '提现审核', desc: '处理门店提现申请', count: notificationState.pendingWithdrawalCount, view: 'withdrawals', tone: 'orange', icon: Wallet }
 ])
 
 const quickActions = [
   { title: '新增门店', desc: '维护门店基础资料', view: 'stores', icon: Location },
   { title: '调整房态', desc: '查看库存与每日余量', view: 'catalog', icon: Calendar },
-  { title: '查看订单', desc: '处理入住和离店任务', view: 'orders', icon: Tickets },
+  { title: '查看订单', desc: '处理入住和离店任务', view: 'financialOrders', icon: Tickets },
   { title: '账号权限', desc: '管理角色与门店范围', view: 'users', icon: Bell }
 ]
 
@@ -140,7 +145,7 @@ async function load() {
   loading.value = true
   try {
     metricsData.value = await get('/admin/metrics')
-    await Promise.all([loadTrend(), loadRank()])
+    await Promise.all([loadTrend(), loadRank(), refreshNotifications({ silent: true })])
   } catch (error) {
     ElMessage.error(error.message)
   } finally {

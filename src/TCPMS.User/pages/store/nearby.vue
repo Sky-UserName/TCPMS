@@ -23,7 +23,7 @@
 			<view v-for="store in nearbyStores" :key="store.id" class="nearby-card" @tap="goDetail(store)">
 				<view class="nearby-image-wrap">
 					<image :src="store.image" mode="aspectFill" class="nearby-image"></image>
-					<text class="proto-pill primary nearby-status">{{ store.status }} · {{ store.badge }}</text>
+				<text class="proto-pill primary nearby-status">{{ store.status }}</text>
 					<view class="nearby-distance"><ProtoIcon name="location" :size="20" /><text>距您 {{ store.distance }}</text></view>
 				</view>
 				<view class="nearby-body">
@@ -36,7 +36,7 @@
 						<text v-for="tag in store.tags" :key="tag">{{ tag }}</text>
 					</view>
 					<view class="nearby-price-row">
-						<text class="nearby-price">¥{{ store.price }}<text class="small">/晚起</text></text>
+						<text class="nearby-price">{{ store.price === null || store.price === undefined ? '暂无报价' : `¥${store.price}` }}<text v-if="store.price !== null && store.price !== undefined" class="small">/晚起</text></text>
 						<button class="proto-button-small" hover-class="none" @tap.stop="goDetail(store)"><text>查看详情</text><ProtoIcon name="chevron-right" tone="white" :size="22" /></button>
 					</view>
 				</view>
@@ -51,7 +51,7 @@
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
-	import { demoStores, goPage, showToast } from '@/common/prototype.js'
+	import { goPage, showToast } from '@/common/prototype.js'
 	import { fetchNearbyStores } from '@/common/api.js'
 
 	export default {
@@ -60,8 +60,8 @@
 			return {
 				radius: '50km',
 				radiusOptions: ['5km', '10km', '30km', '50km'],
-				locationStatus: 'ready',
-				stores: demoStores
+				locationStatus: 'loading',
+				stores: []
 			}
 		},
 		computed: {
@@ -74,15 +74,20 @@
 				})
 			},
 			locationText() {
-				if (this.locationStatus === 'loading') return '正在获取当前 GPS 坐标...'
+				if (this.locationStatus === 'loading') return '正在定位并查询附近门店'
 				if (this.locationStatus === 'denied') return '未开启系统定位，无法精确测距'
-				return '已定位到郑州市金水区'
+				if (this.locationStatus === 'error') return '附近门店数据暂不可用'
+				return `已定位，找到 ${this.stores.length} 家附近门店`
 			},
 			locationDesc() {
-				if (this.locationStatus === 'loading') return '正在搜寻周边精品民宿与旅宿网络'
-				if (this.locationStatus === 'denied') return '可以按推荐顺序浏览全部门店'
-				return '精准经纬度高精度校准 · 智能测距生效中'
+				if (this.locationStatus === 'loading') return '正在读取设备坐标并同步服务端门店'
+				if (this.locationStatus === 'denied') return '开启定位权限后可查询真实距离'
+				if (this.locationStatus === 'error') return '请检查网络和 API 地址后重试'
+				return '距离由当前坐标与门店经纬度计算'
 			}
+		},
+		onLoad() {
+			this.relocate()
 		},
 		methods: {
 			relocate() {
@@ -94,12 +99,16 @@
 						try {
 							const stores = await fetchNearbyStores(res.latitude, res.longitude, 50)
 							this.stores = stores
+							this.locationStatus = 'ready'
+							showToast(stores.length ? `已同步 ${stores.length} 家附近门店` : '附近暂无营业门店')
 						} catch (error) {
-							// Keep the bundled catalog available when the API is offline.
+							this.stores = []
+							this.locationStatus = 'error'
+							showToast('附近门店同步失败')
 						}
-						showToast('已重新定位')
 					},
 					fail: () => {
+						this.stores = []
 						this.locationStatus = 'denied'
 						showToast('未开启定位，仍可浏览门店')
 					}
@@ -112,6 +121,10 @@
 				uni.reLaunch({ url: '/pages/store/list' })
 			},
 			openLocation(store) {
+				if (store.latitude === null || store.longitude === null || store.latitude === undefined || store.longitude === undefined) {
+					showToast('该门店尚未配置地图坐标')
+					return
+				}
 				uni.openLocation({
 					latitude: Number(store.latitude),
 					longitude: Number(store.longitude),
