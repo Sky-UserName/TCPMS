@@ -68,7 +68,7 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { goPage, goRoot, showToast } from '@/common/prototype.js'
-	import { getOrders, resolveReviewTarget, updateOrder } from '@/common/app-store.js'
+	import { getApiToken, getOrders, isLoggedIn, resolveReviewTarget, updateOrder } from '@/common/app-store.js'
 	import { cancelRemoteOrder, fetchRemoteOrders } from '@/common/api.js'
 
 	export default {
@@ -114,6 +114,10 @@
 			async loadOrders() {
 				this.orders = getOrders()
 				this.syncError = ''
+				if (!isLoggedIn() || !getApiToken()) {
+					this.syncing = false
+					return
+				}
 				this.syncing = true
 				try {
 					this.orders = await fetchRemoteOrders()

@@ -255,13 +255,18 @@ export const setLoggedIn = (profile = {}) => {
 	return saveProfile({
 		...profile,
 		loggedIn: true,
-		uid: profile.uid || '88209412',
-		name: profile.name || '张三',
-		phone: profile.phone || '138****8888'
+		uid: profile.uid || '',
+		name: profile.name || '微信用户',
+		phone: profile.phone || '',
+		avatar: profile.avatar || prototypeImages.avatar
 	})
 }
 
-export const isLoggedIn = () => Boolean(read(storageKeys.auth, false) && getProfile().loggedIn)
+export const isLoggedIn = () => Boolean(
+	read(storageKeys.auth, false) &&
+	getProfile().loggedIn &&
+	getApiToken()
+)
 
 export const getMerchantProfile = () => read(storageKeys.merchant, defaultMerchant)
 

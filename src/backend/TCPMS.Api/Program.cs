@@ -126,6 +126,8 @@ builder.Services.AddSwaggerGen(options =>
     options.OperationFilter<ChineseOperationFilter>();
 });
 
+var webRootDirectory = Path.Combine(builder.Environment.ContentRootPath, "wwwroot");
+Directory.CreateDirectory(Path.Combine(webRootDirectory, "uploads", "avatars"));
 var app = builder.Build();
 
 if (swaggerEnabled)
@@ -157,6 +159,7 @@ app.UseExceptionHandler(errorApp =>
     });
 });
 
+app.UseStaticFiles();
 app.UseCors("Development");
 app.UseAuthentication();
 app.UseAuthorization();
@@ -242,6 +245,7 @@ auth.MapPost("/miniapp-login", async (
     TokenService tokenService,
     IHostEnvironment environment,
     WeChatPayService weChatPayService,
+    HttpRequest httpRequest,
     CancellationToken cancellationToken) =>
 {
     WeChatCode2Session? weChatSession = null;
@@ -278,14 +282,47 @@ auth.MapPost("/miniapp-login", async (
             ? $"dev-{Guid.NewGuid():N}"
             : request.DevOpenId.Trim());
     var user = await db.WxUsers.SingleOrDefaultAsync(x => x.OpenId == openId, cancellationToken);
+    if (user is not null && !user.IsEnabled)
+    {
+        return Results.BadRequest(new ApiError("user_disabled", "当前用户已被停用"));
+    }
+
+    string? phoneNumber = null;
+    if (!string.IsNullOrWhiteSpace(request.PhoneCode))
+    {
+        if (weChatSession is null)
+        {
+            return Results.BadRequest(new ApiError("wechat_code_required", "手机号授权必须先使用真实微信登录凭证"));
+        }
+        try
+        {
+            phoneNumber = await weChatPayService.ExchangePhoneNumberAsync(
+                request.PhoneCode.Trim(),
+                cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Json(
+                new ApiError("wechat_phone_failed", ex.Message, httpRequest.HttpContext.TraceIdentifier),
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+    }
+
+    var nickname = string.IsNullOrWhiteSpace(request.Nickname)
+        ? null
+        : request.Nickname.Trim();
+    var avatarUrl = string.IsNullOrWhiteSpace(request.AvatarUrl)
+        ? null
+        : request.AvatarUrl.Trim();
     if (user is null)
     {
         user = new WxUser
         {
             Id = Guid.NewGuid(),
             OpenId = openId,
-            Nickname = request.Nickname ?? "演示用户",
-            AvatarUrl = request.AvatarUrl,
+            Nickname = nickname ?? "微信用户",
+            AvatarUrl = avatarUrl,
+            PhoneNumber = phoneNumber,
             UnionId = weChatSession?.UnionId,
             LastLoginAt = DateTime.UtcNow
         };
@@ -293,8 +330,9 @@ auth.MapPost("/miniapp-login", async (
     }
     else
     {
-        user.Nickname = request.Nickname ?? user.Nickname;
-        user.AvatarUrl = request.AvatarUrl ?? user.AvatarUrl;
+        user.Nickname = nickname ?? user.Nickname;
+        user.AvatarUrl = avatarUrl ?? user.AvatarUrl;
+        user.PhoneNumber = phoneNumber ?? user.PhoneNumber;
         user.UnionId = weChatSession?.UnionId ?? user.UnionId;
         user.UpdatedAt = DateTime.UtcNow;
         user.LastLoginAt = DateTime.UtcNow;
@@ -302,8 +340,137 @@ auth.MapPost("/miniapp-login", async (
 
     await db.SaveChangesAsync(cancellationToken);
     var token = tokenService.CreateMiniappToken(user);
-    return Results.Ok(new TokenResponse(token.Token, token.ExpiresAt, "miniapp", user.Nickname ?? "微信用户"));
+    return Results.Ok(new TokenResponse(
+        token.Token,
+        token.ExpiresAt,
+        "miniapp",
+        user.Nickname ?? "微信用户",
+        ToMiniappProfile(user, httpRequest)));
 });
+
+auth.MapGet("/me", async (
+    ClaimsPrincipal principal,
+    AppDbContext db,
+    HttpRequest request,
+    CancellationToken cancellationToken) =>
+{
+    var userId = GetUserId(principal);
+    if (!userId.HasValue)
+    {
+        return Results.Unauthorized();
+    }
+
+    var user = await db.WxUsers.AsNoTracking().SingleOrDefaultAsync(
+        x => x.Id == userId.Value,
+        cancellationToken);
+    return user is null
+        ? Results.NotFound(new ApiError("user_not_found", "用户不存在"))
+        : Results.Ok(ToMiniappProfile(user, request));
+}).RequireAuthorization("Miniapp");
+
+auth.MapPost("/phone", async (
+    MiniappPhoneRequest request,
+    ClaimsPrincipal principal,
+    AppDbContext db,
+    WeChatPayService weChatPayService,
+    HttpRequest httpRequest,
+    CancellationToken cancellationToken) =>
+{
+    var userId = GetUserId(principal);
+    if (!userId.HasValue)
+    {
+        return Results.Unauthorized();
+    }
+    if (string.IsNullOrWhiteSpace(request.PhoneCode))
+    {
+        return Results.BadRequest(new ApiError("phone_code_required", "手机号授权凭证不能为空"));
+    }
+
+    var user = await db.WxUsers.SingleOrDefaultAsync(x => x.Id == userId.Value, cancellationToken);
+    if (user is null)
+    {
+        return Results.NotFound(new ApiError("user_not_found", "用户不存在"));
+    }
+
+    try
+    {
+        user.PhoneNumber = await weChatPayService.ExchangePhoneNumberAsync(
+            request.PhoneCode.Trim(),
+            cancellationToken);
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.Ok(ToMiniappProfile(user, httpRequest));
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Json(
+            new ApiError("wechat_phone_failed", ex.Message, httpRequest.HttpContext.TraceIdentifier),
+            statusCode: StatusCodes.Status502BadGateway);
+    }
+}).RequireAuthorization("Miniapp");
+
+auth.MapPost("/avatar", async (
+    ClaimsPrincipal principal,
+    AppDbContext db,
+    IWebHostEnvironment environment,
+    HttpRequest request,
+    CancellationToken cancellationToken) =>
+{
+    var userId = GetUserId(principal);
+    if (!userId.HasValue)
+    {
+        return Results.Unauthorized();
+    }
+
+    var user = await db.WxUsers.SingleOrDefaultAsync(x => x.Id == userId.Value, cancellationToken);
+    if (user is null)
+    {
+        return Results.NotFound(new ApiError("user_not_found", "用户不存在"));
+    }
+
+    IFormFile? file;
+    try
+    {
+        var form = await request.ReadFormAsync(cancellationToken);
+        file = form.Files.GetFile("file");
+    }
+    catch (InvalidDataException)
+    {
+        return Results.BadRequest(new ApiError("avatar_invalid", "头像上传内容无效"));
+    }
+
+    if (file is null || file.Length <= 0)
+    {
+        return Results.BadRequest(new ApiError("avatar_required", "请选择头像文件"));
+    }
+    if (file.Length > 5 * 1024 * 1024)
+    {
+        return Results.BadRequest(new ApiError("avatar_too_large", "头像不能超过 5MB"));
+    }
+
+    var extension = await DetectImageExtensionAsync(file, cancellationToken);
+    if (extension is null)
+    {
+        return Results.BadRequest(new ApiError("avatar_type_invalid", "头像必须是 JPG、PNG 或 WEBP 图片"));
+    }
+
+    var avatarDirectoryPath = Path.Combine(environment.ContentRootPath, "wwwroot", "uploads", "avatars");
+    Directory.CreateDirectory(avatarDirectoryPath);
+    var fileName = $"{user.Id:N}-{Guid.NewGuid():N}{extension}";
+    var targetPath = Path.Combine(avatarDirectoryPath, fileName);
+    await using (var stream = new FileStream(targetPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+    {
+        await file.CopyToAsync(stream, cancellationToken);
+    }
+
+    var oldAvatarUrl = user.AvatarUrl;
+    user.AvatarUrl = $"/uploads/avatars/{fileName}";
+    user.UpdatedAt = DateTime.UtcNow;
+    await db.SaveChangesAsync(cancellationToken);
+
+    DeleteStoredAvatar(oldAvatarUrl, environment.ContentRootPath);
+    return Results.Ok(ToMiniappProfile(user, request));
+}).RequireAuthorization("Miniapp");
 
 api.MapGet("/map/config", (IOptions<AmapOptions> options) =>
 {
@@ -1628,6 +1795,95 @@ static Guid? GetUserId(ClaimsPrincipal principal)
     var raw = principal.FindFirstValue(ClaimTypes.NameIdentifier)
         ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
     return Guid.TryParse(raw, out var id) ? id : null;
+}
+
+static MiniappProfileResponse ToMiniappProfile(WxUser user, HttpRequest? request)
+{
+    var avatarUrl = user.AvatarUrl;
+    if (request is not null &&
+        !string.IsNullOrWhiteSpace(avatarUrl) &&
+        avatarUrl.StartsWith("/", StringComparison.Ordinal))
+    {
+        avatarUrl = $"{request.Scheme}://{request.Host}{avatarUrl}";
+    }
+
+    return new MiniappProfileResponse(
+        user.Id,
+        user.Nickname,
+        user.PhoneNumber,
+        avatarUrl);
+}
+
+static async Task<string?> DetectImageExtensionAsync(
+    IFormFile file,
+    CancellationToken cancellationToken)
+{
+    var header = new byte[12];
+    await using var stream = file.OpenReadStream();
+    var read = await stream.ReadAsync(header.AsMemory(0, header.Length), cancellationToken);
+
+    if (read >= 3 && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF)
+    {
+        return ".jpg";
+    }
+    if (read >= 8 &&
+        header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 &&
+        header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A)
+    {
+        return ".png";
+    }
+    if (read >= 12 &&
+        header[0] == (byte)'R' && header[1] == (byte)'I' && header[2] == (byte)'F' && header[3] == (byte)'F' &&
+        header[8] == (byte)'W' && header[9] == (byte)'E' && header[10] == (byte)'B' && header[11] == (byte)'P')
+    {
+        return ".webp";
+    }
+
+    return null;
+}
+
+static void DeleteStoredAvatar(string? avatarUrl, string contentRootPath)
+{
+    if (string.IsNullOrWhiteSpace(avatarUrl))
+    {
+        return;
+    }
+
+    if (Uri.TryCreate(avatarUrl, UriKind.Absolute, out var absoluteUri))
+    {
+        avatarUrl = absoluteUri.AbsolutePath;
+    }
+    if (!avatarUrl.StartsWith("/uploads/avatars/", StringComparison.OrdinalIgnoreCase))
+    {
+        return;
+    }
+
+    var avatarRoot = Path.GetFullPath(Path.Combine(
+        contentRootPath,
+        "wwwroot",
+        "uploads",
+        "avatars"));
+    var candidate = Path.GetFullPath(Path.Combine(
+        contentRootPath,
+        "wwwroot",
+        avatarUrl.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
+    var rootWithSeparator = avatarRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+    if (!candidate.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase))
+    {
+        return;
+    }
+
+    try
+    {
+        if (File.Exists(candidate))
+        {
+            File.Delete(candidate);
+        }
+    }
+    catch (IOException)
+    {
+        // A stale avatar file should not make a successful profile update fail.
+    }
 }
 
 static void ApplyGeoResult(Store store, GeoResult result, string source)

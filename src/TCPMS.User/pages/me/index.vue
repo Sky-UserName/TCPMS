@@ -65,8 +65,8 @@
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { goPage, goRoot, prototypeImages, showToast } from '@/common/prototype.js'
-	import { getFavorites, getGuests, getMerchantProfile, getOrders, getProfile } from '@/common/app-store.js'
-	import { fetchMerchantPermissionMenus, fetchRemoteOrders } from '@/common/api.js'
+	import { getApiToken, getFavorites, getGuests, getMerchantProfile, getOrders, getProfile, isLoggedIn, logout, setLoggedIn } from '@/common/app-store.js'
+	import { fetchMerchantPermissionMenus, fetchMiniappProfile, fetchRemoteOrders } from '@/common/api.js'
 
 	export default {
 		components: { ProtoBottomNav, ProtoIcon },
@@ -145,12 +145,29 @@
 				return this.todayOrder ? `当前预订：${this.todayOrder.room}` : '暂无进行中的预订'
 			}
 		},
-		onShow() {
+		async onShow() {
 			this.refreshData()
+			await this.refreshMiniappProfile()
 			this.loadMerchantEntries()
 			this.refreshRemoteOrders()
 		},
 		methods: {
+			async refreshMiniappProfile() {
+				if (!getApiToken()) return
+				try {
+					const remoteProfile = await fetchMiniappProfile()
+					if (!remoteProfile?.id) return
+					setLoggedIn({
+						uid: remoteProfile.id,
+						name: remoteProfile.nickname || this.profile.name || '微信用户',
+						phone: remoteProfile.phoneNumber || this.profile.phone || '',
+						avatar: remoteProfile.avatarUrl || this.profile.avatar || prototypeImages.avatar
+					})
+					this.refreshData()
+				} catch (error) {
+					// apiRequest handles expired tokens and redirects to the login page.
+				}
+			},
 			async refreshRemoteOrders() {
 				if (!this.loggedIn) return
 				try {
@@ -174,7 +191,7 @@
 			},
 			refreshData(remoteOrders = null) {
 				this.profile = getProfile()
-				this.loggedIn = Boolean(this.profile.loggedIn)
+				this.loggedIn = isLoggedIn()
 				this.avatar = this.profile.avatar || prototypeImages.avatar
 				this.orders = Array.isArray(remoteOrders) ? remoteOrders : getOrders()
 				this.merchant = getMerchantProfile()
@@ -194,7 +211,20 @@
 					return
 				}
 				if (item.action === 'logout') {
-					showToast(this.loggedIn ? '已退出登录' : '当前未登录')
+					if (!this.loggedIn) {
+						showToast('当前未登录')
+						return
+					}
+					uni.showModal({
+						title: '退出登录',
+						content: '退出后需要重新进行微信授权登录',
+						confirmText: '退出',
+						success: (result) => {
+							if (!result.confirm) return
+							logout()
+							uni.reLaunch({ url: '/pages/auth/login' })
+						}
+					})
 					return
 				}
 				if (item.action === 'apply') {

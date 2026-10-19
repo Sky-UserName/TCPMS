@@ -1,5 +1,5 @@
 import { demoRooms, demoStores, prototypeImages } from './prototype.js'
-import { getApiToken, getBooking, saveApiToken, saveOrders, upsertOrder } from './app-store.js'
+import { getApiToken, getBooking, logout, saveApiToken, saveOrders, upsertOrder } from './app-store.js'
 
 const defaultApiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5180/api/v1'
 
@@ -18,6 +18,19 @@ const toQuery = (query = {}) => {
 	return entries.length ? `?${entries.join('&')}` : ''
 }
 
+const handleUnauthorized = () => {
+	logout()
+	try {
+		const pages = getCurrentPages()
+		const current = pages?.[pages.length - 1]
+		if (current?.route !== 'pages/auth/login') {
+			uni.reLaunch({ url: '/pages/auth/login' })
+		}
+	} catch (error) {
+		// Navigation is unavailable in some non-page runtimes.
+	}
+}
+
 export const apiRequest = ({ path, method = 'GET', data, query } = {}) => new Promise((resolve, reject) => {
 	const token = getApiToken()
 	uni.request({
@@ -34,9 +47,25 @@ export const apiRequest = ({ path, method = 'GET', data, query } = {}) => new Pr
 				resolve(response.data)
 				return
 			}
-			reject(response.data || { message: '请求失败' })
+			const payload = response.data && typeof response.data === 'object'
+				? response.data
+				: { message: '请求失败' }
+			if (response.statusCode === 401) {
+				handleUnauthorized()
+				reject({
+					...payload,
+					code: 'unauthorized',
+					message: payload.message || '登录状态已失效，请重新授权登录'
+				})
+				return
+			}
+			reject(payload)
 		},
-		fail: reject
+		fail: (error) => reject({
+			code: 'network_error',
+			message: error?.errMsg || '无法连接本地后端，请确认 API 服务已启动',
+			errMsg: error?.errMsg || ''
+		})
 	})
 })
 
@@ -224,49 +253,81 @@ const mapReviewResponse = (data = {}) => ({
 	items: Array.isArray(data.items) ? data.items.map(mapReviewItem) : []
 })
 
-export const miniappLogin = async () => {
-	let code = null
-	try {
-		const loginResult = await new Promise((resolve, reject) => {
-			uni.login({
-				provider: 'weixin',
-				success: resolve,
-				fail: reject
+export const miniappLogin = async ({ nickname = '', avatarUrl = '', phoneCode = null } = {}) => {
+	const loginResult = await new Promise((resolve, reject) => {
+		uni.login({
+			provider: 'weixin',
+			success: resolve,
+			fail: (error) => reject({
+				code: 'wechat_login_api_error',
+				message: error?.errMsg || '微信登录接口调用失败',
+				errMsg: error?.errMsg || ''
 			})
 		})
-		code = loginResult?.code || null
-	} catch (error) {
-		code = null
-	}
+	})
+	const code = loginResult?.code || null
+	if (!code) throw new Error('微信未返回登录凭证')
 
-	let data
-	try {
-		data = await apiRequest({
-			path: '/auth/miniapp-login',
-			method: 'POST',
-			data: {
-				code,
-				devOpenId: code ? null : 'dev-user-001',
-				nickname: '张三',
-				avatarUrl: prototypeImages.avatar
-			}
-		})
-	} catch (error) {
-		if (!code || error?.code !== 'wechat_login_not_configured') throw error
-		data = await apiRequest({
-			path: '/auth/miniapp-login',
-			method: 'POST',
-			data: {
-				code: null,
-				devOpenId: 'dev-user-001',
-				nickname: '张三',
-				avatarUrl: prototypeImages.avatar
-			}
-		})
-	}
+	const data = await apiRequest({
+		path: '/auth/miniapp-login',
+		method: 'POST',
+		data: {
+			code,
+			devOpenId: null,
+			nickname: nickname || null,
+			avatarUrl: avatarUrl || null,
+			phoneCode: phoneCode || null
+		}
+	})
 	if (data && data.token) saveApiToken(data.token)
 	return data
 }
+
+export const bindMiniappPhone = async (phoneCode) => {
+	const data = await apiRequest({
+		path: '/auth/phone',
+		method: 'POST',
+		data: { phoneCode }
+	})
+	return data
+}
+
+export const fetchMiniappProfile = async () => {
+	return apiRequest({ path: '/auth/me' })
+}
+
+export const uploadMiniappAvatar = (filePath) => new Promise((resolve, reject) => {
+	const token = getApiToken()
+	if (!token) {
+		reject(new Error('请先登录'))
+		return
+	}
+	uni.uploadFile({
+		url: `${getApiBaseUrl()}/auth/avatar`,
+		filePath,
+		name: 'file',
+		header: { Authorization: `Bearer ${token}` },
+		success: (response) => {
+			let data = response.data
+			try {
+				data = typeof data === 'string' ? JSON.parse(data) : data
+			} catch (error) {
+				// Keep the raw response for a useful error below.
+			}
+			if (response.statusCode >= 200 && response.statusCode < 300) {
+				resolve(data)
+				return
+			}
+			if (response.statusCode === 401) {
+				handleUnauthorized()
+				reject({ code: 'unauthorized', message: '登录状态已失效，请重新授权登录' })
+				return
+			}
+			reject(data || { message: '头像上传失败' })
+		},
+		fail: reject
+	})
+})
 
 export const fetchStores = async (keyword = '') => {
 	const data = await apiRequest({ path: '/stores/', query: { keyword, status: 'Active' } })

@@ -6,6 +6,15 @@ public sealed record MiniappLoginRequest(
     string? Code,
     string? DevOpenId,
     string? Nickname,
+    string? AvatarUrl,
+    string? PhoneCode = null);
+
+public sealed record MiniappPhoneRequest(string PhoneCode);
+
+public sealed record MiniappProfileResponse(
+    Guid Id,
+    string? Nickname,
+    string? PhoneNumber,
     string? AvatarUrl);
 
 public sealed record StoreRequest(
@@ -137,7 +146,8 @@ public sealed record TokenResponse(
     string Token,
     DateTime ExpiresAt,
     string UserType,
-    string DisplayName);
+    string DisplayName,
+    MiniappProfileResponse? Profile = null);
 
 public sealed record StoreListItem(
     Guid Id,

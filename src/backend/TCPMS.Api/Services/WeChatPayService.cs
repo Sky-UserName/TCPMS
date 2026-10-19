@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -63,6 +64,9 @@ public sealed class WeChatPayService(
     ILogger<WeChatPayService> logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly SemaphoreSlim AccessTokenLock = new(1, 1);
+    private static string? cachedMiniProgramAccessToken;
+    private static DateTimeOffset cachedMiniProgramAccessTokenExpiresAt;
     private readonly WeChatOptions _options = options.Value;
 
     public bool IsMiniProgramConfigured =>
@@ -154,6 +158,124 @@ public sealed class WeChatPayService(
         }
 
         return new WeChatCode2Session(payload.OpenId, payload.UnionId, payload.SessionKey);
+    }
+
+    public async Task<string> ExchangePhoneNumberAsync(
+        string phoneCode,
+        CancellationToken cancellationToken)
+    {
+        if (!IsMiniProgramConfigured)
+        {
+            throw new InvalidOperationException("微信小程序 AppID 或 Secret 尚未配置");
+        }
+        if (string.IsNullOrWhiteSpace(phoneCode))
+        {
+            throw new InvalidOperationException("手机号授权凭证不能为空");
+        }
+
+        var accessToken = await GetMiniProgramAccessTokenAsync(cancellationToken);
+        var url = $"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token={Uri.EscapeDataString(accessToken)}";
+        var requestBody = JsonSerializer.SerializeToUtf8Bytes(
+            new { code = phoneCode.Trim() },
+            JsonOptions);
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Version = HttpVersion.Version11,
+            VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+            Content = new ByteArrayContent(requestBody)
+        };
+        request.Headers.Accept.ParseAdd("application/json");
+        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        request.Content.Headers.ContentLength = requestBody.Length;
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        PhoneNumberResponse? payload = null;
+        if (!string.IsNullOrWhiteSpace(responseBody))
+        {
+            try
+            {
+                payload = JsonSerializer.Deserialize<PhoneNumberResponse>(responseBody, JsonOptions);
+            }
+            catch (JsonException ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "微信手机号接口返回无法解析的响应 (HTTP {StatusCode})",
+                    (int)response.StatusCode);
+            }
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning(
+                "微信手机号接口返回 HTTP {StatusCode} {ReasonPhrase}",
+                (int)response.StatusCode,
+                response.ReasonPhrase);
+        }
+
+        if (!response.IsSuccessStatusCode ||
+            payload is null ||
+            payload.ErrCode != 0 ||
+            string.IsNullOrWhiteSpace(payload.PhoneInfo?.PurePhoneNumber))
+        {
+            var message = !string.IsNullOrWhiteSpace(payload?.ErrMsg)
+                ? payload.ErrMsg
+                : !response.IsSuccessStatusCode
+                    ? $"微信手机号接口返回 HTTP {(int)response.StatusCode} {response.ReasonPhrase}，响应体为空或无法识别"
+                    : payload is null
+                        ? "微信手机号接口返回了无法解析的响应"
+                        : "微信未返回手机号";
+            logger.LogWarning("微信手机号授权失败: {Message}", message);
+            throw new InvalidOperationException(message);
+        }
+
+        return payload.PhoneInfo.PurePhoneNumber!;
+    }
+
+    private async Task<string> GetMiniProgramAccessTokenAsync(CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(cachedMiniProgramAccessToken) &&
+            cachedMiniProgramAccessTokenExpiresAt > DateTimeOffset.UtcNow.AddMinutes(2))
+        {
+            return cachedMiniProgramAccessToken;
+        }
+
+        await AccessTokenLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(cachedMiniProgramAccessToken) &&
+                cachedMiniProgramAccessTokenExpiresAt > DateTimeOffset.UtcNow.AddMinutes(2))
+            {
+                return cachedMiniProgramAccessToken;
+            }
+
+            var query = new Dictionary<string, string>
+            {
+                ["grant_type"] = "client_credential",
+                ["appid"] = _options.MiniProgramAppId,
+                ["secret"] = _options.MiniProgramSecret
+            };
+            var queryString = string.Join(
+                "&",
+                query.Select(x => $"{Uri.EscapeDataString(x.Key)}={Uri.EscapeDataString(x.Value)}"));
+            var url = $"https://api.weixin.qq.com/cgi-bin/token?{queryString}";
+            var payload = await httpClient.GetFromJsonAsync<AccessTokenResponse>(url, JsonOptions, cancellationToken);
+            if (payload is null || payload.ErrCode != 0 || string.IsNullOrWhiteSpace(payload.AccessToken))
+            {
+                throw new InvalidOperationException(payload?.ErrMsg ?? "微信 access_token 获取失败");
+            }
+
+            cachedMiniProgramAccessToken = payload.AccessToken;
+            cachedMiniProgramAccessTokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(
+                Math.Max(60, payload.ExpiresIn - 120));
+            return payload.AccessToken;
+        }
+        finally
+        {
+            AccessTokenLock.Release();
+        }
     }
 
     public async Task<WeChatJsapiPayment> CreateJsapiPaymentAsync(
@@ -520,6 +642,39 @@ public sealed class WeChatPayService(
 
         [JsonPropertyName("session_key")]
         public string? SessionKey { get; set; }
+    }
+
+    private sealed class AccessTokenResponse
+    {
+        [JsonPropertyName("errcode")]
+        public int ErrCode { get; set; }
+
+        [JsonPropertyName("errmsg")]
+        public string? ErrMsg { get; set; }
+
+        [JsonPropertyName("access_token")]
+        public string? AccessToken { get; set; }
+
+        [JsonPropertyName("expires_in")]
+        public int ExpiresIn { get; set; }
+    }
+
+    private sealed class PhoneNumberResponse
+    {
+        [JsonPropertyName("errcode")]
+        public int ErrCode { get; set; }
+
+        [JsonPropertyName("errmsg")]
+        public string? ErrMsg { get; set; }
+
+        [JsonPropertyName("phone_info")]
+        public PhoneInfo? PhoneInfo { get; set; }
+    }
+
+    private sealed class PhoneInfo
+    {
+        [JsonPropertyName("purePhoneNumber")]
+        public string? PurePhoneNumber { get; set; }
     }
 
     private sealed class JsapiPrepayResponse

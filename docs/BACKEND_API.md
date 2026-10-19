@@ -48,13 +48,18 @@ Authorization: Bearer <JWT>
 | GET | /api/v1/health | 无 | 返回服务、环境、数据库提供程序和 UTC 时间 |
 | POST | /api/v1/auth/login | 无 | 后台账号登录，Body 为 LoginRequest |
 | POST | /api/v1/auth/miniapp-login | 无 | 小程序登录，生产环境传微信 login code，Body 为 MiniappLoginRequest |
+| GET | /api/v1/auth/me | miniapp | 查询当前微信用户资料 |
+| POST | /api/v1/auth/phone | miniapp | 使用微信手机号授权凭证绑定手机号 |
+| POST | /api/v1/auth/avatar | miniapp | 上传当前用户头像并保存到本地文件目录 |
 | GET | /api/v1/map/config | 无 | 返回高德小程序 Key 是否启用和默认附近半径 |
 
 登录请求模型：
 
 - LoginRequest：username、password。
-- MiniappLoginRequest：code、devOpenId、nickname、avatarUrl。
-- 成功响应 TokenResponse：token、expiresAt、userType、displayName。
+- MiniappLoginRequest：code、devOpenId、nickname、avatarUrl、phoneCode。
+- MiniappPhoneRequest：phoneCode。
+- 成功响应 TokenResponse：token、expiresAt、userType、displayName、profile。
+- profile：id、nickname、phoneNumber、avatarUrl。
 
 开发环境可以传 devOpenId。生产环境由后端调用微信 code2Session 换取 openid，不能把开发 openId 当真实身份方案。
 

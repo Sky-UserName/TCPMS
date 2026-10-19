@@ -16,7 +16,9 @@
 
 后台登录：POST /api/v1/auth/login。开发种子账号为 admin / Admin@123456。
 
-小程序开发登录：POST /api/v1/auth/miniapp-login。开发环境可使用 devOpenId，生产环境必须接入微信 code2Session 和手机号授权。
+小程序登录：POST /api/v1/auth/miniapp-login。生产环境使用微信 code2Session；登录后可调用 `/api/v1/auth/phone` 绑定手机号，调用 `/api/v1/auth/avatar` 上传头像。
+
+当前用户资料：GET /api/v1/auth/me。头像上传使用 `multipart/form-data`，字段名为 `file`，后端保存到本地 `wwwroot/uploads/avatars`。
 
 将登录响应 token 放入请求头：
 

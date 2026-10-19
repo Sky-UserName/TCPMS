@@ -6,6 +6,11 @@
 			<button class="hero-back-button" hover-class="none" aria-label="返回" @tap="goBack">
 				<ProtoIcon name="back" tone="white" :size="38" />
 			</button>
+			<button class="hero-account-button" hover-class="none" aria-label="个人中心" @tap="goAccount">
+				<image v-if="account.loggedIn" :src="account.avatar" mode="aspectFill" />
+				<ProtoIcon v-else name="user" tone="white" :size="25" />
+				<text>{{ account.loggedIn ? account.name : '登录' }}</text>
+			</button>
 			<text class="hero-count">{{ store.images && store.images.length ? `1 / ${store.images.length}` : '门店图片' }} · 客房与环境</text>
 		</view>
 		<view v-if="showScrollHeader" class="store-scroll-header">
@@ -170,7 +175,7 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { demoRooms, demoStores, goPage, showToast } from '@/common/prototype.js'
-	import { getBooking, getFavorites, recordRecent, saveBooking, toggleFavorite } from '@/common/app-store.js'
+	import { getBooking, getFavorites, getProfile, isLoggedIn, recordRecent, saveBooking, toggleFavorite } from '@/common/app-store.js'
 	import { fetchStoreDetail } from '@/common/api.js'
 
 	export default {
@@ -181,6 +186,11 @@
 				rooms: demoRooms,
 				loadError: '',
 				favorite: false,
+				account: {
+					loggedIn: false,
+					name: '登录',
+					avatar: '/static/logo.png'
+				},
 				booking: getBooking(),
 				showScrollHeader: false,
 				facilityGroups: [
@@ -232,6 +242,7 @@
 		},
 		onShow() {
 			this.booking = getBooking()
+			this.refreshAccount()
 		},
 		onPageScroll(event) {
 			const scrollTop = Number(event && event.scrollTop) || 0
@@ -241,6 +252,17 @@
 			}
 		},
 		methods: {
+			refreshAccount() {
+				const profile = getProfile()
+				this.account = {
+					loggedIn: isLoggedIn(),
+					name: profile.name || '微信用户',
+					avatar: profile.avatar || '/static/logo.png'
+				}
+			},
+			goAccount() {
+				uni.reLaunch({ url: this.account.loggedIn ? '/pages/me/index' : '/pages/auth/login' })
+			},
 			goBack() {
 				uni.navigateBack({ delta: 1 })
 			},
@@ -1362,6 +1384,45 @@
 		background: rgba(0, 55, 67, 0.42);
 		border: 1rpx solid rgba(255, 255, 255, 0.24);
 		border-radius: 50%;
+	}
+
+	.store-detail-page .hero-account-button {
+		position: absolute;
+		top: 76rpx;
+		right: 24rpx;
+		z-index: 6;
+		display: flex;
+		align-items: center;
+		max-width: 260rpx;
+		height: 64rpx;
+		margin: 0;
+		padding: 0 18rpx 0 10rpx;
+		color: #ffffff;
+		background: rgba(0, 55, 67, 0.42);
+		border: 1rpx solid rgba(255, 255, 255, 0.24);
+		border-radius: 32rpx;
+		font-size: 20rpx;
+		font-weight: 650;
+		line-height: 64rpx;
+	}
+
+	.store-detail-page .hero-account-button::after {
+		display: none;
+	}
+
+	.store-detail-page .hero-account-button image {
+		flex: 0 0 auto;
+		width: 44rpx;
+		height: 44rpx;
+		margin-right: 8rpx;
+		border: 2rpx solid rgba(255, 255, 255, 0.86);
+		border-radius: 50%;
+	}
+
+	.store-detail-page .hero-account-button text {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.store-detail-page .store-scroll-header {
