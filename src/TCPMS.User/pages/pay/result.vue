@@ -55,7 +55,7 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { demoOrders, goPage, goRoot, prototypeImages, showToast } from '@/common/prototype.js'
 	import { findOrder, getOrders, updateOrder } from '@/common/app-store.js'
-	import { fetchRemoteOrder, payRemoteOrder, requestRemotePayment } from '@/common/api.js'
+	import { fetchRemoteOrder, payRemoteOrder, confirmRemotePayment, requestRemotePayment } from '@/common/api.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
@@ -101,9 +101,16 @@
 							})
 						})
 						for (let attempt = 0; attempt < 5; attempt += 1) {
-							order = await fetchRemoteOrder(this.order.id, this.order)
-							if (order?.paymentStatus === 'Paid' || order?.statusKey === 'stay') break
-							await new Promise((resolve) => setTimeout(resolve, 600))
+							// 先让服务端主动查单，查不到再读本地订单状态。
+							let confirmed = await confirmRemotePayment(this.order.id, this.order).catch(() => null)
+							if (!confirmed) {
+								confirmed = await fetchRemoteOrder(this.order.id, this.order).catch(() => null)
+							}
+							if (confirmed) {
+								order = confirmed
+								if (confirmed.paymentStatus === 'Paid' || confirmed.statusKey === 'stay') break
+							}
+							await new Promise((resolve) => setTimeout(resolve, 800))
 						}
 					} catch (error) {
 						if (error?.code === 'wechat_pay_not_configured') {

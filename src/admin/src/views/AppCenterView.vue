@@ -9,7 +9,7 @@
 
     <el-alert
       title="配置来源：服务端 appsettings.Production.json 或环境变量"
-      description="请将商户私钥、API v3 Key、平台证书和高德服务端 Key 配置在后端，不要放入管理后台前端或小程序包。"
+      description="请将商户私钥、API v3 Key、平台证书（或微信支付公钥）和高德服务端 Key 配置在后端，不要放入管理后台前端或小程序包。"
       type="info"
       :closable="false"
       show-icon
@@ -119,7 +119,8 @@ const wechatStatus = reactive({
   notifyUrl: '',
   hasApiV3Key: false,
   hasMerchantPrivateKey: false,
-  hasPlatformCertificate: false
+  hasPlatformCertificate: false,
+  hasWeChatPayPublicKey: false
 })
 const amapStatus = reactive({
   configured: false,
@@ -131,7 +132,7 @@ const wechatChecks = computed(() => [
   { label: '小程序登录配置', ok: wechatStatus.miniProgramConfigured },
   { label: 'API v3 Key', ok: wechatStatus.hasApiV3Key },
   { label: '商户私钥', ok: wechatStatus.hasMerchantPrivateKey },
-  { label: '平台证书', ok: wechatStatus.hasPlatformCertificate },
+  { label: '平台证书 / 微信支付公钥', ok: wechatStatus.hasPlatformCertificate || wechatStatus.hasWeChatPayPublicKey },
   { label: '支付回调地址', ok: Boolean(wechatStatus.notifyUrl) }
 ])
 

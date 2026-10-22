@@ -55,6 +55,24 @@ npm run dev
 4. 开发联调可在设备存储中设置 `tcpms.apiBaseUrl`；构建环境也可设置 `VITE_API_BASE_URL`。生产小程序须使用 HTTPS 并配置微信 request 合法域名。
 5. 修改页面后重新编译，不要编辑 unpackage/dist。
 
+## 4.1 配置文件（不入库）
+
+`appsettings*.json` 含数据库口令、JWT 密钥、微信 AppSecret / APIv3 Key，已从版本库移除并加入 `.gitignore`。克隆仓库后先复制模板再填值：
+
+~~~powershell
+cd src/backend/TCPMS.Api
+Copy-Item appsettings.example.json appsettings.json
+Copy-Item appsettings.Development.example.json appsettings.Development.json
+~~~
+
+占位符 `REPLACE_ME` 必须替换；生产环境建议改用环境变量注入，不落文件：
+
+~~~powershell
+$env:Jwt__SecretKey = "<32 位以上随机串>"
+$env:ConnectionStrings__Default = "Server=...;Password=...;"
+$env:WeChat__ApiV3Key = "..."
+~~~
+
 ## 5. 本地 MySQL
 
 ~~~powershell
@@ -85,13 +103,25 @@ dotnet run --project src/backend/TCPMS.Api --urls http://localhost:5180
 | `WeChat__MerchantSerialNumber` | 商户 API 证书序列号 |
 | `WeChat__ApiV3Key` | 微信支付 API v3 Key，必须是 32 字节 |
 | `WeChat__MerchantPrivateKeyPath` | `apiclient_key.pem` 的服务端文件路径；也可直接填写 `MerchantPrivateKeyPem` |
-| `WeChat__PlatformCertificatePath` | 微信支付平台证书 PEM 文件路径；也可直接填写 `PlatformCertificatePem` |
+| `WeChat__PlatformCertificatePath` | 微信支付平台证书 PEM 文件路径；也可直接填写 `PlatformCertificatePem`。2024 年后新入驻商户通常没有平台证书，改用下面的微信支付公钥 |
+| `WeChat__WeChatPayPublicKeyPath` | 商户平台下载的 `pub_key.pem` 路径；也可直接填写 `WeChatPayPublicKeyPem` |
+| `WeChat__WeChatPayPublicKeyId` | 微信支付公钥 ID，形如 `PUB_KEY_ID_...`；用于校验回调头 `Wechatpay-Serial` |
 | `WeChat__NotifyBaseUrl` | 后端公网基地址，例如 `https://api.example.com`；服务会拼接支付回调路径 |
 | `Amap__ServerKey` | 高德 Web 服务 API Key，用于地址解析、逆解析和门店坐标维护 |
 | `Amap__MiniProgramKey` | 高德小程序端 Key，供小程序侧地图能力使用 |
 | `Amap__DefaultRadiusKm` | 附近门店默认搜索半径，单位为公里 |
 
-微信支付回调地址最终为 `/api/v1/payments/wechat/notify`，必须使用公网 HTTPS，并在微信商户平台配置为与服务端一致的地址。应用中心的“测试商户连接”会调用微信支付商户 API 的证书接口；“测试地址解析”会调用高德地理编码接口。生产环境要求真实微信登录凭证，开发用 `devOpenId` 和 `mock-pay` 不会生效。
+微信支付回调地址最终为 `/api/v1/payments/wechat/notify`，必须使用公网 HTTPS，并在微信商户平台配置为与服务端一致的地址。应用中心的“测试商户连接”会用一个不存在的订单号试调用微信查单接口：返回 404 `ORDER_NOT_EXIST` 说明商户号、证书序列号、私钥签名全部有效；返回 401 `SIGN_ERROR` 说明签名有误。之所以不再调用 `/v3/certificates`，是因为 2024 年后新入驻商户属于“微信支付公钥”模式，该接口会返回 `RESOURCE_NOT_EXISTS`。
+
+服务端同时会校验微信应答的 `Wechatpay-Signature`，避免伪造的“查单成功”响应。小程序支付成功后还会调用 `GET /api/v1/orders/{id}/pay-status` 主动查单，后台另有一个每 60 秒运行一次的兜底任务，把回调丢失但微信侧已支付的订单补记为已支付。生产环境要求真实微信登录凭证，开发用 `devOpenId` 和 `mock-pay` 不会生效。
+
+### 5.2 没有公网域名时怎么联调
+
+回调地址只是下单参数，微信不会校验可达性，因此本地可以先填占位地址：
+
+- `appsettings.Development.json` 里 `WeChat:NotifyBaseUrl` 已设为 `https://example.com`，本地可以正常拉起支付，回调收不到，但 `pay-status` 查询与兜底任务会把订单补成已支付。
+- 真机预览时手机访问不到 `localhost`：后端需监听 `0.0.0.0`（开发配置已改为 `http://0.0.0.0:5180`），小程序端 `common/api.js` 的 `devMachineApiBaseUrl` 要改成开发机的局域网地址，并在开发者工具里勾选“不校验合法域名”。
+- 域名下来后，只需把 `WeChat:NotifyBaseUrl` 改成真实域名、在小程序后台把域名加入 request 合法域名，其余代码不用动。
 
 ## 6. 生成发布包
 

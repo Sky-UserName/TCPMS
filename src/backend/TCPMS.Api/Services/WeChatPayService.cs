@@ -22,6 +22,10 @@ public sealed class WeChatOptions
     public string MerchantPrivateKeyPath { get; set; } = string.Empty;
     public string PlatformCertificatePem { get; set; } = string.Empty;
     public string PlatformCertificatePath { get; set; } = string.Empty;
+    // 2024 年后新入驻商户默认使用「微信支付公钥」验签，公钥 ID 形如 PUB_KEY_ID_xxx。
+    public string WeChatPayPublicKeyId { get; set; } = string.Empty;
+    public string WeChatPayPublicKeyPem { get; set; } = string.Empty;
+    public string WeChatPayPublicKeyPath { get; set; } = string.Empty;
     public string NotifyBaseUrl { get; set; } = string.Empty;
     public string ApiBaseUrl { get; set; } = "https://api.mch.weixin.qq.com";
 }
@@ -36,6 +40,7 @@ public sealed record WeChatConfigurationStatus(
     bool HasApiV3Key,
     bool HasMerchantPrivateKey,
     bool HasPlatformCertificate,
+    bool HasWeChatPayPublicKey,
     IReadOnlyList<string> Missing);
 
 public sealed record WeChatJsapiPayment(
@@ -50,6 +55,12 @@ public sealed record WeChatPaymentNotification(
     string OutTradeNumber,
     string TransactionId,
     string TradeState,
+    int TotalAmountCents,
+    DateTimeOffset? SuccessTime);
+
+public sealed record WeChatPayOrderQuery(
+    string TradeState,
+    string TransactionId,
     int TotalAmountCents,
     DateTimeOffset? SuccessTime);
 
@@ -92,7 +103,7 @@ public sealed class WeChatPayService(
             missing.Add("WeChat:ApiV3Key");
         }
         if (!HasMerchantPrivateKey) missing.Add("WeChat:MerchantPrivateKeyPem/Path");
-        if (!HasPlatformCertificate) missing.Add("WeChat:PlatformCertificatePem/Path");
+        if (!HasNotificationKey) missing.Add("WeChat:PlatformCertificatePath 或 WeChat:WeChatPayPublicKeyPath");
         if (!Uri.TryCreate(_options.NotifyBaseUrl, UriKind.Absolute, out _))
         {
             missing.Add("WeChat:NotifyBaseUrl");
@@ -101,7 +112,7 @@ public sealed class WeChatPayService(
         return new WeChatConfigurationStatus(
             IsMiniProgramConfigured,
             IsPaymentConfigured &&
-            HasPlatformCertificate &&
+            HasNotificationKey &&
             Uri.TryCreate(_options.NotifyBaseUrl, UriKind.Absolute, out _),
             _options.MiniProgramAppId,
             _options.MerchantId,
@@ -110,6 +121,7 @@ public sealed class WeChatPayService(
             Encoding.UTF8.GetByteCount(_options.ApiV3Key) == 32,
             HasMerchantPrivateKey,
             HasPlatformCertificate,
+            HasWeChatPayPublicKey,
             missing);
     }
 
@@ -126,10 +138,19 @@ public sealed class WeChatPayService(
         }
     }
 
+    public bool HasWeChatPayPublicKey =>
+        !string.IsNullOrWhiteSpace(_options.WeChatPayPublicKeyPem) ||
+        (!string.IsNullOrWhiteSpace(_options.WeChatPayPublicKeyPath) &&
+         File.Exists(_options.WeChatPayPublicKeyPath));
+
+    /// <summary>旧式「平台证书」验签材料是否存在（不含微信支付公钥）。</summary>
     public bool HasPlatformCertificate =>
         !string.IsNullOrWhiteSpace(_options.PlatformCertificatePem) ||
         (!string.IsNullOrWhiteSpace(_options.PlatformCertificatePath) &&
          File.Exists(_options.PlatformCertificatePath));
+
+    /// <summary>回调/应答验签材料是否齐备：平台证书或微信支付公钥，二者其一即可。</summary>
+    public bool HasNotificationKey => HasPlatformCertificate || HasWeChatPayPublicKey;
 
     public async Task<WeChatCode2Session> ExchangeCodeAsync(
         string code,
@@ -326,6 +347,55 @@ public sealed class WeChatPayService(
             paySign);
     }
 
+    /// <summary>
+    /// 主动查询订单支付状态。回调未到达（本地开发没有公网 HTTPS）时，用它兜底确认支付结果。
+    /// 订单不存在时返回 null。
+    /// </summary>
+    public async Task<WeChatPayOrderQuery?> QueryOrderAsync(
+        string outTradeNo,
+        CancellationToken cancellationToken)
+    {
+        EnsureMerchantConfigured();
+        if (string.IsNullOrWhiteSpace(outTradeNo))
+        {
+            throw new InvalidOperationException("商户订单号不能为空");
+        }
+
+        var path = $"/v3/pay/transactions/out-trade-no/{Uri.EscapeDataString(outTradeNo)}" +
+                   $"?mchid={Uri.EscapeDataString(_options.MerchantId)}";
+        var payload = await SendAsync<JsonElement>(
+            HttpMethod.Get,
+            path,
+            null,
+            cancellationToken,
+            allowNotFound: true);
+        if (payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        var tradeState = payload.TryGetProperty("trade_state", out var state)
+            ? state.GetString() ?? string.Empty
+            : string.Empty;
+        var transactionId = payload.TryGetProperty("transaction_id", out var transaction)
+            ? transaction.GetString() ?? string.Empty
+            : string.Empty;
+        var total = payload.TryGetProperty("amount", out var amount) &&
+                    amount.TryGetProperty("total", out var totalValue) &&
+                    totalValue.ValueKind == JsonValueKind.Number
+            ? totalValue.GetInt32()
+            : 0;
+        DateTimeOffset? successTime = null;
+        if (payload.TryGetProperty("success_time", out var success) &&
+            success.ValueKind == JsonValueKind.String &&
+            success.TryGetDateTimeOffset(out var parsedSuccessTime))
+        {
+            successTime = parsedSuccessTime;
+        }
+
+        return new WeChatPayOrderQuery(tradeState, transactionId, total, successTime);
+    }
+
     public async Task<string> CreateRefundAsync(
         BookingOrder order,
         RefundRecord refund,
@@ -354,14 +424,20 @@ public sealed class WeChatPayService(
             : payload.RefundId;
     }
 
+    /// <summary>
+    /// 商户接口连通性自检。不再调用 /v3/certificates：公钥模式商户会返回 RESOURCE_NOT_EXISTS。
+    /// 改为查询一个不存在的订单，微信返回 404 ORDER_NOT_EXIST 即说明商户号、证书序列号、私钥签名全部有效；
+    /// 签名错误会返回 401 SIGN_ERROR。
+    /// </summary>
     public async Task TestConnectionAsync(CancellationToken cancellationToken)
     {
-        EnsurePaymentConfigured();
-        _ = await SendAsync<JsonElement>(
-            HttpMethod.Get,
-            "/v3/certificates",
-            null,
-            cancellationToken);
+        EnsureMerchantConfigured();
+        var probeNo = $"TCPMS-CONNECT-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+        var probe = await QueryOrderAsync(probeNo, cancellationToken);
+        if (probe is not null)
+        {
+            throw new InvalidOperationException("微信支付连通性自检返回了非预期的订单数据");
+        }
     }
 
     public WeChatPaymentNotification VerifyAndDecryptNotification(
@@ -388,26 +464,8 @@ public sealed class WeChatPayService(
 
         try
         {
-            using var certificate = LoadPlatformCertificate();
-            if (!string.Equals(
-                    NormalizeSerial(serial),
-                    NormalizeSerial(certificate.SerialNumber),
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                throw new CryptographicException("微信支付平台证书序列号不匹配");
-            }
-
             var message = $"{timestamp}\n{nonce}\n{body}\n";
-            using var rsa = certificate.GetRSAPublicKey()
-                ?? throw new CryptographicException("微信支付平台证书不包含 RSA 公钥");
-            if (!rsa.VerifyData(
-                    Encoding.UTF8.GetBytes(message),
-                    Convert.FromBase64String(signature),
-                    HashAlgorithmName.SHA256,
-                    RSASignaturePadding.Pkcs1))
-            {
-                throw new CryptographicException("微信支付回调签名校验失败");
-            }
+            VerifyNotificationSignature(serial, message, signature);
 
             var envelope = JsonSerializer.Deserialize<NotificationEnvelope>(body, JsonOptions)
                 ?? throw new CryptographicException("微信支付回调内容为空");
@@ -446,9 +504,10 @@ public sealed class WeChatPayService(
         HttpMethod method,
         string path,
         object? requestBody,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowNotFound = false)
     {
-        EnsurePaymentConfigured();
+        EnsureMerchantConfigured();
         var body = requestBody is null
             ? string.Empty
             : JsonSerializer.Serialize(requestBody, JsonOptions);
@@ -469,8 +528,13 @@ public sealed class WeChatPayService(
 
         using var response = await httpClient.SendAsync(request, cancellationToken);
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        VerifyResponseSignature(response, responseBody);
         if (!response.IsSuccessStatusCode)
         {
+            if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return default;
+            }
             logger.LogWarning(
                 "微信支付接口调用失败，Path={Path}, StatusCode={StatusCode}, Body={Body}",
                 path,
@@ -519,6 +583,153 @@ public sealed class WeChatPayService(
         using var aes = new AesGcm(Encoding.UTF8.GetBytes(_options.ApiV3Key), 16);
         aes.Decrypt(nonce, ciphertext, tag, plaintext, associatedData);
         return Encoding.UTF8.GetString(plaintext);
+    }
+
+    /// <summary>
+    /// 兼容两种验签模式：平台证书（旧）与微信支付公钥（2024 年后新商户默认）。
+    /// 回调头 Wechatpay-Serial 为 PUB_KEY_ID_ 开头时走公钥验签。
+    /// </summary>
+    /// <summary>
+    /// 校验微信支付应答签名。应答同样由微信私钥签名，若不校验，中间人可伪造「支付成功」的查单结果。
+    /// 若应答序列号在本地没有对应密钥（例如平台证书轮换后尚未同步），只告警不阻断，避免业务整体中断。
+    /// </summary>
+    private void VerifyResponseSignature(HttpResponseMessage response, string body)
+    {
+        var signature = ReadHeader(response, "Wechatpay-Signature");
+        var timestamp = ReadHeader(response, "Wechatpay-Timestamp");
+        var nonce = ReadHeader(response, "Wechatpay-Nonce");
+        var serial = ReadHeader(response, "Wechatpay-Serial");
+        if (string.IsNullOrWhiteSpace(signature) ||
+            string.IsNullOrWhiteSpace(timestamp) ||
+            string.IsNullOrWhiteSpace(nonce) ||
+            string.IsNullOrWhiteSpace(serial))
+        {
+            logger.LogDebug("微信支付应答未带签名头，跳过应答验签");
+            return;
+        }
+
+        if (!CanVerifySerial(serial))
+        {
+            logger.LogWarning("微信支付应答序列号 {Serial} 在本地没有对应密钥，已跳过应答验签", serial);
+            return;
+        }
+
+        VerifyNotificationSignature(serial, $"{timestamp}\n{nonce}\n{body}\n", signature);
+    }
+
+    private static string? ReadHeader(HttpResponseMessage response, string name) =>
+        response.Headers.TryGetValues(name, out var values) ? values.FirstOrDefault() : null;
+
+    private bool CanVerifySerial(string serial)
+    {
+        var normalized = NormalizeSerial(serial);
+        if (normalized.StartsWith("PUB_KEY_ID_", StringComparison.OrdinalIgnoreCase))
+        {
+            return HasWeChatPayPublicKey &&
+                   (string.IsNullOrWhiteSpace(_options.WeChatPayPublicKeyId) ||
+                    string.Equals(
+                        normalized,
+                        NormalizeSerial(_options.WeChatPayPublicKeyId),
+                        StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!HasPlatformCertificate)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var certificate = LoadPlatformCertificate();
+            return string.Equals(
+                normalized,
+                NormalizeSerial(certificate.SerialNumber),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+    }
+
+    private void VerifyNotificationSignature(string serial, string message, string signature)
+    {
+        var normalizedSerial = NormalizeSerial(serial);
+        var messageBytes = Encoding.UTF8.GetBytes(message);
+        var signatureBytes = Convert.FromBase64String(signature);
+
+        if (normalizedSerial.StartsWith("PUB_KEY_ID_", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.IsNullOrWhiteSpace(_options.WeChatPayPublicKeyId) &&
+                !string.Equals(
+                    normalizedSerial,
+                    NormalizeSerial(_options.WeChatPayPublicKeyId),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new CryptographicException("微信支付公钥 ID 与配置不一致");
+            }
+            if (!HasWeChatPayPublicKey)
+            {
+                throw new InvalidOperationException("微信支付公钥尚未配置，请在商户平台下载公钥后配置 WeChatPayPublicKeyPath");
+            }
+
+            using var publicKey = LoadWeChatPayPublicKey();
+            if (!publicKey.VerifyData(
+                    messageBytes,
+                    signatureBytes,
+                    HashAlgorithmName.SHA256,
+                    RSASignaturePadding.Pkcs1))
+            {
+                throw new CryptographicException("微信支付回调签名校验失败");
+            }
+            return;
+        }
+
+        using var certificate = LoadPlatformCertificate();
+        if (!string.Equals(
+                normalizedSerial,
+                NormalizeSerial(certificate.SerialNumber),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CryptographicException("微信支付平台证书序列号不匹配");
+        }
+        using var certificateKey = certificate.GetRSAPublicKey()
+            ?? throw new CryptographicException("微信支付平台证书不包含 RSA 公钥");
+        if (!certificateKey.VerifyData(
+                messageBytes,
+                signatureBytes,
+                HashAlgorithmName.SHA256,
+                RSASignaturePadding.Pkcs1))
+        {
+            throw new CryptographicException("微信支付回调签名校验失败");
+        }
+    }
+
+    private RSA LoadWeChatPayPublicKey()
+    {
+        var pem = _options.WeChatPayPublicKeyPem;
+        if (string.IsNullOrWhiteSpace(pem) &&
+            !string.IsNullOrWhiteSpace(_options.WeChatPayPublicKeyPath) &&
+            File.Exists(_options.WeChatPayPublicKeyPath))
+        {
+            pem = File.ReadAllText(_options.WeChatPayPublicKeyPath);
+        }
+        if (string.IsNullOrWhiteSpace(pem))
+        {
+            throw new InvalidOperationException("微信支付公钥尚未配置");
+        }
+
+        var rsa = RSA.Create();
+        try
+        {
+            rsa.ImportFromPem(pem);
+            return rsa;
+        }
+        catch
+        {
+            rsa.Dispose();
+            throw new InvalidOperationException("微信支付公钥格式不正确，应为 BEGIN PUBLIC KEY 开头的 PEM 文件");
+        }
     }
 
     private X509Certificate2 LoadPlatformCertificate()
@@ -576,12 +787,20 @@ public sealed class WeChatPayService(
         }
     }
 
+    private void EnsureMerchantConfigured()
+    {
+        if (!IsPaymentConfigured)
+        {
+            throw new InvalidOperationException("微信支付商户配置不完整，请先配置商户号、证书序列号、API v3 Key 和商户私钥");
+        }
+    }
+
     private void EnsurePaymentConfigured()
     {
-        if (!IsPaymentConfigured ||
-            !Uri.TryCreate(_options.NotifyBaseUrl, UriKind.Absolute, out _))
+        EnsureMerchantConfigured();
+        if (!Uri.TryCreate(_options.NotifyBaseUrl, UriKind.Absolute, out _))
         {
-            throw new InvalidOperationException("微信支付配置不完整，请先配置商户号、证书序列号、API v3 Key、商户私钥和回调地址");
+            throw new InvalidOperationException("微信支付回调地址未配置（WeChat:NotifyBaseUrl），必须是公网 HTTPS 地址");
         }
     }
 

@@ -92,6 +92,7 @@ builder.Services.AddCors(options =>
 });
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IPasswordHasher<AdminUser>, PasswordHasher<AdminUser>>();
+builder.Services.AddHostedService<PaymentReconciliationService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -308,12 +309,8 @@ auth.MapPost("/miniapp-login", async (
         }
     }
 
-    var nickname = string.IsNullOrWhiteSpace(request.Nickname)
-        ? null
-        : request.Nickname.Trim();
-    var avatarUrl = string.IsNullOrWhiteSpace(request.AvatarUrl)
-        ? null
-        : request.AvatarUrl.Trim();
+    var nickname = NormalizeNickname(request.Nickname);
+    var avatarUrl = NormalizeAvatarUrl(request.AvatarUrl);
     if (user is null)
     {
         user = new WxUser
@@ -1304,10 +1301,10 @@ orders.MapPost("/{id:guid}/pay", async (
             cancellationToken);
         return Results.Ok(payment);
     }
-    catch (InvalidOperationException)
+    catch (InvalidOperationException ex)
     {
         return Results.Json(
-            new ApiError("wechat_pay_not_configured", "微信支付尚未完成服务端配置"),
+            new ApiError("wechat_pay_not_configured", ex.Message),
             statusCode: StatusCodes.Status503ServiceUnavailable);
     }
     catch (HttpRequestException)
@@ -1316,6 +1313,66 @@ orders.MapPost("/{id:guid}/pay", async (
             new ApiError("wechat_pay_unavailable", "微信支付接口暂时不可用"),
             statusCode: StatusCodes.Status503ServiceUnavailable);
     }
+});
+
+orders.MapGet("/{id:guid}/pay-status", async (
+    Guid id,
+    AppDbContext db,
+    ClaimsPrincipal principal,
+    WeChatPayService weChatPayService,
+    CancellationToken cancellationToken) =>
+{
+    var userId = GetUserId(principal);
+    if (userId is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var order = await db.BookingOrders.SingleOrDefaultAsync(
+        item => item.Id == id && item.WxUserId == userId.Value,
+        cancellationToken);
+    if (order is null)
+    {
+        return Results.NotFound(new ApiError("order_not_found", "订单不存在"));
+    }
+
+    // 已支付或非待支付订单直接返回，避免重复处理。
+    if (order.PaymentStatus == "Paid" || order.Status != OrderStatuses.PendingPayment)
+    {
+        return Results.Ok(ToOrderListItem(order, null, null));
+    }
+
+    try
+    {
+        // 回调未到达时主动向微信查询，避免本地开发环境没有公网 HTTPS 回调导致订单卡在待支付。
+        var result = await weChatPayService.QueryOrderAsync(order.OrderNumber, cancellationToken);
+        if (result is not null &&
+            string.Equals(result.TradeState, "SUCCESS", StringComparison.OrdinalIgnoreCase) &&
+            result.TotalAmountCents == order.TotalAmountCents)
+        {
+            await PaymentOrderService.MarkOrderPaidAsync(
+                db,
+                order,
+                result.TransactionId,
+                null,
+                cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Json(
+            new ApiError("wechat_pay_not_configured", ex.Message),
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    catch (HttpRequestException)
+    {
+        return Results.Json(
+            new ApiError("wechat_pay_unavailable", "微信支付接口暂时不可用"),
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    return Results.Ok(ToOrderListItem(order, null, null));
 });
 
 orders.MapPost("/{id:guid}/mock-pay", async (
@@ -1795,6 +1852,46 @@ static Guid? GetUserId(ClaimsPrincipal principal)
     var raw = principal.FindFirstValue(ClaimTypes.NameIdentifier)
         ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
     return Guid.TryParse(raw, out var id) ? id : null;
+}
+
+static string? NormalizeNickname(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return null;
+    }
+
+    var nickname = value.Trim();
+    return nickname.Length > 32 ? nickname[..32] : nickname;
+}
+
+// 小程序 chooseAvatar 返回的是临时路径（wxfile:// 或 http://tmp/...），
+// 这类地址换设备或重启后即失效，不能作为用户头像入库。
+static string? NormalizeAvatarUrl(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return null;
+    }
+
+    var avatarUrl = value.Trim();
+    if (avatarUrl.StartsWith("wxfile://", StringComparison.OrdinalIgnoreCase) ||
+        avatarUrl.StartsWith("http://tmp/", StringComparison.OrdinalIgnoreCase) ||
+        avatarUrl.StartsWith("https://tmp/", StringComparison.OrdinalIgnoreCase) ||
+        avatarUrl.Contains("/tmp/", StringComparison.OrdinalIgnoreCase))
+    {
+        return null;
+    }
+
+    var isSiteRelative = avatarUrl.StartsWith("/", StringComparison.Ordinal);
+    var isAbsolute = avatarUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                     avatarUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+    if (!isSiteRelative && !isAbsolute)
+    {
+        return null;
+    }
+
+    return avatarUrl.Length > 500 ? avatarUrl[..500] : avatarUrl;
 }
 
 static MiniappProfileResponse ToMiniappProfile(WxUser user, HttpRequest? request)

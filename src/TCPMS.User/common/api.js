@@ -1,13 +1,28 @@
 import { demoRooms, demoStores, prototypeImages } from './prototype.js'
 import { getApiToken, getBooking, logout, saveApiToken, saveOrders, upsertOrder } from './app-store.js'
 
-const defaultApiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5180/api/v1'
+// 真机预览/真机调试时手机访问不到 localhost，必须用开发机的局域网地址。
+// 换了 Wi-Fi 或路由器重新分配 IP 后，只改下面这一行。
+const devMachineApiBaseUrl = 'http://192.168.1.16:5180/api/v1'
+const devtoolsApiBaseUrl = 'http://localhost:5180/api/v1'
+
+// 延迟判断：模块加载早期 uni 可能还没就绪，取不到 platform 时按开发者工具处理。
+const resolveDefaultApiBaseUrl = () => {
+	if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL
+	try {
+		return uni.getSystemInfoSync().platform === 'devtools'
+			? devtoolsApiBaseUrl
+			: devMachineApiBaseUrl
+	} catch (error) {
+		return devtoolsApiBaseUrl
+	}
+}
 
 const getApiBaseUrl = () => {
 	try {
-		return uni.getStorageSync('tcpms.apiBaseUrl') || defaultApiBaseUrl
+		return uni.getStorageSync('tcpms.apiBaseUrl') || resolveDefaultApiBaseUrl()
 	} catch (error) {
-		return defaultApiBaseUrl
+		return resolveDefaultApiBaseUrl()
 	}
 }
 
@@ -449,6 +464,13 @@ export const payRemoteOrder = async (id) => {
 
 export const requestRemotePayment = async (id) => {
 	return apiRequest({ path: `/orders/${id}/pay`, method: 'POST' })
+}
+
+// 支付成功后向服务端确认：服务端会主动向微信查单，回调不可达时也能把订单置为已支付。
+export const confirmRemotePayment = async (id, context = {}) => {
+	const data = await apiRequest({ path: `/orders/${id}/pay-status` })
+	const mapped = mapOrder(data, context)
+	return upsertOrder(mapped)
 }
 
 export const refundRemoteOrder = async (id, amount, reason, context = {}) => {

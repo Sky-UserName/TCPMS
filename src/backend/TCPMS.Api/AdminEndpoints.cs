@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -69,6 +70,7 @@ public static class AdminEndpoints
                     hasApiV3Key = weChat.HasApiV3Key,
                     hasMerchantPrivateKey = weChat.HasMerchantPrivateKey,
                     hasPlatformCertificate = weChat.HasPlatformCertificate,
+                    hasWeChatPayPublicKey = weChat.HasWeChatPayPublicKey,
                     missing = weChat.Missing
                 },
                 amap = new
@@ -142,6 +144,12 @@ public static class AdminEndpoints
                 {
                     return Results.Json(
                         new ApiError("wechat_test_failed", ex.Message),
+                        statusCode: StatusCodes.Status503ServiceUnavailable);
+                }
+                catch (CryptographicException ex)
+                {
+                    return Results.Json(
+                        new ApiError("wechat_test_failed", $"应答验签失败：{ex.Message}"),
                         statusCode: StatusCodes.Status503ServiceUnavailable);
                 }
             }

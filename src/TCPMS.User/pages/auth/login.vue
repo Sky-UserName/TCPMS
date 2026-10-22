@@ -11,12 +11,25 @@
 
 			<view class="login-identity">
 				<button class="identity-avatar" open-type="chooseAvatar" hover-class="none" @chooseavatar="handleChooseAvatar">
-					<image v-if="avatarTempPath" :src="avatarTempPath" mode="aspectFill" />
+					<image v-if="avatarUrl" :src="avatarUrl" mode="aspectFill" />
 					<image v-else src="/static/logo.png" mode="aspectFit" />
 					<view class="identity-avatar-edit"><ProtoIcon name="edit" tone="white" :size="17" /></view>
 				</button>
-				<input v-model="nickname" class="identity-name" type="nickname" maxlength="32" placeholder="微信用户" />
-				<text class="identity-hint">授权后同步昵称、头像和订单信息</text>
+				<text class="identity-avatar-tip">{{ avatarUrl ? '点击可更换微信头像' : '点击获取微信头像' }}</text>
+				<input
+					v-model="nickname"
+					class="identity-name"
+					type="nickname"
+					maxlength="32"
+					placeholder="点击获取微信昵称"
+					placeholder-style="color:#8aa8a9;font-size:32rpx;font-weight:600"
+					confirm-type="done"
+					:focus="nicknameFocus"
+					@focus="handleNicknameFocus"
+					@blur="syncNickname"
+				/>
+				<text class="identity-hint">头像和昵称均读取自你的微信资料</text>
+				<text v-if="isDevtools" class="identity-dev-tip">开发者工具不显示「用微信昵称」，真机预览才会出现</text>
 			</view>
 
 			<view class="login-action-area">
@@ -68,7 +81,7 @@
 
 <script>
 	import ProtoIcon from '@/components/ProtoIcon.vue'
-	import { saveProfile, setLoggedIn } from '@/common/app-store.js'
+	import { getProfile, setLoggedIn } from '@/common/app-store.js'
 	import { miniappLogin, uploadMiniappAvatar } from '@/common/api.js'
 
 	export default {
@@ -78,7 +91,10 @@
 				status: 'idle',
 				phoneStatus: 'idle',
 				nickname: '',
+				avatarUrl: '',
 				avatarTempPath: '',
+				nicknameFocus: false,
+				isDevtools: false,
 				errorMessage: '',
 				agreements: {
 					service: false,
@@ -88,21 +104,71 @@
 		},
 		computed: {
 			canTriggerPhone() {
-				return this.agreements.service && this.agreements.thirdParty && this.status !== 'loading'
+				return this.agreements.service &&
+					this.agreements.thirdParty &&
+					Boolean(String(this.nickname || '').trim()) &&
+					this.status !== 'loading'
+			}
+		},
+		onLoad() {
+			this.prefillWechatProfile()
+			try {
+				this.isDevtools = uni.getSystemInfoSync()?.platform === 'devtools'
+			} catch (error) {
+				this.isDevtools = false
 			}
 		},
 		methods: {
+			// 微信已回收静默获取昵称头像的接口，这里只回填上一次从微信带过来的资料，避免重复选择。
+			prefillWechatProfile() {
+				const profile = getProfile()
+				const name = String(profile?.name || '').trim()
+				if (name && name !== '微信用户') this.nickname = name
+				const avatar = String(profile?.avatar || '')
+				const isTempPath = /^(wxfile:|https?:\/\/tmp\/)/i.test(avatar)
+				if (!isTempPath && (/^https?:\/\//i.test(avatar) || avatar.startsWith('/uploads/'))) {
+					this.avatarUrl = avatar
+				}
+			},
 			toggleAgreement(key) {
 				this.agreements[key] = !this.agreements[key]
 				this.errorMessage = ''
 			},
 			handleChooseAvatar(event) {
-				this.avatarTempPath = event?.detail?.avatarUrl || ''
+				const url = event?.detail?.avatarUrl || ''
+				if (!url) {
+					this.errorMessage = '没有取到微信头像，请再点一次'
+					return
+				}
+				this.avatarUrl = url
+				this.avatarTempPath = url
+				this.errorMessage = ''
+			},
+			handleNicknameFocus() {
+				this.nicknameFocus = true
+			},
+			syncNickname(event) {
+				this.nicknameFocus = false
+				const value = event?.detail?.value
+				// 开发者工具 blur 可能不回传 value，此时保留 v-model 已同步的内容。
+				if (typeof value === 'string') this.nickname = value.trim()
+			},
+			focusNickname() {
+				this.nicknameFocus = false
+				this.$nextTick(() => {
+					this.nicknameFocus = true
+				})
 			},
 			validateAuthorization() {
 				if (!this.agreements.service || !this.agreements.thirdParty) {
 					this.errorMessage = '请先阅读并同意相关协议'
 					this.status = 'error'
+					return
+				}
+				if (!String(this.nickname || '').trim()) {
+					this.errorMessage = '请点击昵称，从键盘上方选择你的微信昵称'
+					this.status = 'error'
+					this.focusNickname()
 					return
 				}
 				this.errorMessage = '请再次点击授权登录，并在微信弹窗中允许获取手机号'
@@ -120,25 +186,41 @@
 					this.status = 'error'
 					return
 				}
+				const nickname = String(this.nickname || '').trim()
+				if (!nickname) {
+					this.errorMessage = '请点击昵称，从键盘上方选择你的微信昵称'
+					this.status = 'error'
+					this.focusNickname()
+					return
+				}
 				this.status = 'loading'
 				this.errorMessage = ''
+				let profile = null
 				try {
-					const result = await miniappLogin({
-						nickname: this.nickname,
-						avatarUrl: this.avatarTempPath,
-						phoneCode
-					})
-					const profile = result.profile || {}
+					// 头像临时路径不能直接入库，先登录拿到 token，再上传换成正式地址。
+					const result = await miniappLogin({ nickname, phoneCode })
+					profile = result?.profile || {}
+					if (!profile.id) throw new Error('登录返回的用户资料不完整，请稍后重试')
 					setLoggedIn({
-						uid: profile.id || '',
-						name: profile.nickname || result.displayName || this.nickname || '微信用户',
+						uid: profile.id,
+						name: profile.nickname || nickname || result.displayName || '微信用户',
 						phone: profile.phoneNumber || '',
 						avatar: profile.avatarUrl || ''
 					})
 					if (this.avatarTempPath) {
 						try {
-							const avatarResult = await uploadMiniappAvatar(this.avatarTempPath)
-							if (avatarResult?.avatarUrl) saveProfile({ avatar: avatarResult.avatarUrl })
+							const uploaded = await uploadMiniappAvatar(this.avatarTempPath)
+							if (uploaded?.avatarUrl) {
+								profile = { ...profile, ...uploaded }
+								this.avatarTempPath = ''
+								this.avatarUrl = uploaded.avatarUrl
+								setLoggedIn({
+									uid: uploaded.id || profile.id,
+									name: uploaded.nickname || profile.nickname || nickname || '微信用户',
+									phone: uploaded.phoneNumber || profile.phoneNumber || '',
+									avatar: uploaded.avatarUrl
+								})
+							}
 						} catch (uploadError) {
 							uni.showToast({ title: '头像上传失败，可稍后重试', icon: 'none' })
 						}
@@ -275,9 +357,16 @@
 		border-radius: 50%;
 	}
 
+	.identity-avatar-tip {
+		margin-top: 14rpx;
+		color: #3f8b85;
+		font-size: 20rpx;
+		font-weight: 600;
+	}
+
 	.identity-name {
 		width: 300rpx;
-		margin-top: 28rpx;
+		margin-top: 16rpx;
 		padding: 0;
 		color: #163b40;
 		font-size: 38rpx;
@@ -290,6 +379,13 @@
 		margin-top: 12rpx;
 		color: #759091;
 		font-size: 19rpx;
+	}
+
+	.identity-dev-tip {
+		margin-top: 8rpx;
+		color: #b07a2a;
+		font-size: 18rpx;
+		line-height: 1.5;
 	}
 
 	.login-action-area {

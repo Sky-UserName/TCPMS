@@ -24,12 +24,21 @@ const storageKeys = {
 
 const clone = (value) => JSON.parse(JSON.stringify(value))
 
+const parseStored = (value) => {
+	if (typeof value !== 'string') return value
+	try {
+		return JSON.parse(value)
+	} catch (error) {
+		// 令牌等纯字符串不是 JSON，按原值返回，不能当成空值。
+		return value
+	}
+}
+
 const read = (key, fallback) => {
 	try {
 		const value = uni.getStorageSync(key)
 		if (value === undefined || value === null || value === '') return clone(fallback)
-		if (typeof value === 'string') return JSON.parse(value)
-		return clone(value)
+		return clone(parseStored(value))
 	} catch (error) {
 		return clone(fallback)
 	}
@@ -245,20 +254,23 @@ const defaultBooking = {
 
 export const getProfile = () => read(storageKeys.profile, defaultProfile)
 
+// 增量更新资料：先保留已缓存的资料，再用新字段覆盖，避免局部更新把登录态清空。
 export const saveProfile = (profile) => write(storageKeys.profile, {
 	...defaultProfile,
+	...getProfile(),
 	...profile
 })
 
 export const setLoggedIn = (profile = {}) => {
 	write(storageKeys.auth, true)
+	const current = getProfile()
 	return saveProfile({
 		...profile,
 		loggedIn: true,
-		uid: profile.uid || '',
-		name: profile.name || '微信用户',
-		phone: profile.phone || '',
-		avatar: profile.avatar || prototypeImages.avatar
+		uid: profile.uid || current.uid || '',
+		name: profile.name || current.name || '微信用户',
+		phone: profile.phone || current.phone || '',
+		avatar: profile.avatar || current.avatar || prototypeImages.avatar
 	})
 }
 

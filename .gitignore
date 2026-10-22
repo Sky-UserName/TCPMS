@@ -16,11 +16,26 @@ release/
 *.log
 *.zip
 
+# Runtime uploads and local assistant data
+src/backend/TCPMS.Api/wwwroot/uploads/
+.workbuddy/
+
 # Local configuration and secrets
 .env
 .env.*
 !.env.example
 **/appsettings.Local.json
+# 后端配置文件含数据库口令、JWT 密钥、微信 AppSecret / APIv3 Key，一律不入库。
+# 模板见 src/backend/TCPMS.Api/appsettings.example.json
+src/backend/TCPMS.Api/appsettings.json
+src/backend/TCPMS.Api/appsettings.Development.json
+src/backend/TCPMS.Api/appsettings.Production.json
+# 微信支付/商户证书与私钥：绝不入库
+**/apiclient_key*.pem
+**/apiclient_cert*.pem
+**/apiclient_cert*.p12
+**/pub_key*.pem
+**/*.p12
 
 # IDE and OS files
 .idea/
