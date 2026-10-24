@@ -114,7 +114,7 @@
 				}))
 			},
 			viewList() {
-				uni.navigateTo({ url: '/pages/store/list' })
+				uni.switchTab({ url: '/pages/store/list', fail: () => uni.reLaunch({ url: '/pages/store/list' }) })
 			},
 			goDetail() {
 				goPage(`/pages/store/detail?id=${this.selectedStore.id}`)

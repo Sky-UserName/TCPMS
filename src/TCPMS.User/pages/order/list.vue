@@ -1,6 +1,6 @@
 <template>
 	<view class="proto-page order-list-page">
-		<ProtoHeader title="我的订单" title-align="center" theme="green" />
+		<ProtoHeader title="我的订单" title-align="center" theme="green" :back="false"/>
 		<view class="order-search-box">
 			<ProtoIcon name="search" :size="34" />
 			<input v-model="searchText" placeholder="请输入房间名、订单号" placeholder-class="order-search-placeholder" />
@@ -108,6 +108,7 @@
 			}
 		},
 		async onShow() {
+			uni.hideTabBar({ animation: false, fail: () => {} })
 			await this.loadOrders()
 		},
 		methods: {

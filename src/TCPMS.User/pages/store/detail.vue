@@ -6,11 +6,11 @@
 			<button class="hero-back-button" hover-class="none" aria-label="返回" @tap="goBack">
 				<ProtoIcon name="back" tone="white" :size="38" />
 			</button>
-			<button class="hero-account-button" hover-class="none" aria-label="个人中心" @tap="goAccount">
+			<!-- <button class="hero-account-button" hover-class="none" aria-label="个人中心" @tap="goAccount">
 				<image v-if="account.loggedIn" :src="account.avatar" mode="aspectFill" />
 				<ProtoIcon v-else name="user" tone="white" :size="25" />
 				<text>{{ account.loggedIn ? account.name : '登录' }}</text>
-			</button>
+			</button> -->
 			<text class="hero-count">{{ store.images && store.images.length ? `1 / ${store.images.length}` : '门店图片' }} · 客房与环境</text>
 		</view>
 		<view v-if="showScrollHeader" class="store-scroll-header">
@@ -31,7 +31,7 @@
 			</view>
 			<view class="summary-review"><text>{{ store.reviews || 0 }} 条房客评价</text><ProtoIcon name="chevron-right" :size="20" /></view>
 			<view class="summary-location">
-				<ProtoIcon name="location" :size="24" />
+				<ProtoIcon name="location" :size="35" />
 				<view>
 					<text>距您 {{ store.distance }}</text>
 					<text v-if="store.city">{{ store.city }} · {{ store.address }}</text>
@@ -44,7 +44,7 @@
 
 		<view class="date-summary proto-card" @tap="goDate">
 			<view class="date-summary-heading">
-				<view class="inline-icon-text"><ProtoIcon name="calendar" :size="22" /><text>入住日期</text></view>
+				<view class="inline-icon-text"><ProtoIcon name="calendar" :size="35" /><text>入住日期</text></view>
 				<view class="proto-link" @tap.stop="goDate"><text>修改日期</text><ProtoIcon name="chevron-right" :size="20" /></view>
 			</view>
 			<view class="date-summary-content">
@@ -94,7 +94,7 @@
 
 		<view class="contact-grid proto-card">
 			<view class="contact-row">
-				<view class="contact-icon"><ProtoIcon name="phone" :size="26" /></view>
+				<!-- <view class="contact-icon"><ProtoIcon name="phone" :size="26" /></view> -->
 				<view>
 					<text class="contact-title">门店前台专线</text>
 					<text class="contact-sub">{{ store.phone || '暂无公开电话' }} · 点击显示</text>
@@ -102,7 +102,7 @@
 				<button class="proto-button-small proto-button-light" hover-class="none" @tap="callStore">拨打前台</button>
 			</view>
 			<view class="contact-row">
-				<view class="contact-icon"><ProtoIcon name="support" :size="26" /></view>
+				<!-- <view class="contact-icon"><ProtoIcon name="support" :size="26" /></view> -->
 				<view>
 					<text class="contact-title">在线客房管家</text>
 					<text class="contact-sub">实时响应退订、寄存与加被需求</text>
@@ -150,7 +150,7 @@
 
 		<view class="proto-card location-card">
 			<view class="card-heading"><text>周边位置</text><view class="proto-link" @tap="copyAddress"><text>复制地址</text></view></view>
-			<view class="detail-map-placeholder">
+			<view class="detail-map-placeholder" @tap="goMap">
 				<view class="map-mini-water"></view>
 				<view class="map-mini-road map-mini-road-one"></view>
 				<view class="map-mini-road map-mini-road-two"></view>
@@ -158,14 +158,17 @@
 				<view class="map-mini-marker"><ProtoIcon name="house" :size="30" /></view>
 				<text class="map-mini-label">{{ store.city || '郑州市' }} · 出行便利</text>
 			</view>
-			<view class="location-title-row"><text class="location-title">{{ store.address }}</text><text class="proto-link" @tap="goMap">地图</text></view>
+			<view class="location-title-row">
+				<text class="location-title">{{ store.address }}</text>
+				<!-- <text class="proto-link" @tap="goMap">地图</text> -->
+			</view>
 			<text class="location-note">步行可达餐饮、商圈与公共交通</text>
 		</view>
 
 		<view class="proto-bottom-actions">
-			<button class="detail-bottom-link" hover-class="none" @tap="goHome"><ProtoIcon name="home" :size="22" /><text>首页</text></button>
-			<button class="detail-bottom-link" hover-class="none" @tap="toggleFavorite"><ProtoIcon :name="favorite ? 'heart-filled' : 'heart'" :size="22" /><text>{{ favorite ? '已藏' : '收藏' }}</text></button>
-			<button class="detail-bottom-link" hover-class="none" @tap="shareStore"><ProtoIcon name="share" :size="22" /><text>分享</text></button>
+			<button class="detail-bottom-link" hover-class="none" @tap="goHome"><ProtoIcon name="home" :size="35" /><text>首页</text></button>
+			<button class="detail-bottom-link" hover-class="none" @tap="toggleFavorite"><ProtoIcon :name="favorite ? 'heart-filled' : 'heart'" :size="35" /><text>{{ favorite ? '已收藏' : '收藏' }}</text></button>
+			<button class="detail-bottom-link" hover-class="none" @tap="shareStore"><ProtoIcon name="share" :size="35" /><text>分享</text></button>
 			<button class="proto-primary-button store-primary-cta" hover-class="none" @tap="goRoomList"><text class="store-primary-cta-label">立即预订</text></button>
 		</view>
 	</view>
@@ -622,10 +625,21 @@
 		gap: 14rpx;
 	}
 
+	.inline-icon-text {
+		display: flex;
+		align-items: center;
+		gap: 6rpx;
+	}
+
 	.date-summary-side {
 		display: flex;
 		flex: 1;
 		flex-direction: column;
+	}
+
+	.date-summary-side:last-child {
+		align-items: flex-end;
+		text-align: right;
 	}
 
 	.date-summary-side > text:first-child {
@@ -786,7 +800,7 @@
 		margin: 0;
 		padding: 0 18rpx;
 		color: #ffffff !important;
-		background: var(--proto-primary) !important;
+		// background: var(--proto-primary) !important;
 		border-radius: 38rpx;
 		font-size: 22rpx;
 		white-space: nowrap;

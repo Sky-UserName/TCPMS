@@ -64,7 +64,7 @@
 <script>
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
-	import { goPage, goRoot, prototypeImages, showToast } from '@/common/prototype.js'
+	import { goPage, goTab, prototypeImages, showToast } from '@/common/prototype.js'
 	import { getApiToken, getFavorites, getGuests, getMerchantProfile, getOrders, getProfile, isLoggedIn, logout, setLoggedIn } from '@/common/app-store.js'
 	import { fetchMerchantPermissionMenus, fetchMiniappProfile, fetchRemoteOrders } from '@/common/api.js'
 
@@ -146,6 +146,7 @@
 			}
 		},
 		async onShow() {
+			uni.hideTabBar({ animation: false, fail: () => {} })
 			this.refreshData()
 			await this.refreshMiniappProfile()
 			this.loadMerchantEntries()
@@ -275,14 +276,14 @@
 				showToast(item.message || '暂无可用信息')
 			},
 			goOrders() {
-				goPage('/pages/order/list')
+				goTab('/pages/order/list')
 			},
 			goTodayOrder() {
 				if (this.todayOrder) {
 					goPage(`/pages/order/detail?id=${this.todayOrder.id}`)
 					return
 				}
-				goRoot('/pages/store/list')
+				goTab('/pages/store/list')
 			},
 			goLogin() {
 				goPage('/pages/auth/login')

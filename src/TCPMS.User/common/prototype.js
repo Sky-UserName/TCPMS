@@ -241,3 +241,11 @@ export const goPage = (path) => {
 export const goRoot = (path) => {
 	uni.reLaunch({ url: path })
 }
+
+/**
+ * 跳转 tabBar 页面（首页/门店/订单/消息/我的）必须用 switchTab，
+ * 用 goPage(navigateTo) 会报 "can not navigateTo a tabbar page"，用 goRoot(reLaunch) 会重建页面闪屏。
+ */
+export const goTab = (path) => {
+	uni.switchTab({ url: path, fail: () => uni.reLaunch({ url: path }) })
+}

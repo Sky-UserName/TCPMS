@@ -75,7 +75,7 @@
 					<view class="preference-row" @tap="openSheet('preference')">
 						<view class="preference-summary">
 							<view class="preference-title">
-								<ProtoIcon name="group" :size="28" />
+								<ProtoIcon name="group" :size="33" />
 								<text>人数 / 床数 / 居室数</text>
 							</view>
 							<view class="preference-tags">
@@ -88,7 +88,7 @@
 					</view>
 
 					<button class="search-submit" hover-class="none" :class="{ searching: searching }" @tap="handleSearch">
-						<ProtoIcon name="search" tone="white" :size="30" />
+						<ProtoIcon name="search" tone="white" :size="35" />
 						<text>{{ searching ? '正在查询房态...' : '查找民宿' }}</text>
 					</button>
 
@@ -328,6 +328,7 @@
 	import { demoRooms, demoStores, goPage, prototypeImages } from '@/common/prototype.js'
 	import { getBooking, recordRecent, saveBooking } from '@/common/app-store.js'
 	import { fetchStores } from '@/common/api.js'
+	import { setTabParams } from '@/common/tab-params.js'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
@@ -597,6 +598,7 @@
 			this.loadStores()
 		},
 		onShow() {
+			uni.hideTabBar({ animation: false, fail: () => {} })
 			this.applyBooking(getBooking())
 		},
 		computed: {
@@ -895,11 +897,13 @@
 					return
 				}
 				if (item.key === 'order') {
-					uni.reLaunch({ url: '/pages/order/list' })
+					uni.switchTab({ url: '/pages/order/list', fail: () => uni.reLaunch({ url: '/pages/order/list' }) })
 					return
 				}
 				if (item.key === 'quality') {
-					uni.navigateTo({ url: '/pages/store/list?type=quality' })
+					// 门店是 tab 页，query 会被丢弃，筛选意图改用内存中转传给 store/list
+					setTabParams({ type: 'quality' })
+					uni.switchTab({ url: '/pages/store/list', fail: () => uni.reLaunch({ url: '/pages/store/list' }) })
 					return
 				}
 				this.selectedPortal = item
@@ -913,7 +917,8 @@
 					return
 				}
 				if (key === 'house') {
-					uni.navigateTo({ url: '/pages/store/list?type=whole' })
+					setTabParams({ type: 'whole' })
+					uni.switchTab({ url: '/pages/store/list', fail: () => uni.reLaunch({ url: '/pages/store/list' }) })
 					return
 				}
 				this.showMessage('已为你准备好推荐房源')
@@ -1513,7 +1518,7 @@
 		color: #004f55;
 		background: $secondary-fixed;
 		border-radius: 18rpx;
-		font-size: 17rpx;
+		font-size: 19rpx;
 		font-weight: 700;
 		white-space: nowrap;
 	}

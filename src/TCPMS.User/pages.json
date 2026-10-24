@@ -305,6 +305,34 @@
 			}
 		}
 	],
+	"tabBar": {
+		"color": "#6f8085",
+		"selectedColor": "#006a6a",
+		"backgroundColor": "#ffffff",
+		"borderStyle": "black",
+		"list": [
+			{
+				"pagePath": "pages/index/index",
+				"text": "首页"
+			},
+			{
+				"pagePath": "pages/store/list",
+				"text": "门店"
+			},
+			{
+				"pagePath": "pages/order/list",
+				"text": "订单"
+			},
+			{
+				"pagePath": "pages/message/list",
+				"text": "消息"
+			},
+			{
+				"pagePath": "pages/me/index",
+				"text": "我的"
+			}
+		]
+	},
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
 		"navigationBarTitleText": "TCPMS",

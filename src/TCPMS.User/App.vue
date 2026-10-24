@@ -2,9 +2,11 @@
 	export default {
 		onLaunch: function() {
 			console.log('TCPMS user app launch')
+			uni.hideTabBar({ animation: false, fail: () => {} })
 		},
 		onShow: function() {
 			console.log('TCPMS user app show')
+			uni.hideTabBar({ animation: false, fail: () => {} })
 		},
 		onHide: function() {
 			console.log('TCPMS user app hide')

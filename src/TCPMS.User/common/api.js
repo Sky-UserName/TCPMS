@@ -4,7 +4,7 @@ import { getApiToken, getBooking, logout, saveApiToken, saveOrders, upsertOrder 
 // 真机预览/真机调试时手机访问不到 localhost，必须用开发机的局域网地址。
 // 换了 Wi-Fi 或路由器重新分配 IP 后，只改下面这一行。
 const devMachineApiBaseUrl = 'http://192.168.1.16:5180/api/v1'
-const devtoolsApiBaseUrl = 'http://localhost:5180/api/v1'
+const devtoolsApiBaseUrl = 'http://39.96.200.62/api/v1'
 
 // 延迟判断：模块加载早期 uni 可能还没就绪，取不到 platform 时按开发者工具处理。
 const resolveDefaultApiBaseUrl = () => {

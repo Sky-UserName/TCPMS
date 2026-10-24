@@ -82,10 +82,9 @@ image {
 	z-index: 30;
 	display: flex;
 	align-items: center;
-	min-height: 112rpx;
-	height: 112rpx;
-	padding: 20rpx 24rpx 12rpx;
-	padding-top: 20rpx;
+	min-height: 88rpx;
+	height: 88rpx;
+	padding: 0 24rpx;
 	background: #f4fafb;
 	background: rgba(244, 250, 251, 0.98);
 	border-bottom: 1rpx solid rgba(197, 199, 202, 0.36);
@@ -127,13 +126,16 @@ image {
 .proto-header-title-center {
 	position: absolute;
 	left: 50%;
-	top: 50%;
+	top: auto;
+	bottom: 0;
+	height: 88rpx;
+	line-height: 88rpx;
 	width: 420rpx;
 	max-width: calc(100% - 300rpx);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	transform: translate(-50%, -50%);
+	transform: translateX(-50%);
 }
 
 .proto-header-icon-button,
@@ -447,7 +449,7 @@ image {
 	flex: 1;
 	flex-direction: column;
 	justify-content: center;
-	height: 82rpx;
+	height: 88rpx;
 	padding: 0;
 	color: var(--proto-muted);
 	background: transparent;
