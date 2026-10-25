@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using TCPMS.Api.Contracts;
 using TCPMS.Api.Domain;
 
@@ -8,10 +9,14 @@ namespace TCPMS.Api.Infrastructure;
 
 public static class SeedData
 {
+    // 初始管理员口令优先从配置读取，避免把固定口令写死在代码里。
+    private const string DefaultAdminPassword = "Admin@123456";
+
     public static async Task InitializeAsync(IServiceProvider services)
     {
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var configuration = scope.ServiceProvider.GetService<IConfiguration>();
         var passwordHasher = new PasswordHasher<AdminUser>();
 
         await db.Database.EnsureCreatedAsync();
@@ -43,6 +48,12 @@ public static class SeedData
         }
         var adminRole = rolesByCode[RoleCodes.SystemAdmin];
 
+        var seedAdminPassword = configuration?.GetValue<string>("Seed:AdminPassword");
+        if (string.IsNullOrWhiteSpace(seedAdminPassword))
+        {
+            seedAdminPassword = DefaultAdminPassword;
+        }
+
         var admin = await db.AdminUsers.SingleOrDefaultAsync(x => x.Username == "admin");
         if (admin is null)
         {
@@ -53,7 +64,9 @@ public static class SeedData
                 DisplayName = "系统管理员",
                 IsEnabled = true
             };
-            admin.PasswordHash = passwordHasher.HashPassword(admin, "Admin@123456");
+            admin.PasswordHash = passwordHasher.HashPassword(admin, seedAdminPassword);
+            // 初始口令一律标记为「必须修改」，登录后不完成改密无法使用管理接口。
+            admin.MustChangePassword = true;
             db.AdminUsers.Add(admin);
             db.AdminUserRoles.Add(new AdminUserRole
             {

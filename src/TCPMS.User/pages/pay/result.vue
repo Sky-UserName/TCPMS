@@ -8,7 +8,7 @@
 			</view>
 			<text class="pay-title">{{ status === 'success' ? '支付成功' : status === 'query' ? '正在确认支付结果' : '待完成支付' }}</text>
 			<view class="pay-status-pill"><ProtoIcon :name="status === 'success' ? 'check-circle' : status === 'query' ? 'refresh' : 'wallet'" :size="17" /><text>{{ status === 'success' ? '订单已提交 · 门店快速确认中' : status === 'query' ? '正在查询微信支付状态，请稍候' : '请确认订单信息后完成微信支付' }}</text></view>
-			<text class="pay-amount">¥{{ order.price }}.00</text>
+			<text class="pay-amount">¥{{ formatYuan(order.price) }}</text>
 			<text class="pay-method">微信安全支付</text>
 		</view>
 
@@ -53,28 +53,44 @@
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
-	import { demoOrders, goPage, goRoot, prototypeImages, showToast } from '@/common/prototype.js'
-	import { findOrder, getOrders, updateOrder } from '@/common/app-store.js'
-	import { fetchRemoteOrder, payRemoteOrder, confirmRemotePayment, requestRemotePayment } from '@/common/api.js'
+	import { goPage, goRoot, prototypeImages, showToast } from '@/common/prototype.js'
+	import { findOrder, getOrders } from '@/common/app-store.js'
+	import { fetchRemoteOrder, confirmRemotePayment, requestRemotePayment } from '@/common/api.js'
+	import { formatYuan } from '@/common/format.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
 		data() {
 			return {
 				status: 'pending',
-				order: demoOrders[0],
+				// 没有取到真实订单时给一个空壳，避免模板直接读 demo 数据。
+				order: {
+					id: '',
+					price: 0,
+					store: '',
+					room: '',
+					date: '',
+					nights: 1,
+					roomCount: 1,
+					guest: ''
+				},
 				roomImage: prototypeImages.roomOne,
 			}
 		},
 		onLoad(options) {
 			const order = options && options.orderId ? findOrder(options.orderId) : getOrders()[0]
-			if (order) {
-				this.order = order
-				this.roomImage = order.image || prototypeImages.roomOne
-				if (order.statusKey === 'stay' || order.statusKey === 'done') this.status = 'success'
+			if (!order) {
+				showToast('订单不存在或已失效')
+				goRoot('/pages/index/index')
+				return
 			}
+
+			this.order = order
+			this.roomImage = order.image || prototypeImages.roomOne
+			if (order.statusKey === 'stay' || order.statusKey === 'done') this.status = 'success'
 		},
 		methods: {
+			formatYuan,
 			goOrder() {
 				goPage(`/pages/order/detail?id=${this.order.id}`)
 			},
@@ -83,60 +99,53 @@
 			},
 			async payOrder() {
 				if (this.status === 'query') return
+				const orderId = String(this.order.id || '')
+				// 只有服务端真实订单才能发起支付，本地草稿单不再走任何降级逻辑。
+				if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(orderId)) {
+					showToast('订单尚未提交成功，请返回重新下单')
+					return
+				}
+
 				this.status = 'query'
-				let order
-				if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(this.order.id))) {
-					try {
-						const payment = await requestRemotePayment(this.order.id)
-						await new Promise((resolve, reject) => {
-							uni.requestPayment({
-								provider: 'wxpay',
-								timeStamp: payment.timeStamp,
-								nonceStr: payment.nonceStr,
-								package: payment.package,
-								signType: payment.signType,
-								paySign: payment.paySign,
-								success: resolve,
-								fail: reject
-							})
+				try {
+					const payment = await requestRemotePayment(orderId)
+					await new Promise((resolve, reject) => {
+						uni.requestPayment({
+							provider: 'wxpay',
+							timeStamp: payment.timeStamp,
+							nonceStr: payment.nonceStr,
+							package: payment.package,
+							signType: payment.signType,
+							paySign: payment.paySign,
+							success: resolve,
+							fail: reject
 						})
-						for (let attempt = 0; attempt < 5; attempt += 1) {
-							// 先让服务端主动查单，查不到再读本地订单状态。
-							let confirmed = await confirmRemotePayment(this.order.id, this.order).catch(() => null)
-							if (!confirmed) {
-								confirmed = await fetchRemoteOrder(this.order.id, this.order).catch(() => null)
-							}
-							if (confirmed) {
-								order = confirmed
-								if (confirmed.paymentStatus === 'Paid' || confirmed.statusKey === 'stay') break
-							}
-							await new Promise((resolve) => setTimeout(resolve, 800))
-						}
-					} catch (error) {
-						if (error?.code === 'wechat_pay_not_configured') {
-							try {
-								order = await payRemoteOrder(this.order.id)
-							} catch (fallbackError) {
-								this.status = 'pending'
-								showToast(fallbackError?.message || '微信支付尚未配置')
-								return
-							}
-						} else {
-							this.status = 'pending'
-							showToast(error?.errMsg?.includes('cancel') ? '已取消支付' : error?.message || '微信支付失败')
-							return
-						}
-					}
-				}
-				if (!order) {
-					order = updateOrder(this.order.id, {
-						status: '已确认·待入住',
-						statusKey: 'stay',
-						action: '申请退款',
-						paidAt: new Date().toISOString()
 					})
+				} catch (error) {
+					this.status = 'pending'
+					showToast(error?.errMsg?.includes('cancel') ? '已取消支付' : error?.message || '微信支付失败')
+					return
 				}
-				if (order) this.order = order
+
+				// 支付成功后只认服务端状态：先让服务端主动查单，查不到再读订单详情。
+				let confirmedOrder = null
+				for (let attempt = 0; attempt < 5; attempt += 1) {
+					confirmedOrder = await confirmRemotePayment(orderId, this.order).catch(() => null)
+					if (!confirmedOrder) {
+						confirmedOrder = await fetchRemoteOrder(orderId, this.order).catch(() => null)
+					}
+					if (confirmedOrder && confirmedOrder.paymentStatus === 'Paid') break
+					await new Promise((resolve) => setTimeout(resolve, 800))
+				}
+
+				if (!confirmedOrder || confirmedOrder.paymentStatus !== 'Paid') {
+					// 微信已扣款但服务端还没确认，交给「我的订单」和支付对账任务兜底，不在本地伪造成功。
+					this.status = 'pending'
+					showToast('支付结果确认中，请稍后在“我的订单”查看')
+					return
+				}
+
+				this.order = confirmedOrder
 				this.status = 'success'
 			},
 			goService() {

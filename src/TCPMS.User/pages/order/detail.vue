@@ -72,10 +72,10 @@
 				<view class="payment-code-row"><view class="payment-code-label"><ProtoIcon name="calendar" :size="18" /><text>下单时间</text></view><text class="payment-value">{{ order.createdAt ? order.createdAt.slice(0, 19).replace('T', ' ') : '刚刚' }}</text></view>
 				<view class="payment-code-row"><view class="payment-code-label"><ProtoIcon name="receipt" :size="18" /><text>支付流水号</text></view><text class="payment-value">{{ paymentId }}</text></view>
 			</view>
-			<view class="fee-row"><text>房费总计（{{ order.roomCount || 1 }}间 × {{ order.nights || 1 }}晚）</text><text>¥{{ roomSubtotal }}</text></view>
-			<view class="fee-row"><text>平台初秋连住立减</text><text class="discount">-¥{{ discount }}</text></view>
+			<view class="fee-row"><text>房费总计（{{ order.roomCount || 1 }}间 × {{ order.nights || 1 }}晚）</text><text>¥{{ formatYuan(roomSubtotal) }}</text></view>
+			<view class="fee-row"><text>平台初秋连住立减</text><text class="discount">-¥{{ formatYuan(discount) }}</text></view>
 			<view class="fee-row"><text>住宿押金（微信支付分信用免押）</text><text>¥0.00</text></view>
-			<view class="fee-total"><text>实付金额</text><text class="strong">¥{{ order.price }}.00</text></view>
+			<view class="fee-total"><text>实付金额</text><text class="strong">¥{{ formatYuan(order.price) }}</text></view>
 		</view>
 
 		<view class="detail-cancel proto-card">
@@ -103,6 +103,7 @@
 	import { demoOrders, goPage, prototypeImages, showToast } from '@/common/prototype.js'
 	import { findOrder, getOrders, hasOrderReview, resolveReviewTarget } from '@/common/app-store.js'
 	import { fetchRemoteOrder } from '@/common/api.js'
+	import { formatYuan } from '@/common/format.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
@@ -161,6 +162,7 @@
 			this.loadOrder(this.order.id)
 		},
 		methods: {
+			formatYuan,
 			async loadOrder(id) {
 				const order = id ? findOrder(id) : getOrders()[0]
 				if (order) {

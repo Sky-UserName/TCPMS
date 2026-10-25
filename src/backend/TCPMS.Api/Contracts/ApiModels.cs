@@ -2,6 +2,16 @@ namespace TCPMS.Api.Contracts;
 
 public sealed record LoginRequest(string Username, string Password);
 
+// 管理后台登录响应比小程序多一个「是否必须先改初始密码」标记。
+public sealed record AdminLoginResponse(
+    string Token,
+    DateTime ExpiresAt,
+    string UserType,
+    string DisplayName,
+    bool MustChangePassword);
+
+public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
 public sealed record MiniappLoginRequest(
     string? Code,
     string? DevOpenId,

@@ -27,6 +27,7 @@
 			<button class="filter-tab" :class="{ active: featureFilter }" hover-class="none" @tap="filterVisible = true"><text>筛选</text><ProtoIcon name="chevron-down" :size="17" /></button>
 		</view>
 		<view v-if="catalogState === 'demo'" class="catalog-sync-notice">接口暂不可用，当前展示演示数据</view>
+		<view v-if="catalogState === 'error'" class="catalog-sync-notice">门店加载失败，请检查网络后重试</view>
 
 		<ProtoEmptyState v-if="!filteredStores.length" />
 
@@ -88,6 +89,7 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { demoStores, goPage, showToast } from '@/common/prototype.js'
+	import { ALLOW_DEMO_DATA } from '@/common/env.js'
 	import { fetchStores } from '@/common/api.js'
 	import { getBooking } from '@/common/app-store.js'
 	import { takeTabParams } from '@/common/tab-params.js'
@@ -96,7 +98,7 @@
 		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
-				stores: demoStores,
+				stores: ALLOW_DEMO_DATA ? demoStores : [],
 				typeFilter: '',
 				catalogState: 'loading',
 				booking: getBooking(),
@@ -187,6 +189,12 @@
 						this.locationText = `已加载 ${stores.length} 家在线门店，当前展示全部城市`
 					}
 				} catch (error) {
+					// 生产环境不再用演示门店兜底，接口失败就展示空列表并提示重试。
+					if (!ALLOW_DEMO_DATA) {
+						this.stores = []
+						this.catalogState = 'error'
+						return
+					}
 					this.catalogState = 'demo'
 				}
 			},

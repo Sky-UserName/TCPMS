@@ -95,6 +95,9 @@ public class AdminUser
     public string PasswordHash { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public bool IsEnabled { get; set; } = true;
+    // 初始密码由超管设置时置 true，登录后必须先改密才能使用其他接口。
+    public bool MustChangePassword { get; set; }
+    public DateTime? PasswordChangedAt { get; set; }
     public Guid? StoreId { get; set; }
     public string? PhoneNumber { get; set; }
     public DateTime? LastLoginAt { get; set; }

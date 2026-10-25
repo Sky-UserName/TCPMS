@@ -29,23 +29,32 @@ cd .\backend
 $env:ASPNETCORE_ENVIRONMENT = "Production"
 $env:ConnectionStrings__Default = "Server=127.0.0.1;Port=3306;Database=tcpms;User=tcpms;Password=替换为生产密码;CharSet=utf8mb4"
 $env:Jwt__SecretKey = "替换为至少 32 字节的生产密钥"
-$env:Swagger__Enabled = "true"
+$env:Seed__AdminPassword = "首次部署时使用的管理员初始口令"
+$env:Cors__AllowedOrigins__0 = "https://admin.example.com"
 $env:ASPNETCORE_URLS = "http://0.0.0.0:5180"
 dotnet .\TCPMS.Api.dll
 ~~~
+
+`Cors__AllowedOrigins__0/1/...` 是管理后台域名白名单，生产不配置时后端只允许同源访问。`Seed__AdminPassword` 只在首次建库时创建 `admin` 账号时生效，且该账号首次登录会被强制改密。
+
+已有数据库升级到本版本前，先执行 `docs/sql/2026-10-25_admin_password_policy.sql` 补上管理员密码策略字段。
 
 如果使用 IIS、Nginx 或 systemd，请将以上配置转换为对应的应用环境变量或服务配置，不要把真实密码和 JWT 密钥写入 Git。
 
 ## 3. Swagger 地址
 
-后端启动后：
+生产环境默认关闭 Swagger（`Swagger:Enabled=false`），根路径 `/` 也不再跳转。需要临时查看时显式打开：
+
+~~~powershell
+$env:Swagger__Enabled = "true"
+~~~
+
+打开后：
 
 - Swagger UI：`http://<API域名>/swagger`
 - OpenAPI JSON：`http://<API域名>/swagger/v1/swagger.json`
 
-根地址 `/` 会跳转到 Swagger UI。管理后台调用的 API 地址由 `-ApiBaseUrl` 在构建时确定。
-
-如果不希望公网访问接口文档，可以将 `Swagger__Enabled` 设为 `false`，或仅在网关、内网和 VPN 中开放 `/swagger`。
+管理后台调用的 API 地址由 `-ApiBaseUrl` 在构建时确定。
 
 ## 4. 部署管理后台
 

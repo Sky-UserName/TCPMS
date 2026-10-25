@@ -46,7 +46,8 @@ Authorization: Bearer <JWT>
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
 | GET | /api/v1/health | 无 | 返回服务、环境、数据库提供程序和 UTC 时间 |
-| POST | /api/v1/auth/login | 无 | 后台账号登录，Body 为 LoginRequest |
+| POST | /api/v1/auth/login | 无 | 后台账号登录，返回 token 与 `mustChangePassword`；失败 5 次锁定 10 分钟（429 `login_locked`） |
+| POST | /api/v1/auth/change-password | admin | 管理员自助改密，Body 为 `{ currentPassword, newPassword }`，成功换发新 token |
 | POST | /api/v1/auth/miniapp-login | 无 | 小程序登录，生产环境传微信 login code，Body 为 MiniappLoginRequest |
 | GET | /api/v1/auth/me | miniapp | 查询当前微信用户资料 |
 | POST | /api/v1/auth/phone | miniapp | 使用微信手机号授权凭证绑定手机号 |

@@ -93,6 +93,7 @@ public sealed record AdminUserItem(
     Guid? StoreId,
     string? StoreName,
     bool IsEnabled,
+    bool MustChangePassword,
     DateTime? LastLoginAt,
     IReadOnlyList<string> Roles);
 

@@ -40,8 +40,9 @@ Invoke-WebRequest http://localhost:5180/swagger/v1/swagger.json
 
 | 项目 | 现状 |
 | --- | --- |
-| 数据库 | 开发默认 InMemory；生产需 MySQL 迁移和备份 |
-| 登录 | 开发可用 devOpenId；生产需微信登录和手机号授权 |
+| 数据库 | 开发默认 InMemory；生产需 MySQL 迁移和备份。项目用 `EnsureCreated` 建库，没有 EF 迁移，线上加字段要走 `docs/sql/` 下的脚本 |
+| 登录 | 开发可用 devOpenId；生产需微信登录和手机号授权。后台账号初始密码由超管设置，首次登录强制改密（`MustChangePassword`），连续失败 5 次锁定 10 分钟 |
+| 订单 | 未支付订单超过 15 分钟由后台任务自动关单并释放锁定库存（`OrderExpiryService`，每分钟一次） |
 | 支付 | 已接入微信 JSAPI 下单、回调验签解密、退款和回调幂等；生产需填写证书配置并联调 |
 | 图片 | 当前含原型演示资源；生产需对象存储和审核 |
 | 地图 | 小程序端已用微信原生 map 渲染门店标记，高德提供逆地理编码与地点检索；房型详情页有可拖动的周边地图（`place/around` POI 标记 + 标签定位）；需配置小程序 Key、`restapi.amap.com` 合法域名和隐私声明 |

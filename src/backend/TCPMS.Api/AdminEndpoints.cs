@@ -1377,6 +1377,8 @@ public static class AdminEndpoints
                 IsEnabled = request.IsEnabled
             };
             user.PasswordHash = passwordHasher.HashPassword(user, request.Password!);
+            // 超管设置的初始密码，要求本人首次登录后自行修改。
+            user.MustChangePassword = true;
             db.AdminUsers.Add(user);
 
             var roleIds = request.RoleIds ?? Array.Empty<Guid>();
@@ -1427,6 +1429,9 @@ public static class AdminEndpoints
             if (!string.IsNullOrWhiteSpace(request.Password))
             {
                 user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
+                // 超管重置密码后同样要求本人改密。
+                user.MustChangePassword = true;
+                user.PasswordChangedAt = null;
             }
 
             db.AdminUserRoles.RemoveRange(user.UserRoles);
@@ -4059,6 +4064,7 @@ public static class AdminEndpoints
             user.StoreId,
             user.Store?.Name,
             user.IsEnabled,
+            user.MustChangePassword,
             user.LastLoginAt,
             user.UserRoles
                 .Where(x => x.Role is not null)

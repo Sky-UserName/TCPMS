@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5180/api/v1'
+// 默认走同源 /api/v1，开发和预览时由 vite 代理转发到后端；
+// 管理后台和 API 分域名部署时用 VITE_API_BASE_URL 覆盖。
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/+$/, '')
 const TOKEN_KEY = 'tcpms.admin.token'
 
 export function getToken() {
@@ -32,9 +34,15 @@ export async function request(path, options = {}) {
   }
 
   if (!response.ok) {
+    // 令牌失效统一清理，交给 App 层弹出登录页，避免各页面各自处理。
+    if (response.status === 401) {
+      clearToken()
+      window.dispatchEvent(new CustomEvent('tcpms:unauthorized'))
+    }
     const message = body?.message || body?.title || `请求失败（${response.status}）`
     const error = new Error(message)
     error.status = response.status
+    error.code = body?.code
     error.body = body
     throw error
   }

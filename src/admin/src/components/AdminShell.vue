@@ -76,10 +76,29 @@
         </button>
         <div v-if="profileVisible" class="profile-menu">
           <button type="button" @click="navigate('users')">账号与权限</button>
+          <button type="button" @click="openPasswordDialog">修改密码</button>
           <button type="button" @click="$emit('logout')">退出登录</button>
         </div>
       </div>
     </aside>
+
+    <el-dialog v-model="passwordVisible" title="修改密码" width="380px" append-to-body>
+      <el-form ref="passwordFormRef" :model="passwordForm" :rules="passwordRules" label-position="top">
+        <el-form-item prop="currentPassword" label="当前密码">
+          <el-input v-model="passwordForm.currentPassword" type="password" show-password />
+        </el-form-item>
+        <el-form-item prop="newPassword" label="新密码">
+          <el-input v-model="passwordForm.newPassword" type="password" show-password placeholder="至少 8 位，需包含字母和数字" />
+        </el-form-item>
+        <el-form-item prop="confirmPassword" label="确认新密码">
+          <el-input v-model="passwordForm.confirmPassword" type="password" show-password />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="passwordVisible = false">取消</el-button>
+        <el-button type="primary" :loading="passwordSaving" @click="submitPassword">保存</el-button>
+      </template>
+    </el-dialog>
 
     <section class="main-shell">
       <header class="topbar">
@@ -156,7 +175,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElNotification } from 'element-plus'
 import {
   ArrowDown,
@@ -181,6 +200,7 @@ import {
   Wallet
 } from '@element-plus/icons-vue'
 import { refreshNotifications, useAdminNotifications } from '../notifications'
+import { post, setToken } from '../api'
 
 const props = defineProps({
   user: { type: Object, default: null },
@@ -190,6 +210,47 @@ const emit = defineEmits(['navigate', 'logout'])
 const collapsed = ref(false)
 const menuQuery = ref('')
 const profileVisible = ref(false)
+const passwordVisible = ref(false)
+const passwordSaving = ref(false)
+const passwordFormRef = ref()
+const passwordForm = reactive({ currentPassword: '', newPassword: '', confirmPassword: '' })
+const passwordRules = {
+  currentPassword: [{ required: true, message: '请输入当前密码', trigger: 'blur' }],
+  newPassword: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    {
+      validator: (rule, value, callback) => {
+        if (!value || value.length < 8 || value.length > 64) {
+          callback(new Error('密码长度需在 8 到 64 位之间'))
+          return
+        }
+        if (!/[A-Za-z]/.test(value) || !/\d/.test(value)) {
+          callback(new Error('密码需同时包含字母和数字'))
+          return
+        }
+        if (value === passwordForm.currentPassword) {
+          callback(new Error('新密码不能与当前密码相同'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur'
+    }
+  ],
+  confirmPassword: [
+    { required: true, message: '请再次输入新密码', trigger: 'blur' },
+    {
+      validator: (rule, value, callback) => {
+        if (value !== passwordForm.newPassword) {
+          callback(new Error('两次输入的新密码不一致'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur'
+    }
+  ]
+}
 const helpVisible = ref(false)
 const notificationVisible = ref(false)
 const firstNoticeVisible = ref(false)
@@ -272,6 +333,32 @@ const roleLabel = computed(() => props.user?.roles?.[0] || '总部管理员')
 const todayLabel = computed(() => new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' }).format(new Date()))
 
 function navigate(key) { emit('navigate', key); profileVisible.value = false }
+function openPasswordDialog() {
+  profileVisible.value = false
+  passwordForm.currentPassword = ''
+  passwordForm.newPassword = ''
+  passwordForm.confirmPassword = ''
+  passwordVisible.value = true
+}
+async function submitPassword() {
+  const valid = await passwordFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  passwordSaving.value = true
+  try {
+    const result = await post('/auth/change-password', {
+      currentPassword: passwordForm.currentPassword,
+      newPassword: passwordForm.newPassword
+    })
+    // 后端会换发 token，旧 token 里仍带「必须改密」标记。
+    if (result?.token) setToken(result.token)
+    passwordVisible.value = false
+    ElMessage.success('密码已更新')
+  } catch (error) {
+    ElMessage.error(error.message || '修改密码失败')
+  } finally {
+    passwordSaving.value = false
+  }
+}
 function toggleGroup(key) { expandedGroups.value[key] = !expandedGroups.value[key] }
 function notificationIcon(type) {
   return ({ order: Tickets, refund: Wallet, store: Location, room: House, review: CollectionTag, withdrawal: Wallet })[type] || BellFilled

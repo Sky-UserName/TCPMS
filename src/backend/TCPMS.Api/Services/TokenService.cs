@@ -27,7 +27,8 @@ public sealed class TokenService(IOptions<JwtOptions> options)
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Name, user.Username),
             new("display_name", user.DisplayName),
-            new("user_type", "admin")
+            new("user_type", "admin"),
+            new("must_change_password", user.MustChangePassword ? "true" : "false")
         };
         claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
         if (user.StoreId.HasValue)

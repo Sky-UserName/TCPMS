@@ -186,3 +186,21 @@ npm run build
 - 关闭生产环境 mock-pay 和不受控本地演示回退。
 - 为 JWT、数据库、地图和支付凭证配置密钥托管。
 - 通过 Swagger 导出并评审对外接口，再发布前端。
+
+## 10. 生产环境安全默认值
+
+这一版把几处「开发方便、上线危险」的默认行为改掉了，部署时注意对应配置：
+
+| 项 | 现在的行为 | 需要做什么 |
+| --- | --- | --- |
+| 首次登录 | 种子管理员和超管重置过密码的账号带 `MustChangePassword`，不改密无法调用管理接口（返回 403 `password_change_required`） | 无，登录页会自动进入改密步骤 |
+| 初始管理员口令 | 可用 `Seed:AdminPassword` 覆盖，未配置时用内置默认值 | 生产建议显式配置，避免沿用默认口令 |
+| 登录失败 | 同一账号或同一 IP 10 分钟内失败 5 次锁定 10 分钟，返回 429 `login_locked` | 无 |
+| 未支付订单 | 每分钟扫描一次，超过 `PaymentExpiresAt` 的订单自动取消并回滚锁定库存 | 无，多实例部署时依赖状态判断保证幂等 |
+| CORS | 开发放开；生产只允许 `Cors:AllowedOrigins` 中的来源，未配置则只允许同源 | 生产必须配置管理后台域名 |
+| Swagger | 生产默认关闭（`Swagger:Enabled=false`） | 需要临时查看时用环境变量打开 |
+| 演示数据 | 小程序 `VITE_ALLOW_DEMO` 控制，生产构建默认关闭，接口失败展示空态 | 需要演示时打包加 `VITE_ALLOW_DEMO=true` |
+| 管理后台接口地址 | 默认同源 `/api/v1`，开发由 vite 代理到 5180 | 分域名部署时用 `VITE_API_BASE_URL` 覆盖 |
+
+数据库字段变更（`MustChangePassword`、`PasswordChangedAt`）需要先执行 `docs/sql/2026-10-25_admin_password_policy.sql`，因为项目用的是 `EnsureCreated`，已有库不会自动加列。
+

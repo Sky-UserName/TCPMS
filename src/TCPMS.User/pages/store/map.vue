@@ -96,6 +96,7 @@
 	import { demoStores, goPage, showToast } from '@/common/prototype.js'
 	import { fetchStores, fetchNearbyStores } from '@/common/api.js'
 	import { isAmapReady, reverseGeocode, searchPlaces } from '@/common/amap.js'
+	import { ALLOW_DEMO_DATA } from '@/common/env.js'
 
 	const RADIUS_KM = 50
 
@@ -114,11 +115,11 @@
 		components: { ProtoHeader, ProtoIcon },
 		data() {
 			return {
-				allStores: demoStores,
-				stores: demoStores,
+				allStores: ALLOW_DEMO_DATA ? demoStores : [],
+				stores: ALLOW_DEMO_DATA ? demoStores : [],
 				markers: [],
 				markerStores: {},
-				selectedStore: demoStores[0] || null,
+				selectedStore: ALLOW_DEMO_DATA ? (demoStores[0] || null) : null,
 				center: { latitude: 34.74725, longitude: 113.62493 },
 				scale: 11,
 				// 用户拖动后的视野，只在重建 map 时回填，避免和绑定值互相触发形成循环。
@@ -153,12 +154,13 @@
 		},
 		methods: {
 			async loadStores(requestedId) {
-				let list = demoStores
+				let list = ALLOW_DEMO_DATA ? demoStores : []
 				try {
 					const remote = await fetchStores()
 					if (remote.length) list = remote
 				} catch (error) {
-					// 后端不可用时保留演示数据，保证地图页仍可预览。
+					// 开发环境保留演示数据方便预览；生产环境保持空列表并提示，不展示假门店。
+					if (!ALLOW_DEMO_DATA) list = []
 				}
 				this.allStores = list.filter((store) => toPoint(store))
 				this.stores = this.allStores
@@ -167,7 +169,9 @@
 					|| null
 				this.buildMarkers()
 				this.centerOnStores()
-				this.noticeText = `已加载 ${this.stores.length} 家营业门店，可点击价格标记查看详情`
+				this.noticeText = this.stores.length
+					? `已加载 ${this.stores.length} 家营业门店，可点击价格标记查看详情`
+					: '暂时没有可展示的门店，请检查网络后重试'
 			},
 			buildMarkers() {
 				const selectedId = this.selectedStore ? String(this.selectedStore.id) : ''

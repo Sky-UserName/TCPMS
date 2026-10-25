@@ -86,6 +86,9 @@ function logout() {
   session.user = null
 }
 
+// api.js 里遇到 401 会广播事件，这里统一退回登录页。
+window.addEventListener('tcpms:unauthorized', logout)
+
 onMounted(async () => {
   if (!session.token) return
   try {

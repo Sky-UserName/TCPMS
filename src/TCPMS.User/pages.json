@@ -207,102 +207,109 @@
 				"navigationStyle": "custom",
 				"enablePullDownRefresh": false
 			}
-		},
+		}
+	],
+	"subPackages": [
 		{
-			"path": "pages/merchant/index",
-			"style": {
-				"navigationBarTitleText": "民宿管理",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/merchant/finance",
-			"style": {
-				"navigationBarTitleText": "财务统计",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/merchant/rooms",
-			"style": {
-				"navigationBarTitleText": "房间管理",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/merchant/orders",
-			"style": {
-				"navigationBarTitleText": "订单管理",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/merchant/publish",
-			"style": {
-				"navigationBarTitleText": "发布房源",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/merchant/verify",
-			"style": {
-				"navigationBarTitleText": "扫码核销",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/merchant/records",
-			"style": {
-				"navigationBarTitleText": "核销记录",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/merchant/staff",
-			"style": {
-				"navigationBarTitleText": "员工管理",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/merchant/reviews",
-			"style": {
-				"navigationBarTitleText": "评价管理",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/merchant/coupons",
-			"style": {
-				"navigationBarTitleText": "优惠券管理",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/merchant/settings",
-			"style": {
-				"navigationBarTitleText": "民宿设置",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/merchant/messages",
-			"style": {
-				"navigationBarTitleText": "订阅消息",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
+			"root": "pages/merchant",
+			"pages": [
+				{
+					"path": "index",
+					"style": {
+						"navigationBarTitleText": "民宿管理",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "finance",
+					"style": {
+						"navigationBarTitleText": "财务统计",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "rooms",
+					"style": {
+						"navigationBarTitleText": "房间管理",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "orders",
+					"style": {
+						"navigationBarTitleText": "订单管理",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "publish",
+					"style": {
+						"navigationBarTitleText": "发布房源",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "verify",
+					"style": {
+						"navigationBarTitleText": "扫码核销",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "records",
+					"style": {
+						"navigationBarTitleText": "核销记录",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "staff",
+					"style": {
+						"navigationBarTitleText": "员工管理",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "reviews",
+					"style": {
+						"navigationBarTitleText": "评价管理",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "coupons",
+					"style": {
+						"navigationBarTitleText": "优惠券管理",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "settings",
+					"style": {
+						"navigationBarTitleText": "民宿设置",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "messages",
+					"style": {
+						"navigationBarTitleText": "订阅消息",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				}
+			]
 		}
 	],
 	"tabBar": {

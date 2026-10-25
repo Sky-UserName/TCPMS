@@ -190,6 +190,7 @@ const statusMap = {
 	Completed: { status: '已完成', statusKey: 'done', action: '再次预订' },
 	Refunding: { status: '退款审核中', statusKey: 'refund', action: '查看退款进度' },
 	Refunded: { status: '已退款', statusKey: 'refund', action: '查看退款进度' },
+	RefundFailed: { status: '退款失败', statusKey: 'refund', action: '联系客服' },
 	Cancelled: { status: '已取消', statusKey: 'cancel', action: '再次预订' }
 }
 
@@ -455,12 +456,8 @@ export const cancelRemoteOrder = async (id) => {
 	return upsertOrder(mapped)
 }
 
-export const payRemoteOrder = async (id) => {
-	const data = await apiRequest({ path: `/orders/${id}/mock-pay`, method: 'POST' })
-	const mapped = mapOrder(data)
-	return upsertOrder(mapped)
-}
-
+// 模拟支付只在后端 Development 环境存在，前端不再保留任何降级入口，
+// 避免支付未配置时把订单直接置为已支付。
 export const requestRemotePayment = async (id) => {
 	return apiRequest({ path: `/orders/${id}/pay`, method: 'POST' })
 }

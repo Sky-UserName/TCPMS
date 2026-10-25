@@ -85,14 +85,41 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAuthenticatedUser().RequireClaim("user_type", "miniapp"));
 });
 
+// 允许跨域的来源从配置读取，开发环境默认放开；生产环境只允许显式列出的域名，
+// 避免 AllowAnyOrigin 把管理后台接口暴露给任意站点。
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>()?
+    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .Select(origin => origin.Trim().TrimEnd('/'))
+    .ToArray() ?? Array.Empty<string>();
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("Development", policy =>
-        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+    if (builder.Environment.IsDevelopment())
+    {
+        options.AddPolicy("App", policy =>
+            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+        return;
+    }
+
+    options.AddPolicy("App", policy =>
+    {
+        if (allowedOrigins.Length == 0)
+        {
+            // 生产环境没有配置来源时退化为同源访问，宁可后台跨域失败也不放开任意站点。
+            policy.WithOrigins("https://localhost");
+            return;
+        }
+
+        policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod();
+    });
 });
+builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IPasswordHasher<AdminUser>, PasswordHasher<AdminUser>>();
 builder.Services.AddHostedService<PaymentReconciliationService>();
+builder.Services.AddHostedService<OrderExpiryService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -161,9 +188,33 @@ app.UseExceptionHandler(errorApp =>
 });
 
 app.UseStaticFiles();
-app.UseCors("Development");
+app.UseCors("App");
 app.UseAuthentication();
 app.UseAuthorization();
+
+// 初始密码未修改前，只放行改密、登出和健康检查，其余管理接口一律拒绝。
+app.Use(async (context, next) =>
+{
+    var mustChange = context.User.FindFirst("must_change_password")?.Value;
+    if (string.Equals(mustChange, "true", StringComparison.OrdinalIgnoreCase))
+    {
+        var path = context.Request.Path.Value ?? string.Empty;
+        var allowed = path.StartsWith("/api/v1/auth/change-password", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/api/v1/auth/logout", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/api/v1/auth/login", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/api/v1/health", StringComparison.OrdinalIgnoreCase);
+        if (!allowed)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json; charset=utf-8";
+            await context.Response.WriteAsJsonAsync(
+                new ApiError("password_change_required", "请先修改初始密码后再继续操作"));
+            return;
+        }
+    }
+
+    await next();
+});
 
 await SeedData.InitializeAsync(app.Services);
 
@@ -217,18 +268,44 @@ auth.MapPost("/login", async (
     AppDbContext db,
     IPasswordHasher<AdminUser> passwordHasher,
     TokenService tokenService,
+    LoginThrottle throttle,
+    HttpRequest httpRequest,
     CancellationToken cancellationToken) =>
 {
+    var username = (request.Username ?? string.Empty).Trim();
+    if (string.IsNullOrWhiteSpace(username) || string.IsNullOrEmpty(request.Password))
+    {
+        return Results.BadRequest(new ApiError("validation_error", "账号和密码不能为空"));
+    }
+
+    var clientIp = httpRequest.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var throttleKey = $"{username}|{clientIp}";
+    var accountKey = $"account|{username}";
+    if (throttle.IsLocked(throttleKey, out var remaining) || throttle.IsLocked(accountKey, out remaining))
+    {
+        return Results.Json(
+            new ApiError(
+                "login_locked",
+                $"登录失败次数过多，请在 {(int)Math.Ceiling(remaining.TotalMinutes)} 分钟后重试"),
+            statusCode: StatusCodes.Status429TooManyRequests);
+    }
+
     var admin = await db.AdminUsers
         .Include(x => x.UserRoles)
         .ThenInclude(x => x.Role)
-        .SingleOrDefaultAsync(x => x.Username == request.Username, cancellationToken);
+        .SingleOrDefaultAsync(x => x.Username == username, cancellationToken);
 
-    if (admin is null || !admin.IsEnabled ||
-        passwordHasher.VerifyHashedPassword(admin, admin.PasswordHash, request.Password) == PasswordVerificationResult.Failed)
+    var verified = admin is not null &&
+        passwordHasher.VerifyHashedPassword(admin, admin.PasswordHash, request.Password) != PasswordVerificationResult.Failed;
+    if (admin is null || !verified || !admin.IsEnabled)
     {
+        throttle.RegisterFailure(throttleKey);
+        throttle.RegisterFailure(accountKey);
         return Results.Unauthorized();
     }
+
+    throttle.Reset(throttleKey);
+    throttle.Reset(accountKey);
 
     admin.LastLoginAt = DateTime.UtcNow;
     await db.SaveChangesAsync(cancellationToken);
@@ -237,7 +314,82 @@ auth.MapPost("/login", async (
         .Select(x => x.Role!.Code)
         .ToArray();
     var token = tokenService.CreateAdminToken(admin, roles);
-    return Results.Ok(new TokenResponse(token.Token, token.ExpiresAt, "admin", admin.DisplayName));
+    return Results.Ok(new AdminLoginResponse(
+        token.Token,
+        token.ExpiresAt,
+        "admin",
+        admin.DisplayName,
+        admin.MustChangePassword));
+});
+
+// 管理员自助改密。初始密码（超管设置）必须先改一次才能使用其他管理接口。
+auth.MapPost("/change-password", async (
+    ChangePasswordRequest request,
+    AppDbContext db,
+    IPasswordHasher<AdminUser> passwordHasher,
+    TokenService tokenService,
+    ClaimsPrincipal principal,
+    CancellationToken cancellationToken) =>
+{
+    if (!string.Equals(principal.FindFirst("user_type")?.Value, "admin", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.Forbid();
+    }
+
+    var userId = GetUserId(principal);
+    if (userId is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var newPassword = request.NewPassword ?? string.Empty;
+    if (newPassword.Length < 8 || newPassword.Length > 64)
+    {
+        return Results.BadRequest(new ApiError("weak_password", "新密码长度需在 8 到 64 位之间"));
+    }
+    if (!newPassword.Any(char.IsLetter) || !newPassword.Any(char.IsDigit))
+    {
+        return Results.BadRequest(new ApiError("weak_password", "新密码需同时包含字母和数字"));
+    }
+    if (string.Equals(newPassword, request.CurrentPassword, StringComparison.Ordinal))
+    {
+        return Results.BadRequest(new ApiError("password_unchanged", "新密码不能与当前密码相同"));
+    }
+
+    var admin = await db.AdminUsers
+        .Include(x => x.UserRoles)
+        .ThenInclude(x => x.Role)
+        .SingleOrDefaultAsync(x => x.Id == userId.Value, cancellationToken);
+    if (admin is null || !admin.IsEnabled)
+    {
+        return Results.Unauthorized();
+    }
+
+    if (passwordHasher.VerifyHashedPassword(admin, admin.PasswordHash, request.CurrentPassword ?? string.Empty)
+        == PasswordVerificationResult.Failed)
+    {
+        return Results.BadRequest(new ApiError("invalid_current_password", "当前密码不正确"));
+    }
+
+    admin.PasswordHash = passwordHasher.HashPassword(admin, newPassword);
+    admin.MustChangePassword = false;
+    admin.PasswordChangedAt = DateTime.UtcNow;
+    admin.UpdatedAt = DateTime.UtcNow;
+    db.AuditLogs.Add(CreateAudit(principal, "admin_user.change_password", "AdminUser", admin.Id.ToString(), admin.Username));
+    await db.SaveChangesAsync(cancellationToken);
+
+    // 旧 token 仍带着 must_change_password，换发一个新 token 供前端替换。
+    var roles = admin.UserRoles
+        .Where(x => x.Role is not null)
+        .Select(x => x.Role!.Code)
+        .ToArray();
+    var token = tokenService.CreateAdminToken(admin, roles);
+    return Results.Ok(new AdminLoginResponse(
+        token.Token,
+        token.ExpiresAt,
+        "admin",
+        admin.DisplayName,
+        false));
 });
 
 auth.MapPost("/miniapp-login", async (
@@ -1106,6 +1258,15 @@ orders.MapPost("/", async (
         return Results.NotFound(new ApiError("room_type_not_found", "房型不存在或已下架"));
     }
 
+    // 房型下架之外，门店停业/未上线也不能继续接单。
+    var storeSellable = await db.Stores.AnyAsync(
+        x => x.Id == request.StoreId && x.Status == StoreStatuses.Active,
+        cancellationToken);
+    if (!storeSellable)
+    {
+        return Results.Conflict(new ApiError("store_not_available", "门店暂停营业，暂不可预订"));
+    }
+
     var nights = GetNights(request.CheckIn, request.CheckOut);
     await using var transaction = db.Database.IsRelational()
         ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
@@ -1144,7 +1305,7 @@ orders.MapPost("/", async (
     var order = new BookingOrder
     {
         Id = Guid.NewGuid(),
-        OrderNumber = $"TCP{DateTime.Now:yyyyMMddHHmmss}{Random.Shared.Next(1000, 9999)}",
+        OrderNumber = CreateOrderNumber(),
         WxUserId = userId.Value,
         StoreId = request.StoreId,
         RoomTypeId = request.RoomTypeId,
@@ -1894,8 +2055,11 @@ static string? NormalizeAvatarUrl(string? value)
     return avatarUrl.Length > 500 ? avatarUrl[..500] : avatarUrl;
 }
 
-static MiniappProfileResponse ToMiniappProfile(WxUser user, HttpRequest? request)
-{
+// 订单号：时间戳 + 6 位随机数。原来只有 4 位，同一秒内并发较高时容易撞唯一索引。
+static string CreateOrderNumber() =>
+    $"TCP{DateTime.Now:yyyyMMddHHmmss}{Random.Shared.Next(100000, 1000000)}";
+
+static MiniappProfileResponse ToMiniappProfile(WxUser user, HttpRequest? request){
     var avatarUrl = user.AvatarUrl;
     if (request is not null &&
         !string.IsNullOrWhiteSpace(avatarUrl) &&

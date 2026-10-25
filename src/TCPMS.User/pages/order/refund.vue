@@ -9,7 +9,7 @@
 					<text>{{ order.store }}</text>
 					<text class="small">{{ order.room }} · {{ order.roomCount || 1 }}间 {{ order.nights || 1 }}晚</text>
 				</view>
-				<text class="strong">实付 ¥{{ order.price }}.00</text>
+				<text class="strong">实付 ¥{{ formatYuan(order.price) }}</text>
 			</view>
 			<view class="refund-order-meta"><view><ProtoIcon name="calendar" :size="18" /><text>{{ order.date }}</text></view><view><ProtoIcon name="document" :size="18" /><text>单号 {{ order.id }}</text></view></view>
 		</view>
@@ -20,14 +20,14 @@
 		</view>
 
 		<view class="refund-form proto-card">
-			<view class="refund-maximum"><text>最大可退金额</text><text class="strong">¥{{ maxAmount }}.00</text><text class="proto-pill info">全额可退</text></view>
+			<view class="refund-maximum"><text>最大可退金额</text><text class="strong">¥{{ formatYuan(maxAmount) }}</text><text class="proto-pill info">全额可退</text></view>
 			<text class="form-hint">本次申请退款金额</text>
 			<view class="amount-input">
 				<text>¥</text>
 				<input v-model="amount" type="digit" />
 				<button hover-class="none" @tap="amount = maxAmount.toFixed(2)">全部退款</button>
 			</view>
-			<text class="amount-limit">最多可退 ¥{{ maxAmount }}.00，支持部分或全额退款</text>
+			<text class="amount-limit">最多可退 ¥{{ formatYuan(maxAmount) }}，支持部分或全额退款</text>
 
 			<text class="proto-form-label">退款原因 <text class="required">*</text></text>
 			<view class="reason-list">
@@ -82,6 +82,7 @@
 	import { demoOrders, goPage, showToast } from '@/common/prototype.js'
 	import { findOrder, getOrders, updateOrder } from '@/common/app-store.js'
 	import { refundRemoteOrder } from '@/common/api.js'
+	import { formatYuan } from '@/common/format.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
@@ -111,6 +112,7 @@
 			this.loadOrder(options && options.id)
 		},
 		methods: {
+			formatYuan,
 			loadOrder(id) {
 				const order = id ? findOrder(id) : getOrders()[0]
 				if (!order) return
