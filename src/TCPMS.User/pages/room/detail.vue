@@ -28,7 +28,7 @@
 					<view class="highlight-value"><ProtoIcon name="star" :size="25" /><text>{{ roomRatingLabel }} 超棒</text></view>
 					<text>{{ reviewSummary.reviewCount }}条真实评价</text>
 				</view>
-				<view class="detail-highlight location-highlight" @tap="copyAddress">
+				<view class="detail-highlight location-highlight" @tap="openLocation">
 					<view class="highlight-value"><ProtoIcon name="location" :size="25" /><text>{{ store.shortName || store.name || '民宿位置' }}</text></view>
 					<text>{{ store.address || '郑州市中心 · 交通便利' }}</text>
 				</view>
@@ -101,7 +101,56 @@
 
 		<view class="proto-card guest-card"><view class="section-heading"><text>入住人</text><text class="proto-link">添加入住人 <ProtoIcon name="chevron-right" :size="20" /></text></view><view class="guest-placeholder"><ProtoIcon name="user" :size="32" /><text>入住时填写姓名，方便快速办理入住</text></view></view>
 
-		<view class="proto-card location-card"><view class="section-heading"><text>周边位置</text><text class="proto-link" @tap="copyAddress">复制地址</text></view><view class="detail-map-placeholder"><ProtoIcon name="map" :size="42" /><text>{{ store.shortName || store.name || '民宿周边' }}</text></view><text class="location-title">{{ store.address || '郑州市中心，出行便利' }}</text><text class="location-note">步行可达餐饮、商圈与公共交通</text></view>
+		<view class="proto-card location-card">
+			<view class="section-heading">
+				<text>周边位置</text>
+				<view class="proto-link location-heading-action" @tap="openLocation"><text>查看地图</text><ProtoIcon name="chevron-right" :size="18" /></view>
+			</view>
+			<view class="location-map">
+				<map
+					id="roomDetailMap"
+					class="location-map-canvas"
+					:latitude="mapCenter.latitude"
+					:longitude="mapCenter.longitude"
+					:scale="mapScale"
+					:markers="mapMarkers"
+					:enable-scroll="true"
+					:enable-zoom="true"
+					:enable-rotate="false"
+					:enable-overlooking="false"
+					@markertap="onMarkerTap"
+					@callouttap="onMarkerTap"
+					@error="onMapError"
+				></map>
+				<view class="location-map-hint"><ProtoIcon name="map" :size="18" /><text>{{ mapNotice || '双指缩放、拖动地图查看周边' }}</text></view>
+				<view v-if="mapError" class="location-map-error"><ProtoIcon name="info" :size="18" /><text>地图渲染失败：{{ mapError }}</text></view>
+			</view>
+			<view class="location-map-tools">
+				<button class="location-map-tool" hover-class="none" @tap="resetMapView"><ProtoIcon name="store" :size="20" /><text>民宿位置</text></button>
+				<button class="location-map-tool" hover-class="none" @tap="openLocation"><ProtoIcon name="navigation" :size="20" /><text>导航前往</text></button>
+			</view>
+			<scroll-view v-if="nearbyPlaces.length" class="nearby-scroll" scroll-x :show-scrollbar="false">
+				<view
+					v-for="place in nearbyPlaces"
+					:key="place.id"
+					class="nearby-chip"
+					:class="{ 'nearby-chip-active': selectedPlace && selectedPlace.id === place.id }"
+					@tap="focusPlace(place)"
+				>
+					<text class="nearby-chip-name">{{ place.name }}</text>
+					<text class="nearby-chip-meta">{{ place.typeLabel }} · {{ formatDistance(place.distance) }}</text>
+				</view>
+			</scroll-view>
+			<view v-else-if="nearbyLoading" class="nearby-tip">正在加载周边地点…</view>
+			<view class="location-address" @tap="openLocation">
+				<view class="location-address-main"><ProtoIcon name="location" :size="22" /><text class="location-title">{{ store.address || '郑州市中心，出行便利' }}</text></view>
+				<ProtoIcon name="chevron-right" :size="18" />
+			</view>
+			<view class="location-meta-row">
+				<text class="location-note">{{ locationNote }}</text>
+				<text class="location-copy" @tap.stop="copyAddress">复制地址</text>
+			</view>
+		</view>
 
 		<view class="proto-bottom-actions room-bottom-actions">
 			<button class="detail-bottom-link" hover-class="none" @tap="goService"><ProtoIcon name="support" :size="22" /><text>客服</text></button>
@@ -118,6 +167,21 @@
 	import { demoRooms, demoStores, goPage, showToast } from '@/common/prototype.js'
 	import { getBooking, getFavorites, getRoomReviewSummary, recordRecent, saveBooking, toggleFavorite } from '@/common/app-store.js'
 	import { fetchRoomReviews, fetchStoreDetail } from '@/common/api.js'
+	import { geocodeAddress, searchNearby } from '@/common/amap.js'
+
+	// 门店坐标来自后端 decimal，可能是字符串或 null，统一转成数字再交给 map 组件。
+	const toPoint = (store) => {
+		if (!store || store.latitude === null || store.latitude === undefined) return null
+		if (store.longitude === null || store.longitude === undefined) return null
+		const latitude = Number(store.latitude)
+		const longitude = Number(store.longitude)
+		if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
+		if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null
+		return { latitude, longitude }
+	}
+
+	// 坐标彻底拿不到时的兜底视野，避免地图白屏。
+	const CITY_CENTER = { latitude: 34.74725, longitude: 113.62493 }
 
 	const getDateContext = (isoDate, fallback) => {
 		const parts = String(isoDate || '').split('T')[0].split('-').map(Number)
@@ -148,6 +212,16 @@
 				},
 				showScrollHeader: false,
 				openPolicies: ['checkin', 'cancel'],
+				mapCenter: { ...CITY_CENTER },
+				mapScale: 14,
+				mapPoint: null,
+				mapMarkers: [],
+				markerPlaces: {},
+				mapNotice: '',
+				mapError: '',
+				nearbyPlaces: [],
+				nearbyLoading: false,
+				selectedPlace: null,
 				facilityGroups: [
 					{ title: '服务', items: ['围炉煮茶', '前台接待', '行李寄存', '免费停车'] },
 					{ title: '基础', items: ['零食、饮品', '网络电视', '空调', '窗户', '无线网络'] },
@@ -207,6 +281,12 @@
 			},
 			roomRatingLabel() {
 				return Number(this.reviewSummary.roomAverageRating || 0).toFixed(1)
+			},
+			locationNote() {
+				const place = this.selectedPlace
+				if (place) return `${place.typeLabel} · 距离民宿约 ${this.formatDistance(place.distance)}`
+				if (this.nearbyPlaces.length) return `周边 ${this.nearbyPlaces.length} 个地点，点击标签可定位`
+				return '步行可达餐饮、商圈与公共交通'
 			}
 		},
 		async onLoad(options) {
@@ -254,6 +334,7 @@
 				image: this.room.image,
 				path: `/pages/room/detail?id=${this.room.id}&storeId=${this.storeId || ''}`
 			})
+			this.prepareLocation()
 		},
 		onShow() {
 			this.booking = getBooking()
@@ -338,6 +419,142 @@
 				}
 				this.prepareBooking(item)
 				goPage('/pages/booking/confirm')
+			},
+			// 详情页周边地图：先用门店坐标，缺失时按地址反查，最后才退回城市中心。
+			prepareLocation() {
+				if (!this.locationTask) this.locationTask = this.resolveLocation()
+				return this.locationTask
+			},
+			async resolveLocation() {
+				const store = this.store || {}
+				let point = toPoint(store)
+				if (!point) {
+					try {
+						point = await geocodeAddress(store.address || '', store.city || '')
+					} catch (error) {
+						point = null
+					}
+				}
+				this.mapNotice = point ? '' : '未获取到民宿坐标，当前显示城市中心'
+				this.mapPoint = point || { ...CITY_CENTER }
+				this.mapCenter = { ...this.mapPoint }
+				this.buildMapMarkers()
+				this.loadNearby()
+			},
+			async loadNearby() {
+				if (!this.mapPoint) return
+				this.nearbyLoading = true
+				try {
+					const places = await searchNearby(this.mapPoint.latitude, this.mapPoint.longitude, { radius: 1200, limit: 6 })
+					this.nearbyPlaces = Array.isArray(places) ? places : []
+				} catch (error) {
+					// 高德不可用时不打扰用户，地图仍可浏览民宿位置。
+					this.nearbyPlaces = []
+				} finally {
+					this.nearbyLoading = false
+					this.buildMapMarkers()
+				}
+			},
+			buildMapMarkers() {
+				if (!this.mapPoint) return
+				const store = this.store || {}
+				const places = {}
+				const markers = [{
+					id: 1,
+					latitude: this.mapPoint.latitude,
+					longitude: this.mapPoint.longitude,
+					// 不传 iconPath 时用微信默认图标，但宽高必须显式给，否则渲染层直接报错。
+					width: 24,
+					height: 34,
+					callout: {
+						content: store.shortName || store.name || '民宿位置',
+						color: '#0f6b6b',
+						fontSize: 11,
+						borderRadius: 8,
+						borderWidth: 1,
+						borderColor: '#cfe4e4',
+						bgColor: '#ffffff',
+						padding: 6,
+						textAlign: 'center',
+						display: 'ALWAYS'
+					}
+				}]
+				this.nearbyPlaces.forEach((place, index) => {
+					const markerId = index + 2
+					places[markerId] = place
+					markers.push({
+						id: markerId,
+						latitude: place.latitude,
+						longitude: place.longitude,
+						width: 20,
+						height: 28,
+						callout: {
+							content: place.name,
+							color: '#25545a',
+							fontSize: 10,
+							borderRadius: 6,
+							borderWidth: 1,
+							borderColor: '#d8e6e6',
+							bgColor: '#ffffff',
+							padding: 4,
+							display: 'BYCLICK'
+						}
+					})
+				})
+				this.markerPlaces = places
+				this.mapMarkers = markers
+			},
+			moveMapTo(point) {
+				if (!point) return
+				try {
+					const context = uni.createMapContext('roomDetailMap', this)
+					if (context && typeof context.moveToLocation === 'function') {
+						context.moveToLocation({ latitude: point.latitude, longitude: point.longitude })
+					}
+				} catch (error) {
+					// 低版本基础库缺少 moveToLocation，地图仍可手动拖动。
+				}
+			},
+			resetMapView() {
+				this.selectedPlace = null
+				this.mapCenter = { ...this.mapPoint }
+				this.mapScale = 14
+				this.moveMapTo(this.mapPoint)
+			},
+			focusPlace(place) {
+				if (!place) return
+				this.selectedPlace = place
+				this.mapCenter = { latitude: place.latitude, longitude: place.longitude }
+				this.mapScale = 16
+				this.moveMapTo(place)
+			},
+			onMarkerTap(event) {
+				const markerId = Number((event && event.detail && event.detail.markerId) || 0)
+				if (markerId < 2) return
+				const place = this.markerPlaces[markerId]
+				if (place) this.selectedPlace = place
+			},
+			onMapError(event) {
+				const detail = (event && event.detail) || {}
+				this.mapError = detail.errMsg || '地图组件不可用'
+			},
+			async openLocation() {
+				// 地址反查还没回来时先等一步，避免跳到城市中心。
+				if (!this.mapPoint) await this.prepareLocation()
+				const point = this.mapPoint || this.mapCenter || { ...CITY_CENTER }
+				uni.openLocation({
+					latitude: Number(point.latitude),
+					longitude: Number(point.longitude),
+					name: this.store.shortName || this.store.name || '民宿地址',
+					address: this.store.address || '',
+					scale: 18,
+					fail: () => showToast('暂无法打开地图')
+				})
+			},
+			formatDistance(distance) {
+				const meters = Number(distance)
+				if (!Number.isFinite(meters) || meters <= 0) return '附近'
+				return meters < 1000 ? `${Math.round(meters)}m` : `${(meters / 1000).toFixed(1)}km`
 			},
 			copyAddress() {
 				const address = this.store.address || ''
@@ -1399,36 +1616,183 @@
 		color: var(--proto-primary-dark);
 	}
 
-	.detail-map-placeholder {
+	.location-heading-action {
+		display: flex;
+		align-items: center;
+	}
+
+	.location-map {
+		position: relative;
+		margin-top: 14rpx;
+		overflow: hidden;
+		background: #e8f2f4;
+		border-radius: 16rpx;
+	}
+
+	.location-map-canvas {
+		width: 100%;
+		height: 300rpx;
+	}
+
+	.location-map-hint {
+		position: absolute;
+		right: 10rpx;
+		bottom: 10rpx;
+		display: flex;
+		align-items: center;
+		padding: 5rpx 10rpx;
+		color: #2a5f63;
+		font-size: 17rpx;
+		background: rgba(255, 255, 255, 0.88);
+		border-radius: 999rpx;
+	}
+
+	.location-map-hint text {
+		margin-left: 4rpx;
+	}
+
+	.location-map-error {
+		position: absolute;
+		top: 8rpx;
+		right: 8rpx;
+		left: 8rpx;
+		display: flex;
+		align-items: center;
+		padding: 6rpx 10rpx;
+		color: #8a4b12;
+		font-size: 17rpx;
+		background: rgba(255, 241, 224, 0.94);
+		border-radius: 10rpx;
+	}
+
+	.location-map-error text {
+		margin-left: 6rpx;
+	}
+
+	.location-map-tools {
+		display: flex;
+		margin-top: 10rpx;
+	}
+
+	.location-map-tool {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		height: 190rpx;
-		margin-top: 16rpx;
+		flex: 1;
+		height: 60rpx;
+		padding: 0;
 		color: var(--proto-primary-dark);
-		background: #dff2f6;
-		border-radius: 16rpx;
-		font-size: 22rpx;
-		font-weight: 750;
+		background: #eef7f8;
+		border-radius: 12rpx;
+		font-size: 19rpx;
+		font-weight: 700;
+		line-height: 1;
 	}
 
-	.detail-map-placeholder .proto-icon {
+	.location-map-tool + .location-map-tool {
+		margin-left: 10rpx;
+	}
+
+	.location-map-tool .proto-icon {
+		margin-right: 6rpx;
+	}
+
+	.nearby-scroll {
+		height: 86rpx;
+		margin-top: 10rpx;
+		white-space: nowrap;
+	}
+
+	.nearby-chip {
+		display: inline-flex;
+		flex-direction: column;
+		justify-content: center;
+		height: 76rpx;
+		max-width: 300rpx;
 		margin-right: 10rpx;
+		padding: 0 14rpx;
+		vertical-align: middle;
+		background: #f4f9fa;
+		border: 1rpx solid rgba(42, 169, 169, 0.14);
+		border-radius: 12rpx;
+	}
+
+	.nearby-chip-active {
+		background: #e2f3f4;
+		border-color: rgba(42, 169, 169, 0.45);
+	}
+
+	.nearby-chip-name {
+		overflow: hidden;
+		color: var(--proto-text);
+		font-size: 19rpx;
+		font-weight: 750;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.nearby-chip-meta {
+		margin-top: 3rpx;
+		overflow: hidden;
+		color: var(--proto-muted);
+		font-size: 16rpx;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.nearby-tip {
+		margin-top: 8rpx;
+		color: var(--proto-muted);
+		font-size: 18rpx;
+	}
+
+	.location-address {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-top: 10rpx;
+		padding: 9rpx 12rpx;
+		background: #f6fafa;
+		border-radius: 12rpx;
+	}
+
+	.location-address-main {
+		display: flex;
+		align-items: center;
+		flex: 1;
+		min-width: 0;
+	}
+
+	.location-address-main .proto-icon {
+		margin-right: 6rpx;
 	}
 
 	.location-title {
-		display: block;
-		margin-top: 14rpx;
 		color: var(--proto-text);
 		font-size: 21rpx;
 		font-weight: 750;
+		line-height: 1.35;
+	}
+
+	.location-meta-row {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		margin-top: 8rpx;
 	}
 
 	.location-note {
-		display: block;
-		margin-top: 5rpx;
+		flex: 1;
+		margin-right: 10rpx;
 		color: var(--proto-muted);
 		font-size: 18rpx;
+	}
+
+	.location-copy {
+		flex: 0 0 auto;
+		color: var(--proto-primary-dark);
+		font-size: 18rpx;
+		font-weight: 700;
 	}
 
 	.room-bottom-actions {

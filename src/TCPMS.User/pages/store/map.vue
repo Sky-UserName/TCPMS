@@ -2,37 +2,74 @@
 	<view class="proto-page map-page proto-page-plain">
 		<ProtoHeader title="门店地图" theme="green" />
 		<view class="map-notice">
-			<view><ProtoIcon name="location" :size="22" /><text>高德地图精确定位服务</text></view>
+			<view><ProtoIcon name="location" :size="22" /><text>{{ amapReady ? '高德地图定位服务' : '微信原生地图' }}</text></view>
 			<text class="map-city">{{ mapCity }}</text>
 			<button hover-class="none" @tap="viewList"><ProtoIcon name="document" :size="22" /><text>列表视图</text></button>
 		</view>
 		<view class="map-coordinate-notice">
-			<view><ProtoIcon name="info" :size="20" /><text>已加载 {{ stores.length }} 家营业门店，可点击价格标记查看详情</text></view>
+			<view><ProtoIcon name="info" :size="20" /><text>{{ noticeText }}</text></view>
 			<ProtoIcon name="close" :size="20" @tap="viewList" />
 		</view>
 		<view class="map-canvas">
-			<view class="park park-one"></view>
-			<view class="park park-two"></view>
-			<view class="river"></view>
-			<view class="road road-one"></view>
-			<view class="road road-two"></view>
-			<view class="road road-three"></view>
-			<view class="map-label label-park">人民公园</view>
-			<view class="map-label label-metro">二七广场站</view>
-			<view class="map-label label-river">金水河滨河带</view>
-			<view class="user-marker"><ProtoIcon name="navigation" :size="22" /><text>我在这里</text></view>
-			<view v-for="marker in markers" :key="marker.id" class="store-marker" :style="{ top: marker.top, left: marker.left }" @tap="selectedMarker = marker.id">
-				<text>¥{{ marker.price }}</text>
-				<text class="marker-name" :class="{ selected: selectedMarker === marker.id }">{{ marker.name }}</text>
-			</view>
-			<view class="map-controls">
+			<map
+				v-if="!searchVisible"
+				id="storeMap"
+				class="amap-canvas"
+				:latitude="center.latitude"
+				:longitude="center.longitude"
+				:scale="scale"
+				:markers="markers"
+				:show-location="hasUserLocation"
+				@markertap="onMarkerTap"
+				@callouttap="onMarkerTap"
+				@regionchange="onRegionChange"
+				@error="onMapError"
+			></map>
+			<view v-if="mapError" class="map-error-notice"><ProtoIcon name="info" :size="20" /><text>地图渲染失败：{{ mapError }}</text></view>
+			<view v-if="!searchVisible" class="map-controls">
 				<button hover-class="none" aria-label="放大" @tap="zoomIn"><ProtoIcon name="plus" :size="22" /></button>
 				<button hover-class="none" aria-label="缩小" @tap="zoomOut"><ProtoIcon name="minus" :size="22" /></button>
 				<button hover-class="none" aria-label="定位" @tap="locateUser"><ProtoIcon name="navigation" :size="22" /></button>
 			</view>
-			<view class="map-search"><ProtoIcon name="search" :size="24" /><text>搜索此区域门店</text></view>
+			<view v-if="!searchVisible" class="map-search" @tap="openSearch">
+				<ProtoIcon name="search" :size="24" />
+				<text>{{ searchLabel || '搜索此区域门店' }}</text>
+			</view>
+
+			<view v-if="searchVisible" class="map-search-panel">
+				<view class="map-search-bar">
+					<view class="map-search-input">
+						<ProtoIcon name="search" :size="24" />
+						<input
+							v-model="searchKeyword"
+							:focus="true"
+							confirm-type="search"
+							placeholder="搜索地标、商圈或门店名称"
+							placeholder-class="search-placeholder"
+							@confirm="runSearch"
+						/>
+					</view>
+					<text class="map-search-cancel" @tap="closeSearch">取消</text>
+				</view>
+				<scroll-view scroll-y class="map-search-results">
+					<view v-if="searching" class="map-search-tip">正在搜索…</view>
+					<view v-else-if="searchError" class="map-search-tip">{{ searchError }}</view>
+					<view v-else-if="!searchResults.length" class="map-search-tip">输入关键字后点击键盘“搜索”</view>
+					<view v-else>
+						<view
+							v-for="place in searchResults"
+							:key="place.id"
+							class="map-search-result"
+							@tap="pickPlace(place)"
+						>
+							<text class="result-name">{{ place.name }}</text>
+							<text class="result-address">{{ place.district }}{{ place.address || '暂无详细地址' }}</text>
+						</view>
+					</view>
+				</scroll-view>
+			</view>
 		</view>
-		<view class="map-store-card">
+		<view v-if="selectedStore" class="map-store-card">
 			<image :src="selectedStore.image" mode="aspectFill"></image>
 			<view class="map-store-info">
 				<view class="map-store-title-row">
@@ -49,7 +86,7 @@
 				</view>
 			</view>
 		</view>
-		<button class="map-all-button" hover-class="none" @tap="viewList"><ProtoIcon name="document" :size="22" /><text>查看完整门店列表（共{{ stores.length }}家）</text></button>
+		<button class="map-all-button" hover-class="none" @tap="viewList"><ProtoIcon name="document" :size="22" /><text>查看完整门店列表（共{{ allStores.length }}家）</text></button>
 	</view>
 </template>
 
@@ -57,97 +94,280 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { demoStores, goPage, showToast } from '@/common/prototype.js'
-	import { fetchStores } from '@/common/api.js'
+	import { fetchStores, fetchNearbyStores } from '@/common/api.js'
+	import { isAmapReady, reverseGeocode, searchPlaces } from '@/common/amap.js'
+
+	const RADIUS_KM = 50
+
+	// 门店坐标来自后端 decimal，可能是字符串或 null，统一转成数字再交给 map 组件。
+	const toPoint = (store) => {
+		if (!store || store.latitude === null || store.latitude === undefined) return null
+		if (store.longitude === null || store.longitude === undefined) return null
+		const latitude = Number(store.latitude)
+		const longitude = Number(store.longitude)
+		if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
+		if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null
+		return { latitude, longitude }
+	}
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
 		data() {
 			return {
-				selectedMarker: demoStores[0].id,
-				selectedStore: demoStores[0],
+				allStores: demoStores,
 				stores: demoStores,
-				zoomLevel: 12,
-				markers: []
+				markers: [],
+				markerStores: {},
+				selectedStore: demoStores[0] || null,
+				center: { latitude: 34.74725, longitude: 113.62493 },
+				scale: 11,
+				// 用户拖动后的视野，只在重建 map 时回填，避免和绑定值互相触发形成循环。
+				restoreCenter: null,
+				restoreScale: 11,
+				mapError: '',
+				userLocation: null,
+				currentCity: '',
+				amapReady: false,
+				noticeText: '正在加载门店…',
+				searchVisible: false,
+				searchKeyword: '',
+				searchLabel: '',
+				searchResults: [],
+				searching: false,
+				searchError: ''
 			}
 		},
 		computed: {
 			mapCity() {
-				return this.selectedStore.city || '全城门店'
+				return this.currentCity || (this.selectedStore && this.selectedStore.city) || '全城门店'
+			},
+			hasUserLocation() {
+				return Boolean(this.userLocation)
 			}
 		},
 		async onLoad(options) {
 			const requestedId = options && options.id ? options.id : ''
-			try {
-				const stores = await fetchStores()
-				if (stores.length) this.stores = stores
-			} catch (error) {
-				// Keep the bundled map catalog available when the API is offline.
-			}
-			this.markers = this.buildMarkers(this.stores)
-			const selected = this.stores.find((store) => String(store.id) === String(requestedId)) || this.stores[0]
-			if (selected) {
-				this.selectedStore = selected
-				this.selectedMarker = selected.id
-			}
-		},
-		watch: {
-			selectedMarker(value) {
-				const store = this.stores.find((item) => String(item.id) === String(value))
-				if (store) this.selectedStore = store
-			}
+			await this.loadStores(requestedId)
+			this.amapReady = await isAmapReady()
+			this.requestLocation()
 		},
 		methods: {
-			buildMarkers(stores) {
-				const positions = [
-					{ top: '42%', left: '44%' },
-					{ top: '55%', left: '65%' },
-					{ top: '70%', left: '26%' },
-					{ top: '28%', left: '27%' },
-					{ top: '36%', left: '72%' },
-					{ top: '76%', left: '62%' }
-				]
-				return stores.map((store, index) => ({
-					id: store.id,
-					name: store.shortName || store.name,
-					price: store.price,
-					...positions[index % positions.length]
-				}))
+			async loadStores(requestedId) {
+				let list = demoStores
+				try {
+					const remote = await fetchStores()
+					if (remote.length) list = remote
+				} catch (error) {
+					// 后端不可用时保留演示数据，保证地图页仍可预览。
+				}
+				this.allStores = list.filter((store) => toPoint(store))
+				this.stores = this.allStores
+				this.selectedStore = this.stores.find((store) => String(store.id) === String(requestedId))
+					|| this.stores[0]
+					|| null
+				this.buildMarkers()
+				this.centerOnStores()
+				this.noticeText = `已加载 ${this.stores.length} 家营业门店，可点击价格标记查看详情`
+			},
+			buildMarkers() {
+				const selectedId = this.selectedStore ? String(this.selectedStore.id) : ''
+				this.markerStores = {}
+				this.markers = this.stores.reduce((result, store, index) => {
+					const point = toPoint(store)
+					if (!point) return result
+					const markerId = index + 1
+					this.markerStores[markerId] = store
+					const selected = String(store.id) === selectedId
+					result.push({
+						id: markerId,
+						latitude: point.latitude,
+						longitude: point.longitude,
+						// 默认图标也必须给宽高，否则基础库渲染层会报 marker 缺尺寸。
+						width: 24,
+						height: 34,
+						callout: {
+							content: `¥${store.price || '--'}`,
+							color: selected ? '#ffffff' : '#0b6b6b',
+							fontSize: 11,
+							borderRadius: 9,
+							borderWidth: 1,
+							borderColor: selected ? '#0f6b6b' : '#d8e6e6',
+							bgColor: selected ? '#0f6b6b' : '#ffffff',
+							padding: 5,
+							display: 'ALWAYS',
+							textAlign: 'center'
+						}
+					})
+					return result
+				}, [])
+			},
+			centerOnStores() {
+				if (!this.stores.length) return
+				const total = this.stores.reduce((acc, store) => {
+					const point = toPoint(store)
+					acc.latitude += point.latitude
+					acc.longitude += point.longitude
+					return acc
+				}, { latitude: 0, longitude: 0 })
+				this.center = {
+					latitude: total.latitude / this.stores.length,
+					longitude: total.longitude / this.stores.length
+				}
+				this.scale = 11
+			},
+			requestLocation() {
+				uni.getLocation({
+					type: 'gcj02',
+					isHighAccuracy: true,
+					success: (result) => {
+						this.userLocation = { latitude: result.latitude, longitude: result.longitude }
+						this.loadNearby(result.latitude, result.longitude)
+						this.loadAddress(result.latitude, result.longitude)
+					},
+					fail: () => {
+						// 用户拒绝授权时保持门店中心，不阻塞地图浏览。
+					}
+				})
+			},
+			async loadNearby(latitude, longitude) {
+				try {
+					const nearby = (await fetchNearbyStores(latitude, longitude, RADIUS_KM))
+						.filter((store) => toPoint(store))
+					if (!nearby.length) {
+						this.noticeText = `附近 ${RADIUS_KM} 公里内暂无门店，已展示全部 ${this.allStores.length} 家`
+						return
+					}
+					this.stores = nearby
+					this.selectedStore = nearby[0]
+					this.buildMarkers()
+					this.center = { latitude, longitude }
+					this.scale = 12
+					this.noticeText = `附近 ${RADIUS_KM} 公里内 ${nearby.length} 家营业门店`
+				} catch (error) {
+					this.noticeText = `已加载 ${this.stores.length} 家营业门店，可点击价格标记查看详情`
+				}
+			},
+			async loadAddress(latitude, longitude) {
+				try {
+					const result = await reverseGeocode(latitude, longitude)
+					this.currentCity = result.city
+				} catch (error) {
+					// 高德未配置时静默失败，城市名回退到门店所在城市。
+					this.currentCity = ''
+				}
+			},
+			onMarkerTap(event) {
+				const detail = (event && event.detail) || {}
+				const store = this.markerStores[Number(detail.markerId)]
+				if (!store) return
+				this.selectedStore = store
+				this.buildMarkers()
+			},
+			// 只记录视野，不回写绑定值：绑定值一变地图会重新定位，再触发 regionchange 就成了死循环。
+			onRegionChange(event) {
+				const detail = (event && event.detail) || {}
+				const phase = detail.type || (event && event.type)
+				if (phase !== 'end') return
+				const center = detail.centerLocation
+				if (center && Number.isFinite(center.latitude) && Number.isFinite(center.longitude)) {
+					this.restoreCenter = { latitude: center.latitude, longitude: center.longitude }
+				}
+				if (Number.isFinite(detail.scale)) this.restoreScale = detail.scale
+			},
+			onMapError(event) {
+				const detail = (event && event.detail) || {}
+				this.mapError = detail.errMsg || '未知错误'
 			},
 			viewList() {
 				uni.navigateTo({ url: '/pages/store/list' })
 			},
 			goDetail() {
+				if (!this.selectedStore) return
 				goPage(`/pages/store/detail?id=${this.selectedStore.id}`)
 			},
 			callStore() {
+				const phoneNumber = (this.selectedStore && this.selectedStore.phone) || '037188886622'
 				uni.makePhoneCall({
-					phoneNumber: this.selectedStore.phone || '037188886622',
+					phoneNumber,
 					fail: () => showToast('暂无法拨打门店电话')
 				})
 			},
 			openLocation() {
+				const point = toPoint(this.selectedStore)
+				if (!point) {
+					showToast('该门店暂无坐标信息')
+					return
+				}
 				uni.openLocation({
-					latitude: Number(this.selectedStore.latitude),
-					longitude: Number(this.selectedStore.longitude),
+					latitude: point.latitude,
+					longitude: point.longitude,
 					name: this.selectedStore.name,
 					address: this.selectedStore.address,
 					fail: () => showToast('地图服务暂不可用')
 				})
 			},
 			zoomIn() {
-				this.zoomLevel = Math.min(18, this.zoomLevel + 1)
-				showToast(`地图级别 ${this.zoomLevel}`)
+				this.scale = Math.min(20, this.scale + 1)
 			},
 			zoomOut() {
-				this.zoomLevel = Math.max(8, this.zoomLevel - 1)
-				showToast(`地图级别 ${this.zoomLevel}`)
+				this.scale = Math.max(3, this.scale - 1)
 			},
 			locateUser() {
 				uni.getLocation({
 					type: 'gcj02',
-					success: () => showToast('已回到当前位置'),
-					fail: () => showToast('未开启定位权限')
+					isHighAccuracy: true,
+					success: (result) => {
+						this.userLocation = { latitude: result.latitude, longitude: result.longitude }
+						this.center = { latitude: result.latitude, longitude: result.longitude }
+						this.scale = 14
+						this.loadNearby(result.latitude, result.longitude)
+						this.loadAddress(result.latitude, result.longitude)
+						showToast('已回到当前位置')
+					},
+					fail: () => showToast('未开启定位权限，请在设置中允许位置信息')
 				})
+			},
+			openSearch() {
+				if (this.restoreCenter) this.center = this.restoreCenter
+				this.restoreScale = this.scale
+				this.searchVisible = true
+				this.searchError = ''
+				this.searchResults = []
+			},
+			closeSearch() {
+				// 地图在搜索期间被卸载，关闭前把视野补回去，重新挂载时不会跳回初始位置。
+				if (this.restoreCenter) this.center = this.restoreCenter
+				this.scale = this.restoreScale
+				this.searchVisible = false
+				this.searchKeyword = ''
+				this.searchResults = []
+				this.searchError = ''
+			},
+			async runSearch() {
+				const keyword = this.searchKeyword.trim()
+				if (!keyword) return
+				this.searching = true
+				this.searchError = ''
+				try {
+					const results = await searchPlaces(keyword, this.currentCity)
+					this.searchResults = results
+					if (!results.length) this.searchError = '没有找到匹配的地点'
+				} catch (error) {
+					this.searchResults = []
+					this.searchError = (error && error.message) || '高德搜索失败，请检查 Key 与合法域名'
+				} finally {
+					this.searching = false
+				}
+			},
+			async pickPlace(place) {
+				this.searchVisible = false
+				this.searchKeyword = ''
+				this.searchResults = []
+				this.searchLabel = place.name
+				this.center = { latitude: place.latitude, longitude: place.longitude }
+				this.scale = 14
+				this.loadAddress(place.latitude, place.longitude)
+				await this.loadNearby(place.latitude, place.longitude)
 			}
 		}
 	}
@@ -254,151 +474,38 @@
 		height: 860rpx;
 		overflow: hidden;
 		background-color: #edf2f3;
-		background-image: linear-gradient(90deg, rgba(255, 255, 255, 0.85) 3rpx, transparent 3rpx), linear-gradient(rgba(255, 255, 255, 0.85) 3rpx, transparent 3rpx);
-		background-size: 124rpx 124rpx;
 	}
 
-	.park {
+	.amap-canvas {
+		width: 100%;
+		height: 860rpx;
+	}
+
+	.map-error-notice {
 		position: absolute;
-		width: 250rpx;
-		height: 210rpx;
-		background: #daf1da;
-		border-radius: 45% 55% 48% 52%;
-	}
-
-	.park-one {
-		top: 110rpx;
-		left: -50rpx;
-	}
-
-	.park-two {
-		right: -70rpx;
-		bottom: 80rpx;
-	}
-
-	.river {
-		position: absolute;
-		right: -160rpx;
-		bottom: 170rpx;
-		width: 900rpx;
-		height: 100rpx;
-		background: #c5edf3;
-		transform: rotate(-10deg);
-	}
-
-	.road {
-		position: absolute;
-		height: 12rpx;
-		background: #ffffff;
-		border: 4rpx solid #f7dca4;
-		transform: rotate(-52deg);
-	}
-
-	.road-one {
-		top: 280rpx;
-		left: -180rpx;
-		width: 1040rpx;
-	}
-
-	.road-two {
-		top: 450rpx;
-		left: 0;
-		width: 920rpx;
-		transform: rotate(2deg);
-	}
-
-	.road-three {
-		top: 160rpx;
-		left: 370rpx;
-		width: 14rpx;
-		height: 720rpx;
-		transform: rotate(12deg);
-	}
-
-	.map-label {
-		position: absolute;
-		color: #7f9c9f;
+		top: 130rpx;
+		left: 26rpx;
+		right: 26rpx;
+		z-index: 12;
+		display: flex;
+		align-items: center;
+		padding: 16rpx 22rpx;
+		color: #8a3b1f;
+		background: #ffe9dd;
+		border-radius: 14rpx;
 		font-size: 20rpx;
 	}
 
-	.label-park {
-		top: 168rpx;
-		left: 70rpx;
-	}
-
-	.label-metro {
-		top: 200rpx;
-		right: 42rpx;
-	}
-
-	.label-river {
-		right: 90rpx;
-		bottom: 235rpx;
-	}
-
-	.user-marker {
-		position: absolute;
-		top: 50%;
-		left: 48%;
-		display: flex;
-		align-items: center;
-		flex-direction: column;
-		color: #ffffff;
-		text-shadow: 0 4rpx 10rpx rgba(0, 106, 106, 0.24);
-	}
-
-	.user-marker text {
-		margin-top: 4rpx;
-		padding: 7rpx 14rpx;
-		color: var(--proto-primary-dark);
-		background: rgba(255, 255, 255, 0.86);
-		border-radius: 16rpx;
-		font-size: 19rpx;
-		text-shadow: none;
-	}
-
-	.store-marker {
-		position: absolute;
-		display: flex;
-		align-items: center;
-		flex-direction: column;
-		color: #ffffff;
-		background: var(--proto-primary);
-		border: 8rpx solid #ffffff;
-		border-radius: 50% 50% 50% 0;
-		transform: rotate(-45deg);
-		box-shadow: 0 8rpx 18rpx rgba(0, 106, 106, 0.22);
-	}
-
-	.store-marker > text:first-child {
-		padding: 11rpx 7rpx;
-		font-size: 20rpx;
-		font-weight: 800;
-		transform: rotate(45deg);
-	}
-
-	.marker-name {
-		position: absolute;
-		top: 68rpx;
-		width: 180rpx;
-		padding: 6rpx 8rpx;
-		color: var(--proto-text);
-		background: #ffffff;
-		border-radius: 8rpx;
-		font-size: 18rpx;
-		text-align: center;
-		transform: rotate(45deg);
-	}
-
-	.marker-name.selected {
-		color: #ffffff;
-		background: var(--proto-text);
+	.map-error-notice .proto-icon {
+		margin-right: 8rpx;
+		flex: 0 0 auto;
 	}
 
 	.map-controls {
 		position: absolute;
 		top: 220rpx;
 		right: 24rpx;
+		z-index: 10;
 		display: flex;
 		align-items: center;
 		flex-direction: column;
@@ -424,6 +531,7 @@
 		position: absolute;
 		top: 42rpx;
 		left: 50%;
+		z-index: 10;
 		padding: 16rpx 28rpx;
 		color: var(--proto-text);
 		background: #ffffff;
@@ -431,6 +539,87 @@
 		font-size: 23rpx;
 		transform: translateX(-50%);
 		box-shadow: 0 8rpx 20rpx rgba(32, 37, 43, 0.1);
+	}
+
+	.map-search-panel {
+		position: absolute;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		left: 0;
+		z-index: 20;
+		display: flex;
+		flex-direction: column;
+		background: #ffffff;
+	}
+
+	.map-search-bar {
+		display: flex;
+		align-items: center;
+		gap: 16rpx;
+		padding: 24rpx 26rpx;
+		border-bottom: 1rpx solid #e4ebec;
+	}
+
+	.map-search-input {
+		display: flex;
+		align-items: center;
+		flex: 1;
+		height: 72rpx;
+		padding: 0 22rpx;
+		background: #f1f5f5;
+		border-radius: 36rpx;
+	}
+
+	.map-search-input input {
+		flex: 1;
+		margin-left: 10rpx;
+		color: var(--proto-text);
+		font-size: 24rpx;
+	}
+
+	.map-search-input .proto-icon {
+		flex: 0 0 auto;
+	}
+
+	.search-placeholder {
+		color: var(--proto-muted);
+		font-size: 23rpx;
+	}
+
+	.map-search-cancel {
+		color: var(--proto-primary-dark);
+		font-size: 24rpx;
+		font-weight: 700;
+	}
+
+	.map-search-results {
+		flex: 1;
+	}
+
+	.map-search-tip {
+		padding: 60rpx 0;
+		color: var(--proto-muted);
+		font-size: 23rpx;
+		text-align: center;
+	}
+
+	.map-search-result {
+		padding: 24rpx 30rpx;
+		border-bottom: 1rpx solid #f0f4f4;
+	}
+
+	.result-name {
+		color: var(--proto-text);
+		font-size: 26rpx;
+		font-weight: 700;
+	}
+
+	.result-address {
+		display: block;
+		margin-top: 8rpx;
+		color: var(--proto-muted);
+		font-size: 21rpx;
 	}
 
 	.map-store-card {

@@ -55,13 +55,13 @@
 - 将后端 DTO 映射为页面模型。
 - 仅本地演示记录使用演示兜底；服务端 GUID 记录不会用样例价格、图片、评分或房型补全。
 
-默认 API 地址是 http://localhost:5180/api/v1。构建时可通过 `VITE_API_BASE_URL` 配置；开发者工具中也可按设备覆盖：
+默认 API 地址是云服务器 `http://39.96.200.62/api/v1`（`common/api.js` 的 `defaultApiBaseUrl`）。构建时可通过 `VITE_API_BASE_URL` 配置；开发者工具中也可按设备覆盖：
 
 ~~~js
-uni.setStorageSync('tcpms.apiBaseUrl', 'http://localhost:5180/api/v1')
+uni.setStorageSync('tcpms.apiBaseUrl', 'http://39.96.200.62/api/v1')
 ~~~
 
-微信小程序正式版必须配置 HTTPS API 域名，并在公众平台加入 request 合法域名。`tcpms.apiBaseUrl` 优先于构建变量，适合开发联调；上线前检查设备存储中没有旧的测试地址。
+本地联调后端时把 `defaultApiBaseUrl` 或上面的存储值改回 `http://localhost:5180/api/v1`（真机不能写 localhost，要用开发机的局域网 IP）。开发者工具需勾选“不校验合法域名”才能请求 HTTP 的 IP 地址；正式版必须换成 HTTPS 域名，并在公众平台加入 request 合法域名。`tcpms.apiBaseUrl` 优先于构建变量，适合开发联调；上线前检查设备存储中没有旧的测试地址。
 
 后端字段与页面字段不一定相同，例如：
 

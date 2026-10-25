@@ -235,7 +235,15 @@ export const showToast = (title) => {
 export const showPrototypeToast = showToast
 
 export const goPage = (path) => {
-	uni.navigateTo({ url: path })
+	uni.navigateTo({
+		url: path,
+		// 跳转失败原本没有任何反馈，页面“点了没反应”时无法定位；这里至少把原因吐出来。
+		fail: (error) => {
+			const reason = (error && error.errMsg) || '未知原因'
+			showToast(`页面打开失败：${reason}`)
+			console.error('[goPage]', path, reason)
+		}
+	})
 }
 
 export const goRoot = (path) => {

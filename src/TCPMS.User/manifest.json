@@ -54,6 +54,13 @@
         "setting" : {
             "urlCheck" : false
         },
+        /* 定位能力：position 相关接口必须在 manifest 声明，否则 wx.getLocation 会被直接拒绝 */
+        "permission" : {
+            "scope.userLocation" : {
+                "desc" : "用于展示附近门店、计算距离并提供门店导航"
+            }
+        },
+        "requiredPrivateInfos" : [ "getLocation" ],
         "usingComponents" : true
     },
     "mp-alipay" : {

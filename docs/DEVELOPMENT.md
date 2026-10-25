@@ -115,6 +115,23 @@ dotnet run --project src/backend/TCPMS.Api --urls http://localhost:5180
 
 服务端同时会校验微信应答的 `Wechatpay-Signature`，避免伪造的“查单成功”响应。小程序支付成功后还会调用 `GET /api/v1/orders/{id}/pay-status` 主动查单，后台另有一个每 60 秒运行一次的兜底任务，把回调丢失但微信侧已支付的订单补记为已支付。生产环境要求真实微信登录凭证，开发用 `devOpenId` 和 `mock-pay` 不会生效。
 
+#### 小程序端地图
+
+小程序里的地图底图由微信原生 `map` 组件渲染（腾讯瓦片），高德只提供逆地理编码、POI 检索这类数据能力，没有“把高德地图嵌进小程序”的渲染方案。因此两个 Key 的类型不能混用：
+
+- `Amap__MiniProgramKey` 必须是“微信小程序”类型，并在高德控制台绑定小程序 AppID（`wx5c2bb8ff3259ff29`）。它会通过 `GET /api/v1/map/config` 下发给小程序端，属于公开信息。
+- `Amap__ServerKey` 必须是“Web 服务”类型，只存在服务端，用于门店地址解析和坐标维护。
+
+小程序端实现位于 `src/TCPMS.User/pages/store/map.vue` 和 `common/amap.js`。发布前还需要完成三件事：
+
+1. 微信公众平台 > 开发管理 > 服务器域名，把 `https://restapi.amap.com` 加入 request 合法域名。开发者工具或真机调试时可以勾选“不校验合法域名”跳过。
+2. 微信公众平台 > 设置 > 服务内容声明 > 用户隐私保护指引，声明“位置信息”。未声明时 `wx.getLocation` 会直接失败，页面只能显示门店但无法定位。
+3. `manifest.json` 的 `mp-weixin` 节点已声明 `permission.scope.userLocation` 和 `requiredPrivateInfos: ["getLocation"]`，缺失会导致定位接口无响应。
+
+若高德 Key 类型错误或未配置，地图仍可浏览门店标记，只是城市名和地点搜索不可用；控制台返回的 `info` 会显示在搜索面板里便于定位问题。
+
+房型详情页 `pages/room/detail.vue` 的“周边位置”卡片同样用原生 `map` 渲染：默认定位门店坐标（后端没存坐标时用 `v3/geocode/geo` 按地址兜底反查），再用 `v3/place/around` 拉取 1.2km 内的餐饮、购物、风景、地铁、公交、医疗 POI，作为地图标记和横向标签；点标签或标记会把视野移过去。地图本身支持拖动和双指缩放，点地址行会调起 `wx.openLocation` 打开全屏地图并可直接导航。
+
 ### 5.2 没有公网域名时怎么联调
 
 回调地址只是下单参数，微信不会校验可达性，因此本地可以先填占位地址：

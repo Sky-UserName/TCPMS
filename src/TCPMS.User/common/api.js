@@ -1,22 +1,12 @@
 import { demoRooms, demoStores, prototypeImages } from './prototype.js'
 import { getApiToken, getBooking, logout, saveApiToken, saveOrders, upsertOrder } from './app-store.js'
 
-// 真机预览/真机调试时手机访问不到 localhost，必须用开发机的局域网地址。
-// 换了 Wi-Fi 或路由器重新分配 IP 后，只改下面这一行。
-const devMachineApiBaseUrl = 'http://192.168.1.16:5180/api/v1'
-const devtoolsApiBaseUrl = 'http://localhost:5180/api/v1'
+// 后端地址：已部署到云服务器，开发者工具与真机统一走这里。
+// 要临时切回本机后端时改这一行（真机访问不到 localhost，得写开发机的局域网 IP）。
+const defaultApiBaseUrl = 'http://39.96.200.62/api/v1'
 
-// 延迟判断：模块加载早期 uni 可能还没就绪，取不到 platform 时按开发者工具处理。
-const resolveDefaultApiBaseUrl = () => {
-	if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL
-	try {
-		return uni.getSystemInfoSync().platform === 'devtools'
-			? devtoolsApiBaseUrl
-			: devMachineApiBaseUrl
-	} catch (error) {
-		return devtoolsApiBaseUrl
-	}
-}
+// 环境变量优先，方便打包时用 VITE_API_BASE_URL 覆盖。
+const resolveDefaultApiBaseUrl = () => import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl
 
 const getApiBaseUrl = () => {
 	try {
@@ -360,6 +350,16 @@ export const fetchNearbyStores = async (latitude, longitude, radiusKm = 50) => {
 		query: { latitude, longitude, radiusKm }
 	})
 	return Array.isArray(data) ? data.map(mapStore) : []
+}
+
+// 高德小程序端 Key 由后端 /map/config 下发，前端不硬编码；接口不可用时返回未启用状态。
+export const fetchMapConfig = async () => {
+	const data = await apiRequest({ path: '/map/config' })
+	return {
+		amapEnabled: Boolean(data && data.amapEnabled),
+		miniProgramKey: (data && data.miniProgramKey) || '',
+		defaultRadiusKm: data && data.defaultRadiusKm ? Number(data.defaultRadiusKm) : 50
+	}
 }
 
 export const fetchStoreDetail = async (id) => {
