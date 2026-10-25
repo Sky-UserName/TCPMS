@@ -59,7 +59,7 @@
 						key: 'messages',
 						label: '消息',
 						icon: '/static/prototype-icons/ui-support.png',
-						activeIcon: '/static/prototype-icons/ui-support.png',
+						activeIcon: '/static/prototype-icons/ui-support-active.png',
 						path: '/pages/message/list'
 					},
 					{
@@ -82,7 +82,11 @@
 				if (item.key === this.active) {
 					return
 				}
-				uni.reLaunch({ url: item.path })
+				// 5 个主页面已在 pages.json 注册为 tabBar 页面，switchTab 复用页面实例、不重建，避免切换闪屏。
+				uni.switchTab({
+					url: item.path,
+					fail: () => uni.reLaunch({ url: item.path })
+				})
 			}
 		}
 	}

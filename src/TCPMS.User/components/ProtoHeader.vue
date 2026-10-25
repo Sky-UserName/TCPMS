@@ -26,15 +26,14 @@
 				'proto-header-title-center': titleAlign === 'center'
 			}"
 		>{{ title }}</text>
-
-		<view class="proto-header-trailing">
+		<!-- <view class="proto-header-trailing">
 			<button v-if="action && theme !== 'green'" class="proto-header-icon-button proto-header-action" hover-class="none" :aria-label="actionLabel" @tap="handleAction">
 				<ProtoIcon :name="actionIcon" :tone="iconTone" :size="34" />
 			</button>
 			<button v-if="trailingAvatar && theme !== 'green'" class="proto-header-user-button" hover-class="none" aria-label="个人中心" @tap="handleProfile">
 				<ProtoIcon name="user" tone="white" :size="28" />
 			</button>
-		</view>
+		</view> -->
 	</view>
 </template>
 
@@ -104,9 +103,9 @@
 			headerStyle() {
 				const statusBar = Number(this.statusBarHeightRpx) || 0
 				return {
-					minHeight: `${112 + statusBar}rpx`,
-					height: `${112 + statusBar}rpx`,
-					paddingTop: `${20 + statusBar}rpx`
+					minHeight: `${88 + statusBar}rpx`,
+					height: `${88 + statusBar}rpx`,
+					paddingTop: `${statusBar}rpx`
 				}
 			},
 			actionIcon() {
@@ -156,7 +155,7 @@
 				const pages = getCurrentPages()
 				const current = pages.length ? pages[pages.length - 1].route : ''
 				if (current === 'pages/me/index') return
-				uni.navigateTo({
+				uni.switchTab({
 					url: '/pages/me/index',
 					fail: () => uni.reLaunch({ url: '/pages/me/index' })
 				})

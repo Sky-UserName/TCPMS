@@ -37,7 +37,7 @@
 
 		<view class="proto-card itinerary-card" @tap="goDate">
 			<view class="section-heading itinerary-heading">
-				<view class="inline-icon-text"><ProtoIcon name="calendar" :size="22" /><text>入住日期</text></view>
+				<view class="inline-icon-text"><ProtoIcon name="calendar" :size="26" /><text>入住日期</text></view>
 				<view class="proto-link" @tap.stop="goDate"><text>修改日期</text><ProtoIcon name="chevron-right" :size="20" /></view>
 			</view>
 			<view class="stay-strip">

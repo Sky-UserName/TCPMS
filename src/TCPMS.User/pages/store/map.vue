@@ -279,7 +279,7 @@
 				this.mapError = detail.errMsg || '未知错误'
 			},
 			viewList() {
-				uni.navigateTo({ url: '/pages/store/list' })
+				uni.switchTab({ url: '/pages/store/list', fail: () => uni.reLaunch({ url: '/pages/store/list' }) })
 			},
 			goDetail() {
 				if (!this.selectedStore) return

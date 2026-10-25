@@ -65,6 +65,9 @@
 				]
 			}
 		},
+		onShow() {
+			uni.hideTabBar({ animation: false, fail: () => {} })
+		},
 		methods: {
 			openMessage(item) {
 				if (item.unread) {

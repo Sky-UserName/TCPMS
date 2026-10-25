@@ -1,7 +1,6 @@
 <template>
 	<view class="proto-page store-list-page">
-		<ProtoHeader title="民宿搜索" title-align="center" theme="green" />
-
+		<ProtoHeader title="民宿搜索" title-align="center" theme="green" :back="false"/>
 		<view class="store-search-panel">
 			<button class="city-button" hover-class="none" @tap="showCity = true">
 				<text>{{ city }}</text>
@@ -91,12 +90,14 @@
 	import { demoStores, goPage, showToast } from '@/common/prototype.js'
 	import { fetchStores } from '@/common/api.js'
 	import { getBooking } from '@/common/app-store.js'
+	import { takeTabParams } from '@/common/tab-params.js'
 
 	export default {
 		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
 				stores: demoStores,
+				typeFilter: '',
 				catalogState: 'loading',
 				booking: getBooking(),
 				city: '郑州市',
@@ -120,7 +121,13 @@
 			this.loadStores()
 		},
 		onShow() {
+			uni.hideTabBar({ animation: false, fail: () => {} })
 			this.booking = getBooking()
+			// 从首页"品质/整租"入口或其他 tab 跳来时，取走一次性筛选意图；无意图时保持当前筛选。
+			const tabParams = takeTabParams()
+			if (tabParams) {
+				this.typeFilter = tabParams.type || ''
+			}
 		},
 		computed: {
 			radiusLabel() {

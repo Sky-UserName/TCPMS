@@ -1,4 +1,3 @@
-import { demoRooms, demoStores, prototypeImages } from './prototype.js'
 import { getApiToken, getBooking, logout, saveApiToken, saveOrders, upsertOrder } from './app-store.js'
 
 // 后端地址：已部署到云服务器，开发者工具与真机统一走这里。
