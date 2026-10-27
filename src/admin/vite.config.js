@@ -11,6 +11,14 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:5180',
         changeOrigin: true
+      },
+      '/static': {
+        target: 'http://localhost:5180',
+        changeOrigin: true
+      },
+      '/uploads': {
+        target: 'http://localhost:5180',
+        changeOrigin: true
       }
     }
   }

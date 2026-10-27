@@ -85,6 +85,8 @@ Authorization: Bearer <JWT>
 | GET | /api/v1/stores/{id} | 无 | 门店 GUID |
 | POST | /api/v1/stores/{id}/geo/geocode | admin | GeocodeRequest |
 | POST | /api/v1/stores/{id}/geo/reverse | admin | ReverseGeocodeRequest |
+| POST | /api/v1/admin/geo/geocode | admin | GeocodeRequest（只解析，不写库） |
+| POST | /api/v1/admin/geo/reverse | admin | ReverseGeocodeRequest（只解析，不写库） |
 | GET | /api/v1/admin/stores | admin | 后台门店列表 |
 | GET | /api/v1/admin/stores/{id} | admin | 后台门店详情 |
 | POST | /api/v1/admin/stores | admin | StoreRequest |
@@ -92,7 +94,7 @@ Authorization: Bearer <JWT>
 
 核心响应：
 
-- StoreListItem：id、name、address、phone、status、longitude、latitude、distanceKm、hasMapLocation。
+- StoreListItem：id、name、address、phone、status、longitude、latitude、distanceKm、hasMapLocation、featuredRoomId、featuredRoomName、startingPriceCents、tags；`/stores` 与 `/stores/nearby` 额外返回 rooms（在售房型摘要，每店最多 6 条，首页直接用房型卡片渲染），后台列表不返回。
 - StoreDetail：store 和已上架 roomTypes。
 - StoreRequest：name、code、description、province、city、district、address、phone、longitude、latitude、status、sortOrder。
 - GeocodeRequest：address、city。
@@ -266,3 +268,65 @@ AdminUserRequest：username、displayName、password、phoneNumber、storeId、i
 | POST | /api/v1/admin/withdrawals/{id}/review | 批准或驳回提现 |
 
 评价、提现审核完成后，`/api/v1/admin/notifications` 会返回最新待办数量；管理后台右上角消息中心和控制台待办共用该接口。
+
+## 12. 小程序商家中心
+
+商家身份不单独建账号表：后端用 `Store.OwnerUsername`（微信 OpenId）或 `Store.OwnerPhone`（已绑定手机号）匹配当前登录的 miniapp 用户。未匹配到门店时 `/merchant/profile` 返回 `enabled=false`，其余商家接口返回 403 `merchant_not_bound`。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | /api/v1/merchant/profile | 门店名称、房型数、待处理订单数、入驻状态 |
+| GET | /api/v1/merchant/rooms | 当前门店房型、价格、近 14 天可售库存、上下架状态 |
+| GET | /api/v1/merchant/rooms/{id} | 房型详情，用于发布页回填；`images` 返回全部图片，`image` 为第一张（封面） |
+| POST | /api/v1/merchant/rooms | 新建房型，同时生成 180 天库存和房间资源；`imageUrls` 传图片数组（最多 9 张），兼容旧字段 `imageUrl` |
+| PUT | /api/v1/merchant/rooms/{id} | 更新房型、库存和上下架状态；传 `imageUrls` 时整组覆盖（可传空数组清空） |
+| POST | /api/v1/merchant/rooms/upload | multipart `file`，上传房型图片，返回 `{ url, fileName, size }`，用于发布页多图上传 |
+| POST | /api/v1/merchant/rooms/{id}/publish?published=true\|false | 上架或下架 |
+| GET | /api/v1/merchant/orders | 本店订单，支持 status=pending/stay/done/cancel |
+| POST | /api/v1/merchant/orders/{id}/confirm | 已支付待确认 → 已确认待入住 |
+| POST | /api/v1/merchant/orders/{id}/check-in | 办理入住并占用房间资源 |
+| POST | /api/v1/merchant/orders/{id}/check-out | 办理退房，释放资源并结算库存 |
+| GET | /api/v1/merchant/verify-records | 本店已核销订单 |
+| POST | /api/v1/merchant/verify | body { code }，按订单号核销并办理入住 |
+| GET | /api/v1/merchant/finance | 今日/7 天/30 天/全部统计和钱包余额 |
+| POST | /api/v1/merchant/withdrawals | body { amountCents, account }，提交提现申请 |
+| GET | /api/v1/merchant/reviews | 本店评价及商家回复 |
+| POST | /api/v1/merchant/reviews/{id}/reply | body { content } |
+| GET/POST/PUT | /api/v1/merchant/coupons、/coupons/{id} | 优惠券列表、创建、启停 |
+| GET/POST | /api/v1/merchant/staff | 店主和门店员工，新增员工会创建 AdminUser（初始密码需首次登录修改） |
+| GET/PUT | /api/v1/merchant/settings | 民宿名称、电话、入离时间、退订规则 |
+| GET/PUT | /api/v1/merchant/message-settings | 订阅消息偏好 |
+
+商家端轻量配置（优惠券、评价回复、设置、订阅偏好）存放在 `AdminManagedItems` 的 JSON 行中，键名带门店 ID，避免为原型阶段新增表结构。
+
+## 13. 小程序用户内容
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | /api/v1/me/summary | 收藏数、常用入住人数、浏览记录数、未读消息数、已完成订单数、入住天数 |
+| GET/POST/DELETE | /api/v1/me/favorites、/favorites/{id} | 收藏列表、新增、取消 |
+| GET/PUT | /api/v1/me/guests | 常用入住人，最多 10 位 |
+| GET/POST/DELETE | /api/v1/me/recent | 浏览记录，最多 20 条 |
+| GET | /api/v1/me/messages | 平台公告 + 最近订单状态消息 |
+| POST | /api/v1/me/messages/{id}/read | 标记消息已读 |
+| GET | /api/v1/articles、/articles/{id} | 攻略列表与详情 |
+| GET | /api/v1/stores/filters | 已上线门店覆盖的城市和区域 |
+| GET | /api/v1/pages/{key} | 说明类页面内容：`rule`（服务协议/隐私政策/权限SDK）、`auth-privacy`（授权前隐私要点）、`service-contact`（客服页文案） |
+
+收藏、入住人、浏览记录、已读状态按用户 ID 存放在 `AdminManagedItems` JSON 行中；攻略、平台公告和说明页文案是全局内容配置，首次启动由 SeedData 写入。
+
+`/me/summary` 的 `points` 默认按「已完成订单实付 1 元累计 1 分」计算，运营可通过写入 `AdminManagedItems` 的 `user_points:{userId}` 覆盖；`stayNights` 为已完成订单的入住晚数合计。
+
+`/pages/{key}` 的返回结构支持多种内容形态，页面按需取用：
+
+| 字段 | 说明 |
+| --- | --- |
+| title / subtitle / kicker / summary / badge / intro | 页面标题、副标题、导语、角标与高亮说明 |
+| version / effectiveAt / updatedAt | 版本、生效日期、更新日期文案 |
+| serviceHours / supportText / hotline / tags / notices | 客服类页面的服务时段、复制文案、热线、标签与服务说明 |
+| tabs[] | 多标签页内容（服务协议/隐私政策/权限SDK），每项含 `key`、`label`、`kicker`、`title`、`updatedAt`、`highlights[]`、`blocks[]`、`permissions[]` |
+| points[] | 有序要点（`index`、`title`、`body`） |
+| blocks[] | 正文块，`type` 为 `heading` / `paragraph` / `highlights` / `permissions`；`highlights` 可用 `style`（`rows` / `cards`）控制排版 |
+| permissions[] | 权限与 SDK 条目（`icon`、`title`、`desc`、`required`） |
+
+未配置的 `key` 返回 404 `page_not_found`，小程序端展示「内容加载失败 + 重试」，不再回退到写死的旧文案。

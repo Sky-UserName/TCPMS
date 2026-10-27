@@ -1,6 +1,7 @@
 <template>
 	<view class="proto-page order-list-page">
 		<ProtoHeader title="我的订单" title-align="center" theme="green" :back="false"/>
+		<template v-if="loggedIn">
 		<view class="order-search-box">
 			<ProtoIcon name="search" :size="34" />
 			<input v-model="searchText" placeholder="请输入房间名、订单号" placeholder-class="order-search-placeholder" />
@@ -58,6 +59,20 @@
 		</view>
 
 		<view v-if="visibleOrders.length" class="order-footer-note">已加载全部订单 · TCPMS 智选保障<text class="small">房源真实性 100% 官方现场实勘</text></view>
+		</template>
+
+		<template v-else>
+			<view class="order-login-panel">
+				<view class="order-login-icon"><ProtoIcon name="receipt" :size="64" /></view>
+				<text class="order-login-title">登录后查看订单</text>
+				<text class="order-login-desc">订单与入住信息仅对本人可见，登录后自动同步你的全部预订。</text>
+				<button class="order-login-button" hover-class="none" @tap="goLogin">
+					<ProtoIcon name="user" tone="white" :size="26" />
+					<text>微信授权登录</text>
+				</button>
+			</view>
+		</template>
+
 		<ProtoBottomNav active="orders" variant="root" />
 	</view>
 </template>
@@ -69,13 +84,16 @@
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { goPage, goRoot, showToast } from '@/common/prototype.js'
 	import { getApiToken, getOrders, isLoggedIn, resolveReviewTarget, updateOrder } from '@/common/app-store.js'
-	import { cancelRemoteOrder, fetchRemoteOrders } from '@/common/api.js'
+	import { cancelRemoteOrder, fetchRemoteOrders, redirectToLogin } from '@/common/api.js'
+
+	const isRemoteId = (value) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(value || ''))
 
 	export default {
 		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
 				orders: [],
+				loggedIn: false,
 				syncError: '',
 				syncing: true,
 				searchText: '',
@@ -113,12 +131,16 @@
 		},
 		methods: {
 			async loadOrders() {
-				this.orders = getOrders()
+				this.loggedIn = isLoggedIn() && Boolean(getApiToken())
 				this.syncError = ''
-				if (!isLoggedIn() || !getApiToken()) {
+				if (!this.loggedIn) {
+					// 未登录不展示任何订单（包括演示订单），登录后才拉取本人订单。
+					this.orders = []
 					this.syncing = false
 					return
 				}
+				// 先铺本机缓存的真实订单（GUID），再用服务端 /orders/me 的结果覆盖。
+				this.orders = getOrders().filter((order) => isRemoteId(order.id))
 				this.syncing = true
 				try {
 					this.orders = await fetchRemoteOrders()
@@ -127,6 +149,9 @@
 				} finally {
 					this.syncing = false
 				}
+			},
+			goLogin() {
+				redirectToLogin()
 			},
 			goDetail(order) {
 				goPage(`/pages/order/detail?id=${order.id}`)
@@ -176,8 +201,7 @@
 					content: '确认取消这笔待支付订单吗？',
 					success: async (res) => {
 						if (!res.confirm) return
-						const isRemoteId = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(order.id))
-						if (isRemoteId) {
+						if (isRemoteId(order.id)) {
 							try {
 								await cancelRemoteOrder(order.id)
 							} catch (error) {
@@ -190,11 +214,12 @@
 								statusKey: 'cancel',
 								action: '再次预订'
 							})
-							this.orders = getOrders()
+							this.orders = getOrders().filter((item) => isRemoteId(item.id))
 							showToast('演示订单仅在本机更新')
 							return
 						}
-						this.orders = getOrders()
+						// 取消成功后重新拉取本人订单，避免本地缓存里残留旧状态。
+						await this.loadOrders()
 						showToast('订单已取消')
 					}
 				})
@@ -239,16 +264,6 @@
 		font-weight: 750;
 	}
 
-	.order-sync {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 6rpx;
-		padding: 18rpx 24rpx;
-		color: var(--proto-muted);
-		font-size: 19rpx;
-		text-align: center;
-	}
 
 	.order-card {
 		padding: 20rpx;
@@ -654,5 +669,59 @@
 		color: #8a949d;
 		font-size: 18rpx;
 		text-align: center;
+	}
+
+	.order-login-panel {
+		display: flex;
+		align-items: center;
+		flex-direction: column;
+		padding: 180rpx 64rpx 80rpx;
+		text-align: center;
+	}
+
+	.order-login-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 168rpx;
+		height: 168rpx;
+		color: var(--proto-primary-deep);
+		background: #eef9fa;
+		border: 1rpx solid #d7eef1;
+		border-radius: 50%;
+	}
+
+	.order-login-title {
+		margin-top: 32rpx;
+		color: #1f2932;
+		font-size: 32rpx;
+		font-weight: 800;
+	}
+
+	.order-login-desc {
+		margin-top: 14rpx;
+		color: #87939d;
+		font-size: 22rpx;
+		line-height: 1.6;
+	}
+
+	.order-login-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 10rpx;
+		width: 424rpx;
+		height: 84rpx;
+		margin-top: 48rpx;
+		color: #ffffff;
+		background: #2aa9a9;
+		border-radius: 42rpx;
+		box-shadow: 0 10rpx 24rpx rgba(42, 169, 169, 0.24);
+		font-size: 26rpx;
+		font-weight: 700;
+	}
+
+	.order-login-button::after {
+		border: 0;
 	}
 </style>

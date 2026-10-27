@@ -326,7 +326,6 @@
 		background: var(--proto-primary);
 	}
 
-	.door-heading,
 	.store-heading,
 	.room-heading {
 		display: flex;
@@ -334,7 +333,6 @@
 		gap: 14rpx;
 	}
 
-	.door-icon,
 	.store-mark {
 		display: flex;
 		align-items: center;
@@ -346,20 +344,16 @@
 		border-radius: 50%;
 	}
 
-	.door-heading > .door-icon,
 	.store-heading > .store-mark {
 		flex: 0 0 54rpx;
 	}
 
-	.door-heading > view,
 	.store-heading > view,
 	.room-heading > view {
 		flex: 1;
 		min-width: 0;
 	}
 
-	.door-title,
-	.door-desc,
 	.store-brand,
 	.store-name,
 	.room-name,
@@ -367,13 +361,7 @@
 		display: block;
 	}
 
-	.door-title {
-		color: var(--proto-text);
-		font-size: 25rpx;
-		font-weight: 750;
-	}
 
-	.door-desc,
 	.store-brand,
 	.room-spec {
 		margin-top: 5rpx;
@@ -381,85 +369,6 @@
 		font-size: 18rpx;
 	}
 
-	.door-heading .proto-pill {
-		min-height: 34rpx;
-		font-size: 17rpx;
-	}
-
-	.door-code-row {
-		display: flex;
-		gap: 18rpx;
-		margin-top: 18rpx;
-		padding: 18rpx;
-		background: var(--proto-surface-low);
-		border-radius: 16rpx;
-	}
-
-	.door-code-row > view:first-child {
-		flex: 1;
-	}
-
-	.door-code-row text,
-	.door-code-row .small {
-		display: block;
-		color: var(--proto-muted);
-		font-size: 18rpx;
-	}
-
-	.door-code-row .strong {
-		margin-top: 8rpx;
-		color: var(--proto-primary-dark);
-		font-size: 38rpx;
-		letter-spacing: 5rpx;
-	}
-
-	.door-code-value {
-		display: flex;
-		align-items: center;
-		gap: 8rpx;
-	}
-
-	.door-code-row .small {
-		margin-top: 7rpx;
-	}
-
-	.qr-placeholder {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-direction: column;
-		width: 120rpx;
-		color: var(--proto-text);
-		background: #ffffff;
-		border-radius: 12rpx;
-	}
-
-	.qr-placeholder-icon {
-		display: block;
-	}
-
-	.qr-placeholder .small {
-		margin-top: 4rpx;
-		color: var(--proto-muted);
-		font-size: 16rpx;
-	}
-
-	.door-safe {
-		display: flex;
-		align-items: flex-start;
-		gap: 7rpx;
-		margin-top: 14rpx;
-		padding: 14rpx;
-		color: var(--proto-muted);
-		background: #eff8f7;
-		border-radius: 12rpx;
-		font-size: 18rpx;
-		line-height: 1.5;
-	}
-
-	.door-safe > text {
-		flex: 1;
-	}
 
 	.detail-store {
 		padding: 22rpx;

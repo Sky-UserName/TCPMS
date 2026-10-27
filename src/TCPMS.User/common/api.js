@@ -1,11 +1,16 @@
 import { getApiToken, getBooking, logout, saveApiToken, saveOrders, upsertOrder } from './app-store.js'
+import { ALLOW_DEV_LOGIN, API_BASE_URL_OVERRIDE, IS_DEV_BUILD } from './env.js'
+import { isLoginRedirecting, setLoginRedirecting } from './auth-gate.js'
 
-// 后端地址：已部署到云服务器，开发者工具与真机统一走这里。
-// 要临时切回本机后端时改这一行（真机访问不到 localhost，得写开发机的局域网 IP）。
-const defaultApiBaseUrl = 'http://39.96.200.62/api/v1'
+// 后端地址：默认连本机后端，发行包用 .env.production 或 VITE_API_BASE_URL 指定线上地址。
+// 真机调试访问不到 localhost，同样用 VITE_API_BASE_URL 指到开发机的局域网地址。
+const localApiBaseUrl = 'http://localhost:5180/api/v1'
+const remoteApiBaseUrl = 'http://39.96.200.62/api/v1'
 
-// 环境变量优先，方便打包时用 VITE_API_BASE_URL 覆盖。
-const resolveDefaultApiBaseUrl = () => import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl
+const resolveDefaultApiBaseUrl = () => {
+	if (API_BASE_URL_OVERRIDE) return API_BASE_URL_OVERRIDE
+	return IS_DEV_BUILD ? localApiBaseUrl : remoteApiBaseUrl
+}
 
 const getApiBaseUrl = () => {
 	try {
@@ -22,17 +27,44 @@ const toQuery = (query = {}) => {
 	return entries.length ? `?${entries.join('&')}` : ''
 }
 
-const handleUnauthorized = () => {
-	logout()
+// 401 只允许触发一次跳转：多个并发请求同时失败时，重复 reLaunch 会让页面白屏、跳转被覆盖。
+const navigateToLogin = (attempt = 0) => {
 	try {
-		const pages = getCurrentPages()
-		const current = pages?.[pages.length - 1]
-		if (current?.route !== 'pages/auth/login') {
-			uni.reLaunch({ url: '/pages/auth/login' })
+		const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+		const current = pages && pages[pages.length - 1]
+		if (current && current.route === 'pages/auth/login') {
+			setLoginRedirecting(false)
+			return
 		}
+		uni.reLaunch({
+			url: '/pages/auth/login',
+			success: () => {
+				// 登录页接管后稍等再解锁，避免旧页面的延迟响应再次触发跳转。
+				setTimeout(() => setLoginRedirecting(false), 600)
+			},
+			fail: () => {
+				// 页面切换动画期间小程序可能拒绝跳转，短暂重试；仍失败则保持当前页可操作。
+				if (attempt < 4) setTimeout(() => navigateToLogin(attempt + 1), 180)
+				else setLoginRedirecting(false)
+			}
+		})
 	} catch (error) {
-		// Navigation is unavailable in some non-page runtimes.
+		setLoginRedirecting(false)
 	}
+}
+
+// delay 给当前页面留出一帧渲染「正在前往登录」的机会，避免跳转瞬间整页空白。
+export const redirectToLogin = (delay = 0) => {
+	if (isLoginRedirecting()) return
+	setLoginRedirecting(true)
+	if (delay > 0) setTimeout(() => navigateToLogin(0), delay)
+	else navigateToLogin(0)
+}
+
+const handleUnauthorized = () => {
+	if (isLoginRedirecting()) return
+	logout()
+	redirectToLogin(80)
 }
 
 export const apiRequest = ({ path, method = 'GET', data, query } = {}) => new Promise((resolve, reject) => {
@@ -87,12 +119,27 @@ const findRoomFallback = (room) => {
 
 const isRemoteRecord = (value) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(value || ''))
 
+// 旧版发布页曾把微信本机临时文件写进图片字段；这类地址在开发者工具会命中 __tmp__
+// 临时服务并触发 CORS，重启后也会失效，读取时统一过滤掉。
+const isTemporaryImagePath = (value) => {
+	const url = String(value || '').trim().toLowerCase()
+	return url.startsWith('http://tmp/') ||
+		url.startsWith('wxfile://') ||
+		url.startsWith('blob:') ||
+		url.includes('/__tmp__/')
+}
+
+const isUsableImage = (value) => {
+	if (typeof value !== 'string' || !value.trim()) return false
+	return !isTemporaryImagePath(value)
+}
+
 const parseImageList = (value) => {
-	if (Array.isArray(value)) return value.filter((item) => typeof item === 'string' && item)
+	if (Array.isArray(value)) return value.filter(isUsableImage)
 	if (typeof value !== 'string' || !value.trim()) return []
 	try {
 		const parsed = JSON.parse(value)
-		return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string' && item) : []
+		return Array.isArray(parsed) ? parsed.filter(isUsableImage) : []
 	} catch (error) {
 		return []
 	}
@@ -112,8 +159,8 @@ export const mapStore = (store, index = 0) => {
 		...parseImageList(store.gallery),
 		...parseImageList(store.photos),
 		...parseImageList(store.roomImageUrlsJson)
-	].filter((item) => typeof item === 'string' && item)
-	const image = store.coverImageUrl || store.doorImageUrl || store.image || images[0] || fallback.image || (isRemote ? '' : prototypeImages.storeOne)
+	].filter(isUsableImage)
+	const image = [store.coverImageUrl, store.doorImageUrl, store.image, images[0]].find(isUsableImage) || fallback.image || (isRemote ? '' : prototypeImages.storeOne)
 	const startingPrice = store.startingPriceCents === null || store.startingPriceCents === undefined
 		? (isRemote ? null : fallback.price)
 		: (Number(store.startingPriceCents) / 100).toFixed(2).replace(/\.00$/, '')
@@ -141,6 +188,8 @@ export const mapStore = (store, index = 0) => {
 		rating: store.rating ?? (isRemote ? null : fallback.rating),
 		reviews: store.reviewCount ?? (isRemote ? null : fallback.reviews),
 		tags: Array.isArray(store.tags) ? store.tags : (isRemote ? [] : fallback.tags || []),
+		// 门店列表可选返回在售房型（首页热门精选直接用房型卡片渲染）。
+		rooms: Array.isArray(store.rooms) ? store.rooms.map((room, roomIndex) => mapRoom(room, roomIndex)) : [],
 		sortIndex: index
 	}
 }
@@ -164,6 +213,7 @@ export const mapRoom = (room, index = 0) => {
 		name: room.name || fallback.name,
 		type: isBed ? '多人间床位' : '独立房间',
 		gender: room.gender || fallback.gender || '',
+		maxGuests: Number(room.maxGuests || 0) || null,
 		capacity: room.maxGuests ? `可住${room.maxGuests}人` : (isRemote ? '' : fallback.capacity),
 		beds: room.bedCount ? `${room.bedCount}张床` : (isRemote ? '' : fallback.beds),
 		price: priceCents === null ? (isRemote ? null : String(fallback.price)) : (priceCents / 100).toFixed(2).replace(/\.00$/, ''),
@@ -176,7 +226,7 @@ export const mapRoom = (room, index = 0) => {
 		services,
 		isPublished: room.isPublished !== false,
 		availability: isRemote ? '选择日期查询房态' : fallback.availability,
-		image: images[0] || room.imageUrl || fallback.image || (isRemote ? '' : prototypeImages.roomOne),
+		image: images[0] || (isUsableImage(room.imageUrl) ? room.imageUrl : '') || fallback.image || (isRemote ? '' : prototypeImages.roomOne),
 		images,
 		sortIndex: index
 	}
@@ -258,42 +308,73 @@ const mapReviewResponse = (data = {}) => ({
 	items: Array.isArray(data.items) ? data.items.map(mapReviewItem) : []
 })
 
-export const miniappLogin = async ({ nickname = '', avatarUrl = '', phoneCode = null } = {}) => {
-	const loginResult = await new Promise((resolve, reject) => {
-		uni.login({
-			provider: 'weixin',
-			success: resolve,
-			fail: (error) => reject({
-				code: 'wechat_login_api_error',
-				message: error?.errMsg || '微信登录接口调用失败',
-				errMsg: error?.errMsg || ''
-			})
-		})
-	})
-	const code = loginResult?.code || null
-	if (!code) throw new Error('微信未返回登录凭证')
+const DEV_OPEN_ID_KEY = 'tcpms.devOpenId'
+const DEV_WECHAT_LOGIN_KEY = 'tcpms.devUseWechatLogin'
+const DEFAULT_DEV_OPEN_ID = 'dev-user-001'
 
-	const data = await apiRequest({
-		path: '/auth/miniapp-login',
-		method: 'POST',
-		data: {
-			code,
-			devOpenId: null,
-			nickname: nickname || null,
-			avatarUrl: avatarUrl || null,
-			phoneCode: phoneCode || null
-		}
-	})
-	if (data && data.token) saveApiToken(data.token)
-	return data
+const readDevStorage = (key, fallback = '') => {
+	try {
+		return uni.getStorageSync(key) || fallback
+	} catch (error) {
+		return fallback
+	}
 }
 
-export const bindMiniappPhone = async (phoneCode) => {
-	const data = await apiRequest({
-		path: '/auth/phone',
-		method: 'POST',
-		data: { phoneCode }
-	})
+// 开发环境默认用固定测试账号登录：种子订单、退款单都能稳定复现。
+// 需要验证真实微信登录时，在控制台执行 uni.setStorageSync('tcpms.devUseWechatLogin', true)。
+const useWechatLoginInDev = () => {
+	try {
+		return uni.getStorageSync(DEV_WECHAT_LOGIN_KEY) === true
+	} catch (error) {
+		return false
+	}
+}
+
+export const miniappLogin = async ({ nickname = '', avatarUrl = '', phoneCode = null } = {}) => {
+	const preferDevAccount = ALLOW_DEV_LOGIN && !useWechatLoginInDev()
+	const payload = {
+		code: null,
+		devOpenId: preferDevAccount ? readDevStorage(DEV_OPEN_ID_KEY, DEFAULT_DEV_OPEN_ID) : null,
+		nickname: nickname || null,
+		avatarUrl: avatarUrl || null,
+		phoneCode: null
+	}
+
+	if (!preferDevAccount) {
+		const loginResult = await new Promise((resolve, reject) => {
+			uni.login({
+				provider: 'weixin',
+				success: resolve,
+				fail: (error) => reject({
+					code: 'wechat_login_api_error',
+					message: error?.errMsg || '微信登录接口调用失败',
+					errMsg: error?.errMsg || ''
+				})
+			})
+		})
+		payload.code = loginResult?.code || null
+		payload.phoneCode = phoneCode
+		if (!payload.code) throw new Error('微信未返回登录凭证')
+	}
+
+	let data
+	try {
+		data = await apiRequest({ path: '/auth/miniapp-login', method: 'POST', data: payload })
+	} catch (error) {
+		// 开发环境里 code 换不到 openId（AppID 未配、code 失效）时退回固定测试账号，避免联调被配置卡住。
+		if (!ALLOW_DEV_LOGIN || preferDevAccount) throw error
+		data = await apiRequest({
+			path: '/auth/miniapp-login',
+			method: 'POST',
+			data: {
+				...payload,
+				code: null,
+				phoneCode: null,
+				devOpenId: readDevStorage(DEV_OPEN_ID_KEY, DEFAULT_DEV_OPEN_ID)
+			}
+		})
+	}
+	if (data && data.token) saveApiToken(data.token)
 	return data
 }
 
@@ -370,9 +451,13 @@ export const fetchStoreDetail = async (id) => {
 	}
 }
 
-export const fetchRooms = async (storeId) => {
-	const data = await apiRequest({ path: '/room-types/', query: { storeId } })
-	return Array.isArray(data) ? data.map(mapRoom) : []
+// 日历选日期时按天查询真实房态与价格，避免展示已满房的日期。
+export const fetchRoomAvailability = async (roomTypeId, checkIn, checkOut) => {
+	const data = await apiRequest({
+		path: `/room-types/${roomTypeId}/availability`,
+		query: { checkIn, checkOut }
+	})
+	return Array.isArray(data) ? data : []
 }
 
 export const createRemoteOrder = async (booking) => {
@@ -431,11 +516,6 @@ export const fetchRoomReviews = async (roomTypeId, limit = 50) => {
 	return mapReviewResponse(data)
 }
 
-export const fetchRemoteOrderReview = async (id) => {
-	const data = await apiRequest({ path: `/orders/${id}/review` })
-	return mapReviewItem(data)
-}
-
 export const createRemoteReview = async (id, review = {}) => {
 	const data = await apiRequest({
 		path: `/orders/${id}/review`,
@@ -460,6 +540,12 @@ export const cancelRemoteOrder = async (id) => {
 // 避免支付未配置时把订单直接置为已支付。
 export const requestRemotePayment = async (id) => {
 	return apiRequest({ path: `/orders/${id}/pay`, method: 'POST' })
+}
+
+// 仅开发联调使用：后端 /mock-pay 只在 Development 环境开放，生产构建里 ALLOW_MOCK_PAY 恒为 false。
+export const mockPayRemoteOrder = async (id) => {
+	const data = await apiRequest({ path: `/orders/${id}/mock-pay`, method: 'POST' })
+	return upsertOrder(mapOrder(data))
 }
 
 // 支付成功后向服务端确认：服务端会主动向微信查单，回调不可达时也能把订单置为已支付。
@@ -489,3 +575,273 @@ export const refundRemoteOrder = async (id, amount, reason, context = {}) => {
 		order: upsertOrder(mapped)
 	}
 }
+
+// ---------------- 商家中心 ----------------
+
+export const fetchMerchantProfile = () => apiRequest({ path: '/merchant/profile' })
+
+export const fetchMerchantApplication = () => apiRequest({ path: '/merchant/application' })
+
+export const submitMerchantApplication = (payload = {}) => apiRequest({
+	path: '/merchant/application',
+	method: 'POST',
+	data: payload
+})
+
+const uploadMerchantImage = (path, filePath) => new Promise((resolve, reject) => {
+	const token = getApiToken()
+	if (!token) {
+		reject({ code: 'unauthorized', message: '请先登录' })
+		return
+	}
+	uni.uploadFile({
+		url: `${getApiBaseUrl()}${path}`,
+		filePath,
+		name: 'file',
+		header: { Authorization: `Bearer ${token}` },
+		success: (response) => {
+			let data = response.data
+			try {
+				data = typeof data === 'string' ? JSON.parse(data) : data
+			} catch (error) {
+				// 保留原始响应，下面统一给出上传失败提示。
+			}
+			if (response.statusCode >= 200 && response.statusCode < 300) {
+				resolve(data)
+				return
+			}
+			if (response.statusCode === 401) {
+				handleUnauthorized()
+				reject({ code: 'unauthorized', message: '登录状态已失效，请重新授权登录' })
+				return
+			}
+			reject(data || { code: 'upload_failed', message: '图片上传失败' })
+		},
+		fail: (error) => reject({
+			code: 'network_error',
+			message: error?.errMsg || '图片上传失败',
+			errMsg: error?.errMsg || ''
+		})
+	})
+})
+
+export const uploadMerchantApplicationImage = (filePath) => uploadMerchantImage('/merchant/application/upload', filePath)
+
+export const uploadMerchantRoomImage = (filePath) => uploadMerchantImage('/merchant/rooms/upload', filePath)
+
+export const fetchMerchantRooms = async () => {
+	const data = await apiRequest({ path: '/merchant/rooms' })
+	return Array.isArray(data) ? data : []
+}
+
+export const fetchMerchantRoom = (id) => apiRequest({ path: `/merchant/rooms/${id}` })
+
+export const saveMerchantRoom = (id, payload) => apiRequest({
+	path: id ? `/merchant/rooms/${id}` : '/merchant/rooms',
+	method: id ? 'PUT' : 'POST',
+	data: payload
+})
+
+export const publishMerchantRoom = (id, published) => apiRequest({
+	path: `/merchant/rooms/${id}/publish`,
+	method: 'POST',
+	query: { published }
+})
+
+export const fetchMerchantOrders = async (status = '') => {
+	const data = await apiRequest({ path: '/merchant/orders', query: { status } })
+	return Array.isArray(data) ? data : []
+}
+
+export const confirmMerchantOrder = (orderId) => apiRequest({
+	path: `/merchant/orders/${orderId}/confirm`,
+	method: 'POST'
+})
+
+export const checkInMerchantOrder = (orderId) => apiRequest({
+	path: `/merchant/orders/${orderId}/check-in`,
+	method: 'POST'
+})
+
+export const checkOutMerchantOrder = (orderId) => apiRequest({
+	path: `/merchant/orders/${orderId}/check-out`,
+	method: 'POST'
+})
+
+export const verifyMerchantOrder = (code) => apiRequest({
+	path: '/merchant/verify',
+	method: 'POST',
+	data: { code }
+})
+
+export const fetchMerchantVerifyRecords = async () => {
+	const data = await apiRequest({ path: '/merchant/verify-records' })
+	return Array.isArray(data) ? data : []
+}
+
+export const fetchMerchantFinance = () => apiRequest({ path: '/merchant/finance' })
+
+export const createMerchantWithdrawal = (amountCents, account = '') => apiRequest({
+	path: '/merchant/withdrawals',
+	method: 'POST',
+	data: { amountCents, account }
+})
+
+export const fetchMerchantReviews = async () => {
+	const data = await apiRequest({ path: '/merchant/reviews' })
+	return Array.isArray(data) ? data : []
+}
+
+export const replyMerchantReview = (id, content) => apiRequest({
+	path: `/merchant/reviews/${id}/reply`,
+	method: 'POST',
+	data: { content }
+})
+
+export const fetchMerchantCoupons = async () => {
+	const data = await apiRequest({ path: '/merchant/coupons' })
+	return Array.isArray(data) ? data : []
+}
+
+export const createMerchantCoupon = (payload = {}) => apiRequest({
+	path: '/merchant/coupons',
+	method: 'POST',
+	data: payload
+})
+
+export const updateMerchantCoupon = (id, payload = {}) => apiRequest({
+	path: `/merchant/coupons/${id}`,
+	method: 'PUT',
+	data: payload
+})
+
+export const fetchMerchantStaff = async () => {
+	const data = await apiRequest({ path: '/merchant/staff' })
+	return Array.isArray(data) ? data : []
+}
+
+export const createMerchantStaff = (payload = {}) => apiRequest({
+	path: '/merchant/staff',
+	method: 'POST',
+	data: payload
+})
+
+export const fetchMerchantSettings = () => apiRequest({ path: '/merchant/settings' })
+
+export const saveMerchantSettingsRemote = (settings) => apiRequest({
+	path: '/merchant/settings',
+	method: 'PUT',
+	data: settings
+})
+
+export const fetchMerchantMessageSettings = async () => {
+	const data = await apiRequest({ path: '/merchant/message-settings' })
+	return Array.isArray(data) ? data : []
+}
+
+export const saveMerchantMessageSettingsRemote = (settings) => apiRequest({
+	path: '/merchant/message-settings',
+	method: 'PUT',
+	data: settings
+})
+
+// ---------------- 用户内容 ----------------
+
+// 浏览类接口允许匿名访问页面；未登录时直接返回空数据，避免把访客踢回登录页。
+const hasApiToken = () => Boolean(getApiToken())
+const requireApiToken = () => {
+	if (!hasApiToken()) {
+		const error = new Error('请先登录')
+		error.code = 'unauthorized'
+		throw error
+	}
+}
+
+export const fetchMySummary = () => hasApiToken()
+	? apiRequest({ path: '/me/summary' })
+	: Promise.resolve({ favoriteCount: 0, guestCount: 0, recentCount: 0, unreadMessageCount: 0, orderCount: 0, stayNights: 0, points: 0 })
+
+export const fetchMyFavorites = async () => {
+	if (!hasApiToken()) return []
+	const data = await apiRequest({ path: '/me/favorites' })
+	return Array.isArray(data) ? data : []
+}
+
+export const addMyFavorite = (record) => {
+	requireApiToken()
+	return apiRequest({
+		path: '/me/favorites',
+		method: 'POST',
+		data: record
+	})
+}
+
+export const removeMyFavorite = (id) => {
+	requireApiToken()
+	return apiRequest({
+		path: `/me/favorites/${encodeURIComponent(id)}`,
+		method: 'DELETE'
+	})
+}
+
+export const fetchMyGuests = async () => {
+	if (!hasApiToken()) return []
+	const data = await apiRequest({ path: '/me/guests' })
+	return Array.isArray(data) ? data : []
+}
+
+export const saveMyGuests = (guests) => {
+	requireApiToken()
+	return apiRequest({
+		path: '/me/guests',
+		method: 'PUT',
+		data: guests
+	})
+}
+
+export const fetchMyRecent = async () => {
+	if (!hasApiToken()) return []
+	const data = await apiRequest({ path: '/me/recent' })
+	return Array.isArray(data) ? data : []
+}
+
+export const recordMyRecent = (item) => {
+	if (!hasApiToken()) return Promise.resolve(null)
+	return apiRequest({
+		path: '/me/recent',
+		method: 'POST',
+		data: item
+	})
+}
+
+export const clearMyRecent = () => {
+	if (!hasApiToken()) return Promise.resolve(null)
+	return apiRequest({ path: '/me/recent', method: 'DELETE' })
+}
+
+export const fetchMyMessages = async () => {
+	if (!hasApiToken()) return []
+	const data = await apiRequest({ path: '/me/messages' })
+	return Array.isArray(data) ? data : []
+}
+
+export const markMyMessageRead = (id) => {
+	if (!hasApiToken()) return Promise.resolve(null)
+	return apiRequest({
+		path: `/me/messages/${encodeURIComponent(id)}/read`,
+		method: 'POST'
+	})
+}
+
+export const fetchArticle = (id) => apiRequest({ path: `/articles/${encodeURIComponent(id)}` })
+
+export const fetchStoreFilters = () => apiRequest({ path: '/stores/filters' })
+
+export const fetchCarousel = async () => {
+	const data = await apiRequest({ path: '/carousel' })
+	return Array.isArray(data) ? data : []
+}
+
+// 服务协议、隐私政策、联系客服等说明页面的文案由后端下发，页面只负责渲染。
+export const fetchPageContent = (key) => apiRequest({ path: `/pages/${encodeURIComponent(key)}` })
+

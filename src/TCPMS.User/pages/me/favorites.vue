@@ -29,7 +29,9 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { demoRooms, demoStores, goPage, prototypeImages, showToast } from '@/common/prototype.js'
-	import { getFavoriteRecords, toggleFavorite } from '@/common/app-store.js'
+	import { getFavorites, toggleFavorite } from '@/common/app-store.js'
+	import { fetchMyFavorites, removeMyFavorite } from '@/common/api.js'
+	import { openLegacyStorePath } from '@/common/navigation.js'
 
 	const resolveRecord = (record) => {
 		if (record.title) return record
@@ -42,7 +44,9 @@
 				title: item.name,
 				subtitle: item.address,
 				image: item.image,
-				path: `/pages/store/detail?id=${item.id}`
+				path: item.featuredRoomId
+					? `/pages/room/detail?id=${item.featuredRoomId}&storeId=${item.id}`
+					: `/pages/room/list?storeId=${item.id}`
 			} : record
 		}
 		if (id.indexOf('room-') === 0) {
@@ -71,23 +75,36 @@
 			this.loadItems()
 		},
 		methods: {
-			loadItems() {
-				this.items = getFavoriteRecords().map(resolveRecord)
+			async loadItems() {
+				try {
+					const records = await fetchMyFavorites()
+					this.items = records.map(resolveRecord)
+				} catch (error) {
+					this.items = []
+					showToast(error?.message || '收藏加载失败')
+				}
 			},
 			typeLabel(type) {
 				return type === 'room' ? '房型' : type === 'article' ? '攻略' : '门店'
 			},
 			openItem(item) {
 				if (item.path) {
+					// 历史收藏可能仍指向已下线的门店详情页，这里转到房型详情。
+					if (openLegacyStorePath(item.path)) return
 					goPage(item.path)
 					return
 				}
 				showToast('该收藏内容暂不可打开')
 			},
-			removeItem(item) {
-				toggleFavorite(item.id)
-				this.loadItems()
-				showToast('已取消收藏')
+			async removeItem(item) {
+				try {
+					await removeMyFavorite(item.id)
+					if (getFavorites().map(String).includes(String(item.id))) toggleFavorite(item.id)
+					await this.loadItems()
+					showToast('已取消收藏')
+				} catch (error) {
+					showToast(error?.message || '取消收藏失败')
+				}
 			},
 			goStores() {
 				uni.reLaunch({ url: '/pages/store/list' })

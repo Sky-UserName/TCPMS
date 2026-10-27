@@ -16,12 +16,18 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
-	import { getMerchantVerifyRecords } from '@/common/app-store.js'
+	import { fetchMerchantVerifyRecords } from '@/common/api.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon, ProtoEmptyState },
 		data() { return { records: [] } },
-		onShow() { this.records = getMerchantVerifyRecords() }
+		async onShow() {
+			try {
+				this.records = await fetchMerchantVerifyRecords()
+			} catch (error) {
+				this.records = []
+			}
+		}
 	}
 </script>
 

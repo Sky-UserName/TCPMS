@@ -21,6 +21,28 @@ public sealed record MiniappLoginRequest(
 
 public sealed record MiniappPhoneRequest(string PhoneCode);
 
+/// <summary>
+/// 小程序端民宿入驻申请。申请提交后由平台审核，审核通过前门店保持 PendingReview 状态。
+/// </summary>
+public sealed record MerchantApplicationRequest(
+    string Name,
+    string OwnerName,
+    string OwnerPhone,
+    string? Province = null,
+    string? City = null,
+    string? District = null,
+    string? Address = null,
+    string? StandardAddress = null,
+    decimal? Longitude = null,
+    decimal? Latitude = null,
+    string? Description = null,
+    string? IdCardFrontUrl = null,
+    string? IdCardBackUrl = null,
+    string? PropertyCertificateUrl = null,
+    string? BusinessLicenseUrl = null,
+    string? DoorImageUrl = null,
+    string? RoomImageUrlsJson = null);
+
 public sealed record MiniappProfileResponse(
     Guid Id,
     string? Nickname,
@@ -57,6 +79,17 @@ public sealed record GeocodeRequest(string Address, string? City);
 
 public sealed record ReverseGeocodeRequest(decimal Longitude, decimal Latitude);
 
+/// <summary>
+/// 管理端地图选点用的地址解析结果，只返回数据，不修改门店。
+/// </summary>
+public sealed record GeoLookupResponse(
+    decimal Longitude,
+    decimal Latitude,
+    string? Address,
+    string? Province,
+    string? City,
+    string? District);
+
 public sealed record OrderQuoteRequest(
     Guid StoreId,
     Guid RoomTypeId,
@@ -81,12 +114,6 @@ public sealed record CreateReviewRequest(
     IReadOnlyList<string>? ImageUrls);
 
 public sealed record ReviewRefundRequest(bool Approved, string? Comment);
-
-public sealed record ManualInventoryRequest(
-    Guid RoomTypeId,
-    DateTime Date,
-    int Delta,
-    string Reason);
 
 public sealed record ApiError(string Code, string Message, string? TraceId = null);
 
@@ -182,7 +209,8 @@ public sealed record StoreListItem(
     string? FeaturedRoomName = null,
     int ReviewCount = 0,
     IReadOnlyList<string>? Tags = null,
-    string? Description = null);
+    string? Description = null,
+    IReadOnlyList<RoomTypeSummary>? Rooms = null);
 
 public sealed record RoomTypeSummary(
     Guid Id,

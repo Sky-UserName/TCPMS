@@ -7,7 +7,7 @@
 		<view v-else class="coupon-list">
 			<view v-for="coupon in filteredCoupons" :key="coupon.id" class="coupon-card proto-card"><view class="coupon-value"><text>¥{{ coupon.amount }}</text><text>{{ coupon.threshold }}</text></view><view class="coupon-copy"><text>{{ coupon.name }}</text><text>已使用 {{ coupon.used }} / {{ coupon.stock }} 张</text><text class="coupon-status">{{ coupon.status }}</text></view><button class="coupon-toggle" hover-class="none" @tap="toggleCoupon(coupon)">{{ coupon.status === '生效中' ? '停用' : '启用' }}</button></view>
 		</view>
-		<view class="tool-note"><ProtoIcon name="info" :size="21" /><text>优惠券核销与发放规则将在订单服务接入后同步到住客端。</text></view>
+		<view class="tool-note"><ProtoIcon name="info" :size="21" /><text>优惠券已保存到服务端，启用状态会实时同步。</text></view>
 	</view>
 </template>
 
@@ -15,7 +15,7 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
-	import { addMerchantCoupon, getMerchantCoupons, updateMerchantCoupon } from '@/common/app-store.js'
+	import { createMerchantCoupon, fetchMerchantCoupons, updateMerchantCoupon } from '@/common/api.js'
 	import { showToast } from '@/common/prototype.js'
 
 	export default {
@@ -28,18 +28,45 @@
 				return this.coupons
 			}
 		},
-		onShow() { this.coupons = getMerchantCoupons() },
+		async onShow() {
+			await this.loadCoupons()
+		},
 		methods: {
-			addCoupon() {
-				const coupon = addMerchantCoupon({ name: `演示优惠券${this.coupons.length + 1}` })
-				this.coupons = getMerchantCoupons()
-				showToast(`${coupon.name}已创建`)
+			async loadCoupons() {
+				try {
+					this.coupons = await fetchMerchantCoupons()
+				} catch (error) {
+					this.coupons = []
+					showToast(error?.message || '优惠券加载失败')
+				}
 			},
-			toggleCoupon(coupon) {
+			addCoupon() {
+				uni.showModal({
+					title: '新建优惠券',
+					editable: true,
+					placeholderText: '请输入优惠券名称',
+					confirmText: '创建',
+					success: async ({ confirm, content = '' }) => {
+						if (!confirm || !content.trim()) return
+						try {
+							const coupon = await createMerchantCoupon({ name: content.trim() })
+							showToast(`${coupon.name}已创建`)
+							await this.loadCoupons()
+						} catch (error) {
+							showToast(error?.message || '创建失败')
+						}
+					}
+				})
+			},
+			async toggleCoupon(coupon) {
 				const nextStatus = coupon.status === '生效中' ? '已停用' : '生效中'
-				updateMerchantCoupon(coupon.id, { status: nextStatus })
-				this.coupons = getMerchantCoupons()
-				showToast(nextStatus === '生效中' ? '优惠券已启用' : '优惠券已停用')
+				try {
+					await updateMerchantCoupon(coupon.id, { status: nextStatus })
+					await this.loadCoupons()
+					showToast(nextStatus === '生效中' ? '优惠券已启用' : '优惠券已停用')
+				} catch (error) {
+					showToast(error?.message || '操作失败')
+				}
 			}
 		}
 	}

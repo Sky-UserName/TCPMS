@@ -5,7 +5,7 @@
 		<scroll-view class="merchant-status-tabs" scroll-x :show-scrollbar="false">
 			<text v-for="tab in tabs" :key="tab.key" :class="{ active: activeTab === tab.key }" @tap="activeTab = tab.key">{{ tab.label }}</text>
 		</scroll-view>
-		<view class="merchant-room-summary"><view><text>房源列表</text><text class="merchant-room-summary-caption">本地演示数据</text></view><text>{{ filteredRooms.length }} 间</text></view>
+		<view class="merchant-room-summary"><view><text>房源列表</text><text class="merchant-room-summary-caption">服务端实时库存</text></view><text>{{ filteredRooms.length }} 间</text></view>
 		<ProtoEmptyState v-if="!filteredRooms.length" title="暂无房间数据" description="发布你的第一间房源，开始经营民宿" action-text="发布房源" @action="goPublish" />
 		<view v-else class="merchant-room-list">
 			<view v-for="room in filteredRooms" :key="room.id" class="merchant-room-card proto-card">
@@ -29,8 +29,8 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
-	import { goPage, showToast } from '@/common/prototype.js'
-	import { getMerchantRooms, updateMerchantRoom } from '@/common/app-store.js'
+	import { goPage, prototypeImages, showToast } from '@/common/prototype.js'
+	import { fetchMerchantRooms, publishMerchantRoom } from '@/common/api.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon, ProtoEmptyState },
@@ -48,8 +48,8 @@
 				rooms: []
 			}
 		},
-		onShow() {
-			this.rooms = getMerchantRooms()
+		async onShow() {
+			await this.loadRooms()
 		},
 		computed: {
 			filteredRooms() {
@@ -61,21 +61,29 @@
 			}
 		},
 		methods: {
+			async loadRooms() {
+				try {
+					const rooms = await fetchMerchantRooms()
+					this.rooms = rooms.map((room) => ({ ...room, image: room.image || prototypeImages.roomOne }))
+				} catch (error) {
+					this.rooms = []
+					showToast(error?.message || '房源加载失败')
+				}
+			},
 			goPublish() {
 				goPage('/pages/merchant/publish')
 			},
 			editRoom(room) {
 				goPage(`/pages/merchant/publish?id=${room.id}`)
 			},
-			toggleRoom(room) {
+			async toggleRoom(room) {
 				const online = room.status !== '已上架'
-				const updated = updateMerchantRoom(room.id, {
-					status: online ? '已上架' : '已下架',
-					key: online ? 'online' : 'offline'
-				})
-				if (updated) {
-					this.rooms = getMerchantRooms()
-					showToast(online ? '房源已上架（本地演示）' : '房源已下架（本地演示）')
+				try {
+					await publishMerchantRoom(room.id, online)
+					showToast(online ? '房源已上架' : '房源已下架')
+					await this.loadRooms()
+				} catch (error) {
+					showToast(error?.message || '操作失败')
 				}
 			}
 		}

@@ -101,7 +101,6 @@
             <el-button v-if="row.status === 'PendingReview'" link type="success" @click="changeStatus(row, 'Active')">通过</el-button>
             <el-button v-if="row.status === 'PendingReview'" link type="primary" @click="openEdit(row)">查看资料</el-button>
             <el-button link type="primary" @click="openRooms(row)">房间</el-button>
-            <el-button link type="primary" @click="openGeo(row)">地图</el-button>
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-dropdown @command="(command) => changeStatus(row, command)">
               <el-button link type="primary">更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
@@ -127,24 +126,14 @@
       <el-form :model="form" label-width="96px" class="dialog-form store-form">
         <div class="form-section-title">账号信息</div>
         <div class="form-grid">
-          <el-form-item label="用户名"><el-input v-model="form.ownerUsername" placeholder="房东账号或小程序用户标识" /></el-form-item>
+          <el-form-item label="用户名">
+            <el-input v-model="form.ownerUsername" :disabled="dialog.mode === 'edit'" placeholder="房东账号或小程序用户标识" />
+            <div v-if="dialog.mode === 'edit'" class="field-hint">用户名由小程序用户登录后自动绑定，编辑门店时不可修改。</div>
+          </el-form-item>
           <el-form-item label="昵称"><el-input v-model="form.ownerNickname" placeholder="房东昵称" /></el-form-item>
           <el-form-item label="房东姓名"><el-input v-model="form.ownerName" placeholder="真实姓名" /></el-form-item>
           <el-form-item label="房东手机号"><el-input v-model="form.ownerPhone" placeholder="用于审核联系" /></el-form-item>
         </div>
-        <el-form-item label="头像" class="field-wide">
-          <div class="asset-editor">
-            <div class="asset-field">
-              <el-input v-model="form.ownerAvatarUrl" placeholder="输入头像地址，或选择本地图片" />
-              <el-upload :show-file-list="false" :auto-upload="false" accept="image/*" :on-change="(file) => handleLocalPreview('ownerAvatarUrl', file)">
-                <el-button type="primary" plain :icon="Upload">选择图片</el-button>
-              </el-upload>
-            </div>
-            <div v-if="assetPreview('ownerAvatarUrl')" class="asset-preview avatar-preview">
-              <el-image :src="assetPreview('ownerAvatarUrl')" :preview-src-list="[assetPreview('ownerAvatarUrl')]" preview-teleported fit="cover" />
-            </div>
-          </div>
-        </el-form-item>
 
         <div class="form-section-title">门店信息</div>
         <div class="form-grid">
@@ -170,8 +159,8 @@
         </div>
         <el-form-item label="详细地址" class="field-wide">
           <div class="address-editor">
-            <el-input v-model="form.address" placeholder="填写门店详细地址，可在地图配置中解析坐标" />
-            <el-button type="primary" plain :icon="Location" :disabled="!form.id" @click="openGeo(form)">地图选择</el-button>
+            <el-input v-model="form.address" placeholder="填写门店详细地址，也可以在地图上选点后自动带出" />
+            <el-button type="primary" plain :icon="Location" @click="openMapPicker">地图选择</el-button>
           </div>
         </el-form-item>
         <el-form-item label="门店简介"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
@@ -183,45 +172,45 @@
 
         <div class="form-section-title">资质与图片</div>
         <div class="asset-grid">
-          <el-form-item label="身份证正面">
+          <el-form-item v-for="item in assetFields" :key="item.field" :label="item.label">
             <div class="asset-editor">
-              <div class="asset-field"><el-input v-model="form.idCardFrontUrl" placeholder="图片地址" /><el-upload :show-file-list="false" :auto-upload="false" accept="image/*" :on-change="(file) => handleLocalPreview('idCardFrontUrl', file)"><el-button type="primary" plain :icon="Upload">选择</el-button></el-upload></div>
-              <div v-if="assetPreview('idCardFrontUrl')" class="asset-preview"><el-image :src="assetPreview('idCardFrontUrl')" :preview-src-list="[assetPreview('idCardFrontUrl')]" preview-teleported fit="cover" /></div>
-            </div>
-          </el-form-item>
-          <el-form-item label="身份证反面">
-            <div class="asset-editor">
-              <div class="asset-field"><el-input v-model="form.idCardBackUrl" placeholder="图片地址" /><el-upload :show-file-list="false" :auto-upload="false" accept="image/*" :on-change="(file) => handleLocalPreview('idCardBackUrl', file)"><el-button type="primary" plain :icon="Upload">选择</el-button></el-upload></div>
-              <div v-if="assetPreview('idCardBackUrl')" class="asset-preview"><el-image :src="assetPreview('idCardBackUrl')" :preview-src-list="[assetPreview('idCardBackUrl')]" preview-teleported fit="cover" /></div>
-            </div>
-          </el-form-item>
-          <el-form-item label="房产证">
-            <div class="asset-editor">
-              <div class="asset-field"><el-input v-model="form.propertyCertificateUrl" placeholder="图片地址" /><el-upload :show-file-list="false" :auto-upload="false" accept="image/*" :on-change="(file) => handleLocalPreview('propertyCertificateUrl', file)"><el-button type="primary" plain :icon="Upload">选择</el-button></el-upload></div>
-              <div v-if="assetPreview('propertyCertificateUrl')" class="asset-preview"><el-image :src="assetPreview('propertyCertificateUrl')" :preview-src-list="[assetPreview('propertyCertificateUrl')]" preview-teleported fit="cover" /></div>
-            </div>
-          </el-form-item>
-          <el-form-item label="营业执照">
-            <div class="asset-editor">
-              <div class="asset-field"><el-input v-model="form.businessLicenseUrl" placeholder="图片地址" /><el-upload :show-file-list="false" :auto-upload="false" accept="image/*" :on-change="(file) => handleLocalPreview('businessLicenseUrl', file)"><el-button type="primary" plain :icon="Upload">选择</el-button></el-upload></div>
-              <div v-if="assetPreview('businessLicenseUrl')" class="asset-preview"><el-image :src="assetPreview('businessLicenseUrl')" :preview-src-list="[assetPreview('businessLicenseUrl')]" preview-teleported fit="cover" /></div>
-            </div>
-          </el-form-item>
-          <el-form-item label="门头照片">
-            <div class="asset-editor">
-              <div class="asset-field"><el-input v-model="form.doorImageUrl" placeholder="图片地址" /><el-upload :show-file-list="false" :auto-upload="false" accept="image/*" :on-change="(file) => handleLocalPreview('doorImageUrl', file)"><el-button type="primary" plain :icon="Upload">选择</el-button></el-upload></div>
-              <div v-if="assetPreview('doorImageUrl')" class="asset-preview"><el-image :src="assetPreview('doorImageUrl')" :preview-src-list="[assetPreview('doorImageUrl')]" preview-teleported fit="cover" /></div>
+              <div class="asset-preview-grid">
+                <div v-if="assetPreview(item.field)" class="asset-preview image-preview-item">
+                  <el-image :src="assetPreview(item.field)" :preview-src-list="[assetPreview(item.field)]" preview-teleported fit="cover">
+                    <template #error>
+                      <div class="image-error"><el-icon><Picture /></el-icon><span>图片不可用</span></div>
+                    </template>
+                  </el-image>
+                  <el-button class="image-remove" type="danger" circle plain :icon="Delete" title="删除图片" @click="clearAsset(item.field)" />
+                </div>
+                <el-upload class="image-uploader" :show-file-list="false" :auto-upload="false" accept="image/*" :on-change="(file) => handleLocalPreview(item.field, file)">
+                  <button type="button" class="image-add-tile">
+                    <el-icon><component :is="assetPreview(item.field) ? Upload : Plus" /></el-icon>
+                    <span>{{ assetPreview(item.field) ? '替换图片' : '上传图片' }}</span>
+                  </button>
+                </el-upload>
+              </div>
             </div>
           </el-form-item>
           <el-form-item label="房间照片" class="field-wide">
             <div class="asset-editor">
-              <div class="asset-field"><el-input v-model="form.roomImageUrlsText" type="textarea" :rows="2" placeholder="每行一个图片地址，也可以选择本地图片" /><el-upload :show-file-list="false" :auto-upload="false" accept="image/*" :on-change="handleRoomImageChange"><el-button type="primary" plain :icon="Upload">选择图片</el-button></el-upload></div>
-              <div v-if="roomImageList.length" class="asset-preview-grid">
-                <div v-for="(image, index) in roomImageList" :key="`${image}-${index}`" class="asset-preview image-preview-item">
-                  <el-image :src="image" :preview-src-list="roomImageList" preview-teleported fit="cover" />
+              <div class="asset-preview-grid">
+                <div v-for="(image, index) in roomImages" :key="`${index}-${String(image).slice(0, 40)}`" class="asset-preview image-preview-item">
+                  <el-image :src="resolveAssetUrl(image)" :preview-src-list="roomPreviewList" :initial-index="index" preview-teleported fit="cover">
+                    <template #error>
+                      <div class="image-error"><el-icon><Picture /></el-icon><span>图片不可用</span></div>
+                    </template>
+                  </el-image>
                   <el-button class="image-remove" type="danger" circle plain :icon="Delete" title="删除图片" @click="removeRoomImage(index)" />
                 </div>
+                <el-upload class="image-uploader" :show-file-list="false" :auto-upload="false" accept="image/*" multiple :on-change="handleRoomImageChange">
+                  <button type="button" class="image-add-tile">
+                    <el-icon><Plus /></el-icon>
+                    <span>上传图片</span>
+                  </button>
+                </el-upload>
               </div>
+              <div class="field-hint">已上传 {{ roomImages.length }} 张房间照片，支持一次选择多张，第一张将作为房间封面。</div>
             </div>
           </el-form-item>
         </div>
@@ -229,29 +218,53 @@
       <template #footer><el-button @click="dialog.visible = false">取消</el-button><el-button type="primary" :loading="dialog.saving" @click="save">保存门店</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="geoDialog.visible" title="高德地图位置配置" width="620px" destroy-on-close>
-      <div class="geo-dialog">
-        <div class="geo-intro"><span class="geo-pin"><el-icon><Location /></el-icon></span><div><strong>{{ geoDialog.store?.name }}</strong><small>{{ geoDialog.store?.address || '暂无详细地址' }}</small></div></div>
-        <el-alert v-if="geoDialog.error" :title="geoDialog.error" type="warning" show-icon :closable="false" />
-        <el-form :model="geoForm" label-width="88px" class="dialog-form">
-          <el-form-item label="解析城市"><el-input v-model="geoForm.city" placeholder="例如：上海市" /></el-form-item>
-          <el-form-item label="详细地址"><el-input v-model="geoForm.address" placeholder="输入完整地址后调用高德地理编码" /></el-form-item>
-          <div class="form-grid">
-            <el-form-item label="经度"><el-input-number v-model="geoForm.longitude" :precision="6" :step="0.0001" controls-position="right" /></el-form-item>
-            <el-form-item label="纬度"><el-input-number v-model="geoForm.latitude" :precision="6" :step="0.0001" controls-position="right" /></el-form-item>
+    <el-dialog
+      v-model="mapDialog.visible"
+      title="地图选点"
+      width="760px"
+      class="map-picker-dialog"
+      destroy-on-close
+      @opened="initMap"
+      @closed="destroyMap"
+    >
+      <div class="map-picker">
+        <div class="map-search">
+          <el-input v-model="mapForm.keyword" clearable placeholder="搜索地址，例如：广州市越秀区北京路" :prefix-icon="Search" @keyup.enter="searchAddress()" />
+          <el-input v-model="mapForm.searchCity" clearable class="map-city-input" placeholder="城市（可选）" />
+          <el-button type="primary" :loading="mapDialog.searching" @click="searchAddress()">搜索</el-button>
+        </div>
+        <div class="map-canvas-wrap">
+          <div ref="mapContainer" class="map-canvas"></div>
+          <div v-if="mapDialog.loading" class="map-loading"><span class="map-loading-dot"></span>正在解析地址…</div>
+          <div class="map-canvas-tip">点击地图或拖动图钉选择位置</div>
+          <span class="map-canvas-brand">© 高德地图</span>
+        </div>
+        <el-alert v-if="mapDialog.error" :title="mapDialog.error" type="warning" show-icon :closable="false" />
+        <div class="map-summary">
+          <div class="map-summary-text">
+            <span>当前选点</span>
+            <strong>{{ mapForm.address || '尚未选择位置' }}</strong>
           </div>
-        </el-form>
-        <div class="geo-preview"><div class="map-grid"></div><span class="map-center-pin"><el-icon><LocationFilled /></el-icon></span><span class="map-preview-label">{{ geoForm.longitude && geoForm.latitude ? `${geoForm.longitude}, ${geoForm.latitude}` : '待配置坐标' }}</span></div>
+          <div class="map-coord-inputs">
+            <label>经度<el-input-number v-model="mapForm.longitude" :precision="6" :step="0.0001" :controls="false" placeholder="经度" @change="syncFromInputs" /></label>
+            <label>纬度<el-input-number v-model="mapForm.latitude" :precision="6" :step="0.0001" :controls="false" placeholder="纬度" @change="syncFromInputs" /></label>
+          </div>
+        </div>
       </div>
-      <template #footer><el-button @click="geoDialog.visible = false">取消</el-button><el-button :loading="geoDialog.loading" @click="reverseGeo">逆地理解析</el-button><el-button type="primary" :loading="geoDialog.loading" @click="geocode">地址解析并保存</el-button></template>
+      <template #footer>
+        <el-button @click="mapDialog.visible = false">取消</el-button>
+        <el-button type="primary" :disabled="mapForm.latitude == null || mapForm.longitude == null" @click="confirmMapPicker">使用该位置</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Delete, Location, LocationFilled, Picture, Plus, Refresh, Search, Upload } from '@element-plus/icons-vue'
+import { ArrowDown, Delete, Location, Picture, Plus, Refresh, Search, Upload } from '@element-plus/icons-vue'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { get, post, put } from '../api'
 import { toRegionCascaderOptions } from '../data/regions'
 import { requestNotificationRefresh } from '../notifications'
@@ -273,10 +286,30 @@ const storeTabs = [
   { key: 'rejected', label: '已拒绝' }
 ]
 const dialog = reactive({ visible: false, mode: 'create', saving: false })
-const geoDialog = reactive({ visible: false, loading: false, store: null, error: '' })
+const mapDialog = reactive({ visible: false, loading: false, searching: false, error: '' })
 const form = reactive(emptyForm())
-const uploadPreview = reactive({ ownerAvatarUrl: '', idCardFrontUrl: '', idCardBackUrl: '', propertyCertificateUrl: '', businessLicenseUrl: '', doorImageUrl: '' })
-const geoForm = reactive({ address: '', city: '', longitude: null, latitude: null })
+const roomImages = ref([])
+const assetFields = [
+  { field: 'idCardFrontUrl', label: '身份证正面' },
+  { field: 'idCardBackUrl', label: '身份证反面' },
+  { field: 'propertyCertificateUrl', label: '房产证' },
+  { field: 'businessLicenseUrl', label: '营业执照' },
+  { field: 'doorImageUrl', label: '门头照片' }
+]
+const uploadPreview = reactive({ idCardFrontUrl: '', idCardBackUrl: '', propertyCertificateUrl: '', businessLicenseUrl: '', doorImageUrl: '' })
+const mapForm = reactive({ keyword: '', searchCity: '', address: '', province: '', city: '', district: '', longitude: null, latitude: null })
+const mapContainer = ref(null)
+const MAP_FALLBACK_CENTER = { latitude: 34.7466, longitude: 113.6254 }
+const mapPinIcon = L.divIcon({
+  className: 'map-pin-marker',
+  html: '<svg width="28" height="36" viewBox="0 0 28 36" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 1.5c-6.6 0-12 5.3-12 11.9C2 21.9 14 34.5 14 34.5S26 21.9 26 13.4C26 6.8 20.6 1.5 14 1.5z" fill="#0f7777" stroke="#fff" stroke-width="2.5"/><circle cx="14" cy="13.2" r="4.4" fill="#fff"/></svg>',
+  iconSize: [28, 36],
+  iconAnchor: [14, 35]
+})
+let mapInstance = null
+let mapMarker = null
+let mapRequestToken = 0
+let mapSyncTimer = null
 const statusOptions = [
   { label: '草稿', value: 'Draft' },
   { label: '待审核', value: 'PendingReview' },
@@ -291,11 +324,10 @@ function emptyForm() {
     id: '', name: '', code: '', description: '', province: '', city: '', district: '', regionPath: [], address: '', phone: '',
     longitude: null, latitude: null, status: 'Draft', sortOrder: 0, rating: 0,
     ownerUsername: '', ownerNickname: '', ownerAvatarUrl: '', ownerName: '', ownerPhone: '',
-    idCardFrontUrl: '', idCardBackUrl: '', propertyCertificateUrl: '', businessLicenseUrl: '', doorImageUrl: '',
-    roomImageUrlsText: '', roomImageUrlsJson: ''
+    idCardFrontUrl: '', idCardBackUrl: '', propertyCertificateUrl: '', businessLicenseUrl: '', doorImageUrl: ''
   }
 }
-const roomImageList = computed(() => parseArray(form.roomImageUrlsText))
+const roomPreviewList = computed(() => roomImages.value.map((image) => resolveAssetUrl(image)).filter(Boolean))
 const filteredStores = computed(() => stores.value.filter((row) => {
   const keyword = filters.keyword.trim().toLowerCase()
   const matchesKeyword = !keyword || [row.name, row.address, row.phone].join(' ').toLowerCase().includes(keyword)
@@ -337,14 +369,32 @@ function formatDateTime(value) {
   if (Number.isNaN(date.getTime())) return '—'
   return date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
+// 历史图片地址里带的是上传时的后端域名（可能是 localhost 或某个内网 IP），
+// 管理端换机器/换端口访问时会加载失败，这里统一转成站内相对路径交给代理处理。
+function resolveAssetUrl(value) {
+  const url = String(value || '').trim()
+  if (!url) return ''
+  if (/^(data:|blob:)/i.test(url)) return url
+  try {
+    const parsed = new URL(url, window.location.origin)
+    if (parsed.pathname.startsWith('/uploads/') || parsed.pathname.startsWith('/static/')) {
+      return `${parsed.pathname}${parsed.search}`
+    }
+  } catch {
+    return url
+  }
+  return url
+}
 function assetUrl(row, field) {
-  return row?.[field] || ''
+  return resolveAssetUrl(row?.[field])
 }
 function roomImageListForRow(row) {
   return parseArray(row?.roomImageUrlsJson || row?.roomImageUrls || row?.roomImages)
+    .map((image) => resolveAssetUrl(image))
+    .filter(Boolean)
 }
 function assetPreview(field) {
-  return uploadPreview[field] || form[field] || ''
+  return resolveAssetUrl(uploadPreview[field] || form[field])
 }
 function normalizeRegionOptions(payload) {
   const source = Array.isArray(payload) ? payload : (payload?.items || payload?.data || payload?.rows || [])
@@ -482,27 +532,39 @@ function handleLocalPreview(field, uploadFile) {
   }
   reader.readAsDataURL(file)
 }
+function clearAsset(field) {
+  uploadPreview[field] = ''
+  form[field] = ''
+}
 function handleRoomImageChange(uploadFile) {
   const file = uploadFile?.raw
   if (!file || !file.type?.startsWith('image/')) return ElMessage.warning('请选择图片文件')
   if (file.size > 5 * 1024 * 1024) return ElMessage.warning('图片不能超过 5MB')
   const reader = new FileReader()
   reader.onload = () => {
-    form.roomImageUrlsText = [...roomImageList.value, String(reader.result || '')].filter(Boolean).join('\n')
+    const dataUrl = String(reader.result || '')
+    if (dataUrl) roomImages.value = [...roomImages.value, dataUrl]
   }
   reader.readAsDataURL(file)
 }
 function removeRoomImage(index) {
-  form.roomImageUrlsText = roomImageList.value.filter((_, itemIndex) => itemIndex !== index).join('\n')
+  roomImages.value = roomImages.value.filter((_, itemIndex) => itemIndex !== index)
 }
-function openCreate() { Object.assign(form, emptyForm()); resetUploadPreview(); dialog.mode = 'create'; dialog.visible = true }
+function openCreate() {
+  Object.assign(form, emptyForm())
+  roomImages.value = []
+  resetUploadPreview()
+  dialog.mode = 'create'
+  dialog.visible = true
+}
 async function openEdit(row) {
   try {
     const detail = await get(`/admin/stores/${row.id}`)
-    Object.assign(form, { ...emptyForm(), ...detail, roomImageUrlsText: parseArray(detail.roomImageUrlsJson).join('\n') })
+    Object.assign(form, { ...emptyForm(), ...detail })
   } catch {
-    Object.assign(form, { ...emptyForm(), ...row, code: row.code || row.id.slice(0, 8).toUpperCase(), roomImageUrlsText: parseArray(row.roomImageUrlsJson).join('\n') })
+    Object.assign(form, { ...emptyForm(), ...row, code: row.code || row.id.slice(0, 8).toUpperCase() })
   }
+  roomImages.value = parseArray(form.roomImageUrlsJson)
   form.regionPath = findRegionPathByLabels(form.province, form.city, form.district)
   resetUploadPreview()
   dialog.mode = 'edit'
@@ -514,9 +576,8 @@ async function save() {
   try {
     const payload = {
       ...form,
-      roomImageUrlsJson: JSON.stringify(form.roomImageUrlsText.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean))
+      roomImageUrlsJson: JSON.stringify(roomImages.value.filter(Boolean))
     }
-    delete payload.roomImageUrlsText
     delete payload.regionPath
     if (dialog.mode === 'create') await post('/admin/stores', payload)
     else await put(`/admin/stores/${form.id}`, payload)
@@ -528,13 +589,173 @@ async function save() {
 }
 function parseArray(value) {
   if (Array.isArray(value)) return value
-  try { const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed : [] } catch { return value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [] }
+  const text = String(value ?? '').trim()
+  if (!text) return []
+  try {
+    const parsed = JSON.parse(text)
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : []
+  } catch {
+    // 兼容历史上用换行或逗号拼接的图片地址。
+    return text.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean)
+  }
 }
-function openGeo(row) {
-  geoDialog.store = row
-  geoDialog.error = ''
-  Object.assign(geoForm, { address: row.address || '', city: '', longitude: row.longitude, latitude: row.latitude })
-  geoDialog.visible = true
+function round6(value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.round(number * 1e6) / 1e6 : null
+}
+function openMapPicker() {
+  const longitude = Number(form.longitude)
+  const latitude = Number(form.latitude)
+  Object.assign(mapForm, {
+    keyword: form.address || '',
+    searchCity: form.city || '',
+    address: form.address || '',
+    province: form.province || '',
+    city: form.city || '',
+    district: form.district || '',
+    longitude: Number.isFinite(longitude) && longitude ? round6(longitude) : null,
+    latitude: Number.isFinite(latitude) && latitude ? round6(latitude) : null
+  })
+  mapDialog.error = ''
+  mapDialog.loading = false
+  mapDialog.visible = true
+}
+function initMap() {
+  nextTick(() => {
+    if (mapInstance || !mapContainer.value) return
+    const hasPoint = mapForm.latitude != null && mapForm.longitude != null
+    const center = hasPoint
+      ? [mapForm.latitude, mapForm.longitude]
+      : [MAP_FALLBACK_CENTER.latitude, MAP_FALLBACK_CENTER.longitude]
+    mapInstance = L.map(mapContainer.value, {
+      center,
+      zoom: hasPoint ? 16 : 12,
+      minZoom: 3,
+      maxZoom: 18,
+      zoomControl: true,
+      attributionControl: false
+    })
+    L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+      subdomains: ['1', '2', '3', '4'],
+      maxZoom: 18
+    }).addTo(mapInstance)
+    mapInstance.on('click', (event) => {
+      applyPoint(event.latlng.lat, event.latlng.lng, { reverse: true })
+    })
+    if (hasPoint) placeMarker(mapForm.latitude, mapForm.longitude)
+    window.setTimeout(() => mapInstance?.invalidateSize(), 180)
+    if (hasPoint && !mapForm.address) {
+      reverseLookup()
+    } else if (!hasPoint && mapForm.keyword) {
+      // 门店还没坐标时，用已有详细地址先定位，避免每次都从默认城市开始找。
+      searchAddress({ silent: true })
+    }
+  })
+}
+function destroyMap() {
+  if (mapSyncTimer) {
+    window.clearTimeout(mapSyncTimer)
+    mapSyncTimer = null
+  }
+  mapRequestToken += 1
+  if (mapInstance) {
+    mapInstance.remove()
+    mapInstance = null
+    mapMarker = null
+  }
+}
+function placeMarker(latitude, longitude) {
+  if (!mapInstance) return
+  if (!mapMarker) {
+    mapMarker = L.marker([latitude, longitude], { draggable: true, icon: mapPinIcon }).addTo(mapInstance)
+    mapMarker.on('dragend', () => {
+      const position = mapMarker.getLatLng()
+      applyPoint(position.lat, position.lng, { reverse: true })
+    })
+    return
+  }
+  mapMarker.setLatLng([latitude, longitude])
+}
+function applyPoint(latitude, longitude, options = {}) {
+  const lat = round6(latitude)
+  const lng = round6(longitude)
+  if (lat == null || lng == null) return
+  mapForm.latitude = lat
+  mapForm.longitude = lng
+  placeMarker(lat, lng)
+  if (options.pan && mapInstance) mapInstance.panTo([lat, lng])
+  if (options.reverse) reverseLookup()
+}
+async function searchAddress(options = {}) {
+  const keyword = mapForm.keyword.trim()
+  if (!keyword) {
+    if (!options.silent) ElMessage.warning('请输入要搜索的地址')
+    return
+  }
+  mapDialog.searching = true
+  mapDialog.error = ''
+  try {
+    const result = await post('/admin/geo/geocode', { address: keyword, city: mapForm.searchCity.trim() || null })
+    if (result?.latitude == null || result?.longitude == null) throw new Error('未找到匹配地址，换个关键词再试试')
+    mapForm.address = result.address || keyword
+    mapForm.province = result.province || mapForm.province
+    mapForm.city = result.city || mapForm.city
+    mapForm.district = result.district || mapForm.district
+    applyPoint(result.latitude, result.longitude)
+    if (mapInstance) {
+      mapInstance.setView([Number(result.latitude), Number(result.longitude)], 16)
+    }
+    if (!options.silent) ElMessage.success('已定位到搜索结果')
+  } catch (error) {
+    mapDialog.error = error.message || '地址解析失败'
+  } finally {
+    mapDialog.searching = false
+  }
+}
+async function reverseLookup() {
+  if (mapForm.latitude == null || mapForm.longitude == null) return
+  const token = (mapRequestToken += 1)
+  mapDialog.loading = true
+  mapDialog.error = ''
+  try {
+    const result = await post('/admin/geo/reverse', { longitude: mapForm.longitude, latitude: mapForm.latitude })
+    if (token !== mapRequestToken) return
+    mapForm.address = result.address || mapForm.address
+    mapForm.province = result.province || mapForm.province
+    mapForm.city = result.city || mapForm.city
+    mapForm.district = result.district || mapForm.district
+  } catch (error) {
+    if (token === mapRequestToken) mapDialog.error = error.message || '该位置解析失败，可以拖动图钉重试'
+  } finally {
+    if (token === mapRequestToken) mapDialog.loading = false
+  }
+}
+function syncFromInputs() {
+  if (mapForm.latitude == null || mapForm.longitude == null) return
+  applyPoint(mapForm.latitude, mapForm.longitude, { pan: true })
+  if (mapInstance) {
+    mapInstance.setView([mapForm.latitude, mapForm.longitude], Math.max(mapInstance.getZoom(), 16))
+  }
+  if (mapSyncTimer) window.clearTimeout(mapSyncTimer)
+  mapSyncTimer = window.setTimeout(() => {
+    mapSyncTimer = null
+    reverseLookup()
+  }, 400)
+}
+function confirmMapPicker() {
+  if (mapForm.latitude == null || mapForm.longitude == null) return ElMessage.warning('请先在地图上选择位置')
+  form.longitude = round6(mapForm.longitude)
+  form.latitude = round6(mapForm.latitude)
+  if (mapForm.address) form.address = mapForm.address
+  // 选点位置就是门店真实所在地，省市区跟随解析结果，避免地址和行政区打架。
+  const regionChanged = Boolean(mapForm.province && mapForm.city && mapForm.district) &&
+    (mapForm.province !== form.province || mapForm.city !== form.city || mapForm.district !== form.district)
+  if (mapForm.province) form.province = mapForm.province
+  if (mapForm.city) form.city = mapForm.city
+  if (mapForm.district) form.district = mapForm.district
+  if (regionChanged) form.regionPath = findRegionPathByLabels(form.province, form.city, form.district)
+  mapDialog.visible = false
+  ElMessage.success('已填入选点位置，保存门店后生效')
 }
 function openRooms(row) {
   const selection = { storeId: row.id, storeName: row.name }
@@ -542,28 +763,6 @@ function openRooms(row) {
   localStorage.setItem('tcpms.admin.room-filter', JSON.stringify(selection))
   window.dispatchEvent(new CustomEvent('tcpms:room-filter-request', { detail: selection }))
   emit('navigate', 'roomManagement')
-}
-async function geocode() {
-  if (!geoForm.address) return ElMessage.warning('请输入详细地址')
-  geoDialog.loading = true
-  geoDialog.error = ''
-  try {
-    const result = await post(`/stores/${geoDialog.store.id}/geo/geocode`, { address: geoForm.address, city: geoForm.city || null })
-    Object.assign(geoForm, { longitude: result.longitude, latitude: result.latitude })
-    ElMessage.success('高德地址解析成功，坐标已保存')
-    geoDialog.store = { ...geoDialog.store, ...result }
-    await load()
-  } catch (error) { geoDialog.error = error.message; ElMessage.error(error.message) } finally { geoDialog.loading = false }
-}
-async function reverseGeo() {
-  if (geoForm.longitude == null || geoForm.latitude == null) return ElMessage.warning('请先填写经纬度')
-  geoDialog.loading = true
-  try {
-    const result = await post(`/stores/${geoDialog.store.id}/geo/reverse`, { longitude: geoForm.longitude, latitude: geoForm.latitude })
-    Object.assign(geoForm, { address: result.address, longitude: result.longitude, latitude: result.latitude })
-    ElMessage.success('逆地理解析成功')
-    await load()
-  } catch (error) { geoDialog.error = error.message; ElMessage.error(error.message) } finally { geoDialog.loading = false }
 }
 async function changeStatus(row, status) {
   if (status === row.status) return
@@ -579,6 +778,9 @@ async function changeStatus(row, status) {
 onMounted(async () => {
   await Promise.all([load(), loadRegions()])
 })
+onBeforeUnmount(() => {
+  destroyMap()
+})
 </script>
 
 <style scoped>
@@ -587,14 +789,17 @@ onMounted(async () => {
 .store-form :deep(.el-form-item){margin-bottom:14px}
 .store-form :deep(.el-input-number),.store-form :deep(.el-select),.store-form :deep(.el-cascader){width:100%}
 .asset-editor{display:flex;flex-direction:column;gap:9px;width:100%}
-.asset-field{display:flex;gap:8px;align-items:center;width:100%}
-.asset-field :deep(.el-input){flex:1}
 .asset-preview{display:flex;width:132px;height:88px;align-items:center;justify-content:center;overflow:hidden;border:1px solid var(--admin-border);border-radius:7px;background:var(--admin-surface-soft)}
 .asset-preview :deep(.el-image){display:block;width:100%;height:100%}
-.avatar-preview{width:72px;height:72px;border-radius:50%}
 .asset-preview-grid{display:flex;flex-wrap:wrap;gap:10px}
 .image-preview-item{position:relative;width:132px;height:88px}
 .image-preview-item .image-remove{position:absolute;right:5px;bottom:5px;min-height:26px;width:26px;padding:0}
+.image-uploader{display:block}
+.image-add-tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:132px;height:88px;border:1px dashed var(--admin-border);border-radius:7px;background:var(--admin-surface-soft);color:var(--admin-muted);font-size:12px;line-height:1.2;cursor:pointer;transition:border-color .2s,color .2s}
+.image-add-tile:hover{border-color:var(--el-color-primary);color:var(--el-color-primary)}
+.image-add-tile .el-icon{font-size:20px}
+.image-error{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;width:100%;height:100%;color:var(--admin-muted);font-size:12px;background:var(--admin-surface-soft)}
+.image-error .el-icon{font-size:18px}
 .asset-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:18px}
 .asset-grid :deep(.el-form-item:last-child){grid-column:1 / -1}
 .region-cascader{width:100%}
@@ -604,5 +809,25 @@ onMounted(async () => {
 .table-image-list{display:flex;align-items:center;gap:4px}
 .credential-thumb,.room-thumb{width:50px;height:38px;border-radius:4px;border:1px solid var(--admin-border);background:var(--admin-surface-soft)}
 .image-count{color:var(--admin-muted);font-size:11px}
+.map-picker{display:flex;flex-direction:column;gap:12px}
+.map-search{display:flex;gap:8px;align-items:center}
+.map-search :deep(.el-input){flex:1}
+.map-city-input{max-width:170px}
+.map-canvas-wrap{position:relative;overflow:hidden;border:1px solid var(--admin-border);border-radius:10px;background:var(--admin-surface-soft)}
+.map-canvas{width:100%;height:360px}
+.map-canvas :deep(.leaflet-container){font:inherit}
+.map-canvas :deep(.map-pin-marker){background:transparent;border:0}
+.map-canvas-tip{position:absolute;left:50%;bottom:12px;z-index:500;transform:translateX(-50%);padding:5px 12px;border-radius:999px;background:rgba(15,23,32,.62);color:#fff;font-size:12px;line-height:1.4;white-space:nowrap;pointer-events:none}
+.map-canvas-brand{position:absolute;right:8px;bottom:6px;z-index:500;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.82);color:#6b7785;font-size:11px;pointer-events:none}
+.map-loading{position:absolute;inset:0;z-index:600;display:flex;align-items:center;justify-content:center;gap:8px;background:rgba(255,255,255,.66);color:var(--admin-muted);font-size:13px;pointer-events:none}
+.map-loading-dot{width:9px;height:9px;border-radius:50%;background:var(--el-color-primary);animation:map-pulse 1s ease-in-out infinite}
+@keyframes map-pulse{0%,100%{opacity:.25;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
+.map-summary{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.map-summary-text{display:flex;flex-direction:column;gap:3px;min-width:0}
+.map-summary-text span{color:var(--admin-muted);font-size:12px}
+.map-summary-text strong{color:var(--text-primary);font-size:13px;line-height:1.5}
+.map-coord-inputs{display:flex;gap:10px;flex:0 0 auto}
+.map-coord-inputs label{display:flex;align-items:center;gap:6px;color:var(--admin-muted);font-size:12px;white-space:nowrap}
+.map-coord-inputs :deep(.el-input-number){width:126px}
 @media (max-width: 760px){.asset-grid{grid-template-columns:1fr}}
 </style>

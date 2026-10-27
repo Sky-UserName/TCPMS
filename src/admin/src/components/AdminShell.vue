@@ -185,6 +185,7 @@ import {
   CollectionTag,
   Delete,
   Document,
+  Picture,
   Expand,
   Fold,
   FullScreen,
@@ -297,6 +298,7 @@ const groups = [
       { key: 'system', label: '系统管理', items: [
         { key: 'users', label: '权限管理', icon: UserFilled },
         { key: 'appCenter', label: '应用中心', icon: CollectionTag },
+        { key: 'carousel', label: '轮播图配置', icon: Picture },
         { key: 'messages', label: '消息提醒', icon: Bell },
         { key: 'messageLogs', label: '消息日志', icon: Document },
         { key: 'subscriptions', label: '订阅消息', icon: BellFilled },
@@ -324,7 +326,7 @@ const titleMap = {
   reviews: '评价管理', facilities: '服务设施', tags: '民宿标签',
   regions: '地区管理', roomTypes: '房间类型', levels: '民宿等级',
   storeStaff: '门店员工', permissionMenus: '权限菜单', withdrawals: '门店提现',
-  income: '门店收入', appCenter: '应用中心', messages: '消息提醒', messageLogs: '消息日志',
+  income: '门店收入', appCenter: '应用中心', carousel: '轮播图配置', messages: '消息提醒', messageLogs: '消息日志',
   subscriptions: '订阅消息'
 }
 const currentTitle = computed(() => titleMap[props.activeView] || '控制台')

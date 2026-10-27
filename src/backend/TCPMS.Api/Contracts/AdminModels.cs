@@ -47,12 +47,6 @@ public sealed record RoomUnitRequest(
     string Status,
     string? Note);
 
-public sealed record PriceCalendarItemRequest(
-    Guid RoomTypeId,
-    DateTime Date,
-    int PriceCents,
-    string? Source);
-
 public sealed record BulkPriceRequest(
     Guid RoomTypeId,
     DateTime From,
@@ -110,12 +104,7 @@ public sealed record AdminMemberItem(
     int IndirectUserCount,
     DateTime? LastLoginAt,
     DateTime CreatedAt,
-    bool IsEnabled)
-{
-    // Keep screenshot-oriented aliases while retaining the API-wide cents convention.
-    public int Balance => BalanceCents;
-    public int Commission => CommissionCents;
-}
+    bool IsEnabled);
 
 public sealed record AdminMemberPage(
     IReadOnlyList<AdminMemberItem> Items,

@@ -15,9 +15,9 @@
 
 | 业务域 | 页面 |
 | --- | --- |
-| 首页与搜索 | pages/index/index、pages/search/index |
+| 首页与搜索 | pages/index/index、pages/search/index、pages/city/select（选择城市，含当前定位 / 热门城市 / A-Z 索引） |
 | 认证 | pages/auth/login、pages/auth/privacy |
-| 门店 | pages/store/list、pages/store/nearby、pages/store/map、pages/store/detail |
+| 门店 | pages/store/list、pages/store/nearby、pages/store/map（门店详情已并入 pages/room/detail） |
 | 房型 | pages/room/list、pages/room/detail |
 | 预订 | pages/booking/date、pages/booking/confirm、pages/pay/result |
 | 订单 | pages/order/list、pages/order/detail、pages/order/refund |
@@ -99,3 +99,5 @@ uni.setStorageSync('tcpms.apiBaseUrl', 'http://39.96.200.62/api/v1')
 7. 写操作完成后同步更新本地订单缓存，并防止重复点击。
 8. 图片必须设置稳定宽高或 aspect-ratio，避免加载后页面跳动。
 9. 房型详情页的评分模块进入评价列表；已完成订单显示“评价”入口，提交后显示“查看评价”。
+10. 订单填写页（pages/booking/confirm）的入住信息默认留空，不做任何预填；入住人只能从 `pages/me/guests?mode=select&selected=id1,id2` 选择后回传（`navigateTo` 的 `events.guestsSelected`，并用 `uni.$emit('booking:guests-selected')` 兜底）。选中结果只保存在页面状态，不写入 `tcpms.booking`，避免下一次下单带上上一次的入住人。
+11. 入住人数量与出行人数 `booking.guestCount` 解耦：不加 `count` 上限，选择页可任意多选（最多受常用入住人 10 条限制），订单页只校验「至少 1 位」，不足或超出都不做截断；`guests` 全量写入 `guestSnapshotJson`，`guestCount` 仍按出行人数走高，用于报价承载校验。

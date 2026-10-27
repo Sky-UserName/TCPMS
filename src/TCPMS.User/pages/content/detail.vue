@@ -3,30 +3,28 @@
 		<ProtoHeader title="攻略详情" theme="green" />
 		<scroll-view scroll-y class="article-scroll">
 			<view class="article-meta">
-				<text class="proto-pill info">出行攻略 / 官方精选</text>
+				<text class="proto-pill info">{{ article.subtitle || '出行攻略 / 官方精选' }}</text>
 				<view class="article-actions">
 					<button hover-class="none" @tap="toggleArticleFavorite"><ProtoIcon :name="favorite ? 'heart-filled' : 'heart'" :size="25" /></button>
 					<button hover-class="none" @tap="shareArticle"><ProtoIcon name="share" :size="25" /></button>
 				</view>
 			</view>
-			<text class="article-title">早上好！从附近开始一段清爽舒心的秋日漫居旅程</text>
+			<text class="article-title">{{ article.title || '攻略加载中' }}</text>
 			<view class="article-byline">
-				<view class="article-author"><ProtoIcon name="user" :size="20" /><text>TCPMS 智选生活局</text></view>
-				<text>2026年09月30日　·　1,420次阅读</text>
+				<view class="article-author"><ProtoIcon name="user" :size="20" /><text>{{ article.author || 'TCPMS 智选生活局' }}</text></view>
+				<text>{{ article.publishedAt }}　·　{{ article.readCount || 0 }}次阅读</text>
 			</view>
 			<image class="article-cover" :src="articleImage" mode="aspectFill"></image>
-			<text class="article-cover-caption">云舍民宿·二七路店 · 晨光燕枝中的原木茶室</text>
+			<text class="article-cover-caption">{{ article.caption }}</text>
 
 			<view class="article-body">
-				<text class="article-quote">秋风渐起，逃离城市喧嚣并不需要太远跋涉。TCPMS 智选旅宿为您甄选城市中心偏中取静的质感住所，无论是独自放空，好友小聚还是青年创客同行，这里都有恰到好处的停留方式。</text>
-				<text class="article-heading">01　从附近开始，给旅途减一点负担</text>
-				<text class="article-paragraph">距离地铁、商圈和公园都不远的门店，适合临时起意的短途出行。抵达后可以把时间留给散步、阅读和一顿慢慢吃完的晚餐，而不是消耗在往返路上。</text>
-				<text class="article-heading">02　选一间适合自己的房间</text>
-				<text class="article-paragraph">喜欢安静，可以选择采光好的独立大床房；和朋友同行，可以看看双床房或多人间床位。先确定入住日期和人数，再根据设施、价格和评价做决定，会比只看一张照片更可靠。</text>
-				<text class="article-heading">03　把入住变成旅途的一部分</text>
-				<text class="article-paragraph">提前保存门店地址，打开导航入口，抵达时直接联系前台。需要发票、寄存行李或调整入住时间，也可以在订单详情里联系官方客服和门店管家。</text>
+				<block v-for="(section, index) in article.sections" :key="index">
+					<text v-if="section.type === 'quote'" class="article-quote">{{ section.text }}</text>
+					<text v-else-if="section.type === 'heading'" class="article-heading">{{ section.text }}</text>
+					<text v-else class="article-paragraph">{{ section.text }}</text>
+				</block>
 
-				<view class="article-store-card">
+				<view v-if="store" class="article-store-card">
 					<image :src="store.image" mode="aspectFill"></image>
 					<view class="article-store-main">
 						<text class="article-store-title">{{ store.name }}</text>
@@ -41,7 +39,7 @@
 					<text class="proto-muted proto-small">更多旅宿灵感</text>
 				</view>
 				<view class="related-list">
-					<view v-for="item in related" :key="item.title" class="related-item" @tap="showToast(item.title)">
+					<view v-for="item in related" :key="item.title" class="related-item" @tap="goRelated(item)">
 						<image :src="item.image" mode="aspectFill"></image>
 						<view>
 							<text class="related-title">{{ item.title }}</text>
@@ -62,61 +60,108 @@
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
-	import { demoRooms, demoStores, goPage, prototypeImages, showToast } from '@/common/prototype.js'
-	import { getFavorites, recordRecent, toggleFavorite } from '@/common/app-store.js'
+	import { goPage, prototypeImages, showToast } from '@/common/prototype.js'
+	import { getFavorites, toggleFavorite } from '@/common/app-store.js'
+	import { addMyFavorite, fetchArticle, fetchMyFavorites, recordMyRecent, removeMyFavorite } from '@/common/api.js'
+	import { openStoreRoom } from '@/common/navigation.js'
+
+	const DEFAULT_ARTICLE_ID = 'autumn-nearby'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
 		data() {
 			return {
+				articleId: DEFAULT_ARTICLE_ID,
 				articleImage: prototypeImages.articleDetail || prototypeImages.article,
-				store: demoStores[0],
+				article: { sections: [], related: [] },
+				store: null,
+				storeRoomId: null,
 				favorite: false,
-				related: [
-					{
-						title: '一张地图，发现城市里的安静角落',
-						desc: '附近门店与周末散步路线',
-						image: prototypeImages.storeTwo
-					},
-					{
-						title: '入住前要准备的 5 件小事',
-						desc: '让抵达和离店都更从容',
-						image: prototypeImages.roomTwo
-					}
-			]
+				related: []
 			}
 		},
-		onShow() {
-			this.favorite = getFavorites().map(String).includes('article-detail')
-			recordRecent({
-				id: 'article-detail',
-				type: 'article',
-				title: '早上好！从附近开始一段清爽舒心的秋日漫居旅程',
-				subtitle: '出行攻略 / 官方精选',
-				image: this.articleImage,
-				path: '/pages/content/detail'
-			})
+		async onLoad(options = {}) {
+			if (options.id) this.articleId = options.id
+			await this.loadArticle()
+		},
+		async onShow() {
+			try {
+				const favorites = await fetchMyFavorites()
+				this.favorite = favorites.map((item) => item.id).includes(`article-${this.articleId}`)
+			} catch (error) {
+				this.favorite = getFavorites().map(String).includes(`article-${this.articleId}`)
+			}
 		},
 		methods: {
+			async loadArticle() {
+				try {
+					const article = await fetchArticle(this.articleId)
+					this.article = article
+					this.articleImage = article.coverImage || prototypeImages.articleDetail
+					this.store = article.store
+					this.storeRoomId = article.storeRoomId
+					this.related = Array.isArray(article.related) ? article.related : []
+					recordMyRecent({
+						id: `article-${article.id}`,
+						type: 'article',
+						title: article.title,
+						subtitle: article.subtitle,
+						image: this.articleImage,
+						path: `/pages/content/detail?id=${article.id}`
+					}).catch(() => {})
+				} catch (error) {
+					showToast(error?.message || '攻略加载失败')
+				}
+			},
 			goStore() {
-				goPage(`/pages/store/detail?id=${this.store.id}`)
+				if (!this.store?.id) {
+					showToast('门店信息暂不可用')
+					return
+				}
+				if (this.storeRoomId) {
+					goPage(`/pages/room/detail?id=${encodeURIComponent(this.storeRoomId)}&storeId=${encodeURIComponent(this.store.id)}`)
+					return
+				}
+				openStoreRoom(this.store)
 			},
 			goRoom() {
-				goPage(`/pages/room/detail?id=${demoRooms[0].id}`)
+				if (this.storeRoomId) goPage(`/pages/room/detail?id=${this.storeRoomId}&storeId=${this.store?.id || ''}`)
+				else showToast('该攻略暂未关联可预订房型')
 			},
-			toggleArticleFavorite() {
-				this.favorite = toggleFavorite('article-detail', {
+			goRelated(item) {
+				if (item.articleId) {
+					goPage(`/pages/content/detail?id=${item.articleId}`)
+					return
+				}
+				showToast(item.title)
+			},
+			async toggleArticleFavorite() {
+				const id = `article-${this.articleId}`
+				const record = {
+					id,
 					type: 'article',
-					title: '早上好！从附近开始一段清爽舒心的秋日漫居旅程',
-					subtitle: '出行攻略 / 官方精选',
+					title: this.article.title || '攻略',
+					subtitle: this.article.subtitle || '出行攻略',
 					image: this.articleImage,
-					path: '/pages/content/detail'
-				})
-				showToast(this.favorite ? '已收藏攻略' : '已取消收藏')
+					path: `/pages/content/detail?id=${this.articleId}`
+				}
+				try {
+					if (this.favorite) {
+						await removeMyFavorite(id)
+						this.favorite = false
+					} else {
+						await addMyFavorite(record)
+						this.favorite = true
+					}
+					toggleFavorite(id, record)
+					showToast(this.favorite ? '已收藏攻略' : '已取消收藏')
+				} catch (error) {
+					showToast(error?.message || '收藏操作失败')
+				}
 			},
 			shareArticle() {
 				uni.setClipboardData({
-					data: '早上好！从附近开始一段清爽舒心的秋日漫居旅程',
+					data: this.article.title || '攻略',
 					success: () => showToast('攻略标题已复制')
 				})
 			}

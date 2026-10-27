@@ -60,7 +60,7 @@
                 "desc" : "用于展示附近门店、计算距离并提供门店导航"
             }
         },
-        "requiredPrivateInfos" : [ "getLocation" ],
+        "requiredPrivateInfos" : [ "getLocation", "chooseLocation" ],
         "usingComponents" : true
     },
     "mp-alipay" : {

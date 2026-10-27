@@ -29,49 +29,34 @@
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
+	import { fetchMyMessages, markMyMessageRead } from '@/common/api.js'
+	import { showToast } from '@/common/prototype.js'
 
 	export default {
 		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
-				messages: [
-					{
-						id: 'platform-announcement',
-						type: 'platform',
-						icon: 'support',
-						title: '平台公告',
-						summary: '民宿活动开始啦',
-						time: '2026.10.06 14:10',
-						unread: true
-					},
-					{
-						id: 'order-message',
-						type: 'order',
-						icon: 'receipt',
-						title: '订单消息',
-						summary: '订单状态有更新，请及时查看',
-						time: '2026.10.06 14:10',
-						unread: false
-					},
-					{
-						id: 'order-reminder',
-						type: 'reminder',
-						icon: 'clock',
-						title: '订单提醒',
-						summary: '入住日期将近，提前准备更从容',
-						time: '2026.10.06 14:10',
-						unread: false
-					}
-				]
+				messages: []
 			}
 		},
-		onShow() {
+		async onShow() {
 			uni.hideTabBar({ animation: false, fail: () => {} })
+			try {
+				this.messages = await fetchMyMessages()
+			} catch (error) {
+				this.messages = []
+				showToast(error?.message || '消息加载失败')
+			}
 		},
 		methods: {
-			openMessage(item) {
+			async openMessage(item) {
 				if (item.unread) {
 					item.unread = false
+					try {
+						await markMyMessageRead(item.id)
+					} catch (error) {
+						// 已读状态同步失败不阻塞阅读。
+					}
 				}
 				uni.showToast({ title: '消息已读', icon: 'none' })
 			}
@@ -189,35 +174,5 @@
 		box-shadow: 0 0 0 1rpx #a9e5e6;
 	}
 
-	.message-empty {
-		display: flex;
-		align-items: center;
-		flex-direction: column;
-		padding: 180rpx 30rpx 120rpx;
-		color: #8d99a4;
-		text-align: center;
-	}
 
-	.message-empty-illustration {
-		position: relative;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 190rpx;
-		height: 190rpx;
-		color: #8d99a4;
-	}
-
-	.message-empty-search {
-		position: absolute;
-		right: 4rpx;
-		bottom: 20rpx;
-		color: var(--proto-primary);
-	}
-
-	.message-empty-title {
-		margin-top: 28rpx;
-		color: #7b8792;
-		font-size: 28rpx;
-	}
 </style>

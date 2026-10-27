@@ -393,8 +393,7 @@
 		margin-top: 72rpx;
 	}
 
-	.login-button,
-	.phone-button {
+	.login-button {
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -414,8 +413,7 @@
 		box-shadow: 0 12rpx 24rpx rgba(20, 139, 131, 0.2);
 	}
 
-	.login-button::after,
-	.phone-button::after {
+	.login-button::after {
 		display: none;
 	}
 
@@ -425,12 +423,6 @@
 		box-shadow: none;
 	}
 
-	.phone-button {
-		margin-top: 18rpx;
-		color: #147870;
-		background: #e9f7f6;
-		border: 1rpx solid #c8e8e5;
-	}
 
 	.login-feedback {
 		width: 100%;

@@ -11,7 +11,7 @@
     </section>
 
     <el-alert class="sync-alert" type="info" :closable="false" show-icon>
-      <template #title>同步来源：用户端 <code>pages/me/index.vue</code> 的 <code>merchantEntries</code>。菜单保存后会同步到服务端。</template>
+      <template #title>同步来源：用户端 <code>pages/me/index.vue</code> 的民宿管理入口。图标与用户端共用 <code>static/prototype-icons</code> 同一套资源，用户端按这里的 <code>iconKey</code> 实时渲染。</template>
     </el-alert>
 
     <el-card class="panel-card list-card" shadow="never">
@@ -56,10 +56,21 @@
         <el-table-column label="图标" width="110">
           <template #default="{ row }">
             <el-image v-if="row.iconUrl" class="menu-icon-image" :src="row.iconUrl" :preview-src-list="[row.iconUrl]" preview-teleported fit="cover" />
+            <span v-else-if="miniAppIconSrc(row.iconKey)" class="menu-icon-image menu-icon-asset" :title="miniAppIconLabel(row.iconKey)">
+              <img :src="miniAppIconSrc(row.iconKey)" :alt="row.title" />
+            </span>
             <span v-else class="menu-icon-fallback"><el-icon><Menu /></el-icon></span>
           </template>
         </el-table-column>
-        <el-table-column prop="iconKey" label="图标标识" width="120" />
+        <el-table-column label="图标标识" width="140">
+          <template #default="{ row }">
+            <div class="icon-key-cell">
+              <strong>{{ row.iconKey || '未设置' }}</strong>
+              <small v-if="miniAppIconLabel(row.iconKey)">{{ miniAppIconLabel(row.iconKey) }}</small>
+              <small v-else-if="row.iconKey" class="icon-key-missing">未匹配图标</small>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="weight" label="权重" width="90" sortable />
         <el-table-column label="状态" width="100">
           <template #default="{ row }"><span class="dot-status" :class="row.status === 'normal' ? 'success' : 'muted'"><i></i>{{ statusLabel(row.status) }}</span></template>
@@ -85,22 +96,38 @@
         <el-form-item label="页面路径" required><el-input v-model="form.route" placeholder="/pages/merchant/rooms" /></el-form-item>
         <div class="form-grid">
           <el-form-item label="标题" required><el-input v-model="form.title" placeholder="例如：房间管理" /></el-form-item>
-          <el-form-item label="图标标识"><el-input v-model="form.iconKey" placeholder="例如：house" /></el-form-item>
           <el-form-item label="权重"><el-input-number v-model="form.weight" :min="0" controls-position="right" /></el-form-item>
           <el-form-item label="状态"><el-radio-group v-model="form.status"><el-radio value="normal">正常</el-radio><el-radio value="hidden">隐藏</el-radio></el-radio-group></el-form-item>
         </div>
+        <el-form-item label="图标标识">
+          <el-select v-model="form.iconKey" class="icon-select" filterable clearable placeholder="选择用户端民宿管理图标">
+            <template #prefix>
+              <img v-if="formIconSrc" class="icon-select-prefix" :src="formIconSrc" alt="" />
+              <el-icon v-else><Menu /></el-icon>
+            </template>
+            <el-option v-for="icon in MINIAPP_ICON_OPTIONS" :key="icon.key" :label="icon.label" :value="icon.key">
+              <span class="icon-option">
+                <img :src="icon.src" alt="" />
+                <span class="icon-option-label">{{ icon.label }}</span>
+                <small>{{ icon.key }}</small>
+              </span>
+            </el-option>
+          </el-select>
+          <div class="form-help">与用户端民宿管理共用同一套图标，用户端按 <code>iconKey</code> 渲染；上传自定义图片时优先使用图片。</div>
+        </el-form-item>
         <el-form-item label="图标">
           <div class="icon-editor">
             <div class="icon-upload-preview">
               <el-image v-if="form.iconUrl" :src="form.iconUrl" fit="cover" />
-              <span v-else><el-icon><Menu /></el-icon><small>{{ form.iconKey || '默认图标' }}</small></span>
+              <img v-else-if="formIconSrc" class="icon-preview-asset" :src="formIconSrc" :alt="form.iconKey" />
+              <span v-else><el-icon><Menu /></el-icon><small>未选择</small></span>
             </div>
             <div class="icon-editor-actions">
               <el-upload :show-file-list="false" :auto-upload="false" accept="image/*" :on-change="handleIconChange">
                 <el-button type="primary" plain :icon="Upload">上传图片</el-button>
               </el-upload>
               <el-button v-if="form.iconUrl" text type="danger" @click="form.iconUrl = ''">移除图片</el-button>
-              <small>上传后会立即显示预览；API 接入后保存到对象存储。</small>
+              <small>左侧是用户端实际显示的图标；上传图片后会覆盖图标标识。</small>
             </div>
           </div>
         </el-form-item>
@@ -115,6 +142,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Menu, Plus, Refresh, RefreshRight, Search, Upload } from '@element-plus/icons-vue'
 import { get, post, put, del } from '../api'
+import { MINIAPP_ICON_OPTIONS, miniAppIconLabel, miniAppIconSrc } from '../data/miniappIcons'
 import { MINIAPP_MERCHANT_MENU } from '../data/permissionMenus'
 
 const statusTabs = [
@@ -131,6 +159,7 @@ const page = ref(1)
 const pageSize = ref(10)
 const dialog = reactive({ visible: false, mode: 'create', saving: false })
 const form = reactive(emptyForm())
+const formIconSrc = computed(() => miniAppIconSrc(form.iconKey))
 
 const filteredRows = computed(() => {
   const query = keyword.value.trim().toLowerCase()
@@ -256,6 +285,20 @@ onBeforeUnmount(() => window.removeEventListener('tcpms:permission-menu-updated'
 .route-cell small{margin-top:4px;color:var(--admin-muted);font-size:11px}
 .menu-icon-image,.menu-icon-fallback{display:inline-flex;width:42px;height:42px;align-items:center;justify-content:center;border:1px solid var(--admin-border);border-radius:9px;background:var(--admin-primary-soft);color:var(--admin-primary-dark);object-fit:cover}
 .menu-icon-fallback{font-size:18px}
+.menu-icon-asset img{display:block;width:24px;height:24px;object-fit:contain}
+.icon-key-cell strong,.icon-key-cell small{display:block}
+.icon-key-cell strong{color:var(--admin-text);font-size:12px}
+.icon-key-cell small{margin-top:3px;color:var(--admin-muted);font-size:11px}
+.icon-key-cell .icon-key-missing{color:#c45656}
+.icon-select{width:100%}
+.icon-select-prefix{width:18px;height:18px;object-fit:contain}
+.icon-option{display:flex;align-items:center;gap:8px;width:100%}
+.icon-option img{width:18px;height:18px;flex:0 0 auto;object-fit:contain}
+.icon-option-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.icon-option small{color:var(--admin-muted);font-size:11px}
+.form-help{margin-top:6px;color:var(--admin-muted);font-size:12px;line-height:1.5}
+.form-help code{padding:1px 4px;border-radius:4px;background:rgba(15,119,119,.08);color:var(--admin-primary-dark);font-size:11px}
+.icon-preview-asset{width:46px;height:46px;object-fit:contain}
 .icon-editor{display:flex;align-items:center;gap:14px;width:100%}
 .icon-upload-preview{display:flex;width:88px;height:88px;flex:0 0 auto;align-items:center;justify-content:center;overflow:hidden;border:1px dashed var(--admin-border);border-radius:10px;background:var(--admin-surface-soft);color:var(--admin-primary-dark)}
 .icon-upload-preview .el-image{width:100%;height:100%}

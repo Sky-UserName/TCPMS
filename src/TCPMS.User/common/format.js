@@ -9,5 +9,3 @@ export const formatYuan = (value) => {
 	}
 	return amount.toFixed(2)
 }
-
-export const formatYuanWithSymbol = (value) => `¥${formatYuan(value)}`

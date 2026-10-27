@@ -41,6 +41,7 @@ Invoke-WebRequest http://localhost:5180/swagger/v1/swagger.json
 | 项目 | 现状 |
 | --- | --- |
 | 数据库 | 开发默认 InMemory；生产需 MySQL 迁移和备份。项目用 `EnsureCreated` 建库，没有 EF 迁移，线上加字段要走 `docs/sql/` 下的脚本 |
+| 样例数据 | 空库且 `Seed:DemoData` 不为 false 时写入 2 家门店、4 个房型（含 1 个待审核）、2 个用户、4 张订单；清库脚本 `docs/sql/2026-10-25_reset_local_data.sql` 只保留地区 |
 | 登录 | 开发可用 devOpenId；生产需微信登录和手机号授权。后台账号初始密码由超管设置，首次登录强制改密（`MustChangePassword`），连续失败 5 次锁定 10 分钟 |
 | 订单 | 未支付订单超过 15 分钟由后台任务自动关单并释放锁定库存（`OrderExpiryService`，每分钟一次） |
 | 支付 | 已接入微信 JSAPI 下单、回调验签解密、退款和回调幂等；生产需填写证书配置并联调 |

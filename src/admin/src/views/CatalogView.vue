@@ -141,12 +141,17 @@
         </div>
 
         <div class="form-section-title">容量与价格</div>
-        <div class="form-grid form-grid-4">
-          <el-form-item label="面积"><el-input-number v-model="roomForm.area" :min="0" :precision="1" controls-position="right"><template #suffix>㎡</template></el-input-number></el-form-item>
+        <div class="form-grid">
+          <el-form-item label="面积"><el-input-number v-model="roomForm.area" :min="0" :precision="1" controls-position="right" placeholder="例如：25"><template #suffix>㎡</template></el-input-number></el-form-item>
           <el-form-item label="朝向"><el-input v-model="roomForm.orientation" placeholder="例如：南" /></el-form-item>
           <el-form-item label="房间数量"><el-input-number v-model="roomForm.roomCount" :min="1" controls-position="right" /></el-form-item>
           <el-form-item label="床位数"><el-input-number v-model="roomForm.bedCount" :min="1" controls-position="right" /></el-form-item>
-          <el-form-item label="容纳人数"><div class="capacity-fields"><el-input-number v-model="roomForm.maxGuests" :min="1" controls-position="right" /><span>成人</span><el-input-number v-model="roomForm.childCapacity" :min="0" controls-position="right" /><span>儿童</span></div></el-form-item>
+          <el-form-item label="容纳人数">
+            <div class="capacity-fields">
+              <el-input-number v-model="roomForm.maxGuests" :min="1" controls-position="right"><template #suffix>成人</template></el-input-number>
+              <el-input-number v-model="roomForm.childCapacity" :min="0" controls-position="right"><template #suffix>儿童</template></el-input-number>
+            </div>
+          </el-form-item>
           <el-form-item label="户型"><el-input v-model="roomForm.layout" placeholder="例如：一室一厅" /></el-form-item>
           <el-form-item label="默认价格"><el-input-number v-model="roomForm.basePriceYuan" :min="0" :precision="2" :step="1" controls-position="right"><template #suffix>元</template></el-input-number></el-form-item>
           <el-form-item label="默认库存"><el-input-number v-model="roomForm.defaultInventory" :min="0" controls-position="right" /></el-form-item>
@@ -171,13 +176,25 @@
         <el-form-item label="房屋介绍"><el-input v-model="roomForm.description" type="textarea" :rows="3" placeholder="填写房间介绍、服务说明和注意事项" /></el-form-item>
         <el-form-item label="房间图片">
           <div class="room-image-editor">
-            <div class="asset-field"><el-input v-model="roomForm.imageUrlsText" type="textarea" :rows="2" placeholder="每行一个图片地址，支持粘贴多个地址" /><el-upload :show-file-list="false" :auto-upload="false" accept="image/*" :on-change="handleRoomImageChange"><el-button type="primary" plain :icon="Upload">选择</el-button></el-upload></div>
-            <div v-if="roomImageList.length" class="room-image-grid">
-              <div v-for="(image, index) in roomImageList" :key="`${image}-${index}`" class="room-image-item">
+            <div class="room-image-grid">
+              <div v-for="(image, index) in roomImages" :key="`${image}-${index}`" class="room-image-item">
                 <img :src="image" alt="" />
+                <span v-if="index === 0" class="room-image-cover">封面</span>
                 <button type="button" title="删除图片" @click="removeRoomImage(index)"><el-icon><Delete /></el-icon></button>
               </div>
+              <el-upload
+                v-if="roomImages.length < 9"
+                class="room-image-upload"
+                :show-file-list="false"
+                :auto-upload="false"
+                accept="image/*"
+                multiple
+                :on-change="handleRoomImageChange"
+              >
+                <div class="room-image-add"><el-icon><Plus /></el-icon><span>上传图片</span></div>
+              </el-upload>
             </div>
+            <div class="form-help">最多 9 张，第一张为封面，点击右上角可删除；支持一次选择多张图片。</div>
           </div>
         </el-form-item>
 
@@ -192,7 +209,7 @@
       <template #footer><el-button @click="roomDialog = false">取消</el-button><el-button type="primary" :loading="roomSaving" @click="saveRoom">保存房间</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="priceSettingsDialog" :title="`${selectedRoom?.name || '房间'} · 价格设置`" width="1120px" top="4vh" destroy-on-close @closed="resetCalendarEdit">
+    <el-dialog v-model="priceSettingsDialog" :title="`${selectedRoom?.name || '房间'} · 价格设置`" width="1120px" top="4vh" destroy-on-close @close="resetCalendarEdit" @closed="resetCalendarEdit">
       <div class="price-settings-dialog">
         <div class="price-settings-summary">
           <div class="price-settings-summary-copy">
@@ -211,21 +228,33 @@
           <div class="calendar-grid">
             <div v-for="day in calendarDays" :key="day.key" class="calendar-day" :class="{ outside: !day.currentMonth, weekend: day.weekend, today: day.today, holiday: day.holiday }">
               <div class="calendar-day-head"><b>{{ day.number }}</b><small v-if="day.holiday">{{ day.holiday }}</small></div>
-              <div class="calendar-metrics">
+              <div v-if="calendarEdit.dayKey === day.key" class="calendar-edit">
+                <span class="calendar-edit-label">{{ calendarFieldLabel(calendarEdit.field) }}</span>
+                <el-input
+                  :ref="setCalendarEditInput"
+                  v-model="calendarEdit.value"
+                  class="calendar-edit-input"
+                  type="number"
+                  size="small"
+                  @input="handleCalendarInput"
+                  @blur="finishCalendarEdit($event)"
+                  @keyup.enter="finishCalendarEdit($event)"
+                  @keydown.esc.stop="finishCalendarEdit($event)"
+                />
+                <span class="calendar-edit-status" :class="{ saving: calendarCellSavingKey === calendarEdit.key }">{{ calendarCellSavingKey === calendarEdit.key ? '保存中…' : '输入即自动保存' }}</span>
+              </div>
+              <div v-else class="calendar-metrics">
                 <div class="calendar-metric">
                   <span>单价</span>
-                  <el-input v-if="isCalendarEditing(day, 'price')" v-model="calendarEdit.value" class="calendar-edit-input" type="number" size="small" :min="0.01" :disabled="calendarCellSavingKey === calendarEditKey(day, 'price')" @change="commitCalendarEdit(day, 'price')" @keyup.enter="commitCalendarEdit(day, 'price')" />
-                  <button v-else type="button" class="calendar-edit-value" :disabled="!day.currentMonth || scheduleLoading" @click="startCalendarEdit(day, 'price')">{{ day.priceCents !== null ? `${centsToYuan(day.priceCents)} 元` : '—' }}</button>
+                  <button type="button" class="calendar-edit-value" :disabled="!day.currentMonth || scheduleLoading" @click="startCalendarEdit(day, 'price')">{{ day.priceCents !== null ? `${centsToYuan(day.priceCents)} 元` : '—' }}</button>
                 </div>
                 <div class="calendar-metric">
                   <span>总数</span>
-                  <el-input v-if="isCalendarEditing(day, 'total')" v-model="calendarEdit.value" class="calendar-edit-input" type="number" size="small" :min="0" :step="1" :disabled="calendarCellSavingKey === calendarEditKey(day, 'total')" @change="commitCalendarEdit(day, 'total')" @keyup.enter="commitCalendarEdit(day, 'total')" />
-                  <button v-else type="button" class="calendar-edit-value" :disabled="!day.currentMonth || scheduleLoading" @click="startCalendarEdit(day, 'total')">{{ day.totalQuantity ?? '—' }}</button>
+                  <button type="button" class="calendar-edit-value" :disabled="!day.currentMonth || scheduleLoading" @click="startCalendarEdit(day, 'total')">{{ day.totalQuantity ?? '—' }}</button>
                 </div>
                 <div class="calendar-metric">
                   <span>剩余</span>
-                  <el-input v-if="isCalendarEditing(day, 'available')" v-model="calendarEdit.value" class="calendar-edit-input" type="number" size="small" :min="0" :step="1" :disabled="calendarCellSavingKey === calendarEditKey(day, 'available')" @change="commitCalendarEdit(day, 'available')" @keyup.enter="commitCalendarEdit(day, 'available')" />
-                  <button v-else type="button" class="calendar-edit-value" :disabled="!day.currentMonth || scheduleLoading" :class="{ 'danger-text': day.availableQuantity !== null && day.availableQuantity <= 1, 'success-text': day.availableQuantity !== null && day.availableQuantity > 1 }" @click="startCalendarEdit(day, 'available')">{{ day.availableQuantity ?? '—' }}</button>
+                  <button type="button" class="calendar-edit-value" :disabled="!day.currentMonth || scheduleLoading" :class="{ 'danger-text': day.availableQuantity !== null && day.availableQuantity <= 1, 'success-text': day.availableQuantity !== null && day.availableQuantity > 1 }" @click="startCalendarEdit(day, 'available')">{{ day.availableQuantity ?? '—' }}</button>
                 </div>
               </div>
             </div>
@@ -262,9 +291,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, ArrowRight, Delete, House, Money, Plus, Refresh, Search, Upload } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Delete, House, Money, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { del, get, post, put } from '../api'
 import { requestNotificationRefresh } from '../notifications'
 
@@ -317,11 +346,21 @@ const scheduleRange = ref([dateOnly(new Date()), dateOnly(addDays(new Date(), 7)
 const priceItems = ref([])
 const inventoryItems = ref([])
 const roomForm = reactive(emptyRoom())
+const roomImages = ref([])
 const priceForm = reactive({ range: [dateOnly(new Date()), dateOnly(addDays(new Date(), 7))], priceYuan: 268, inventoryQuantity: 1 })
 const inventoryForm = reactive({ range: [dateOnly(new Date()), dateOnly(addDays(new Date(), 7))], delta: 1, reason: '' })
 const unitForm = reactive({ visible: false, id: '', code: '', status: 'Available' })
-const calendarEdit = reactive({ key: '', field: '', value: '' })
+const calendarEdit = reactive({ key: '', dayKey: '', field: '', value: '' })
 const calendarCellSavingKey = ref('')
+// 日历小格里放三个数字，宽度只有 ~40px；编辑时改成整格宽的输入面板，这里拿它的实例做自动聚焦。
+let calendarEditInput = null
+// 输入即保存：停止输入 500ms 就写库，输入过程中的半成品不提示、不打断。
+const CALENDAR_AUTO_SAVE_DELAY = 500
+let calendarCommitTimer = null
+let calendarCommitPending = false
+let calendarPendingClose = false
+const CALENDAR_FIELD_LABELS = { price: '单价（元）', total: '总库存', available: '剩余库存' }
+function setCalendarEditInput(instance) { calendarEditInput = instance }
 
 const filteredRooms = computed(() => rooms.value.filter((row) => {
   const text = roomFilters.keyword.trim().toLowerCase()
@@ -418,7 +457,7 @@ function emptyRoom() {
     id: '', storeId: '', name: '', longName: '', kind: 'PrivateRoom', roomCategory: '', bedCount: 1, gender: 'Any',
     maxGuests: 2, childCapacity: 0, area: 15, orientation: '', roomCount: 1, layout: '', basePriceCents: 26800, basePriceYuan: 268, defaultInventory: 1,
     tags: [], services: [], facilities: [], bathroomFacilities: [], nearbyFacilities: [], checkInTime: '当天 14:00 后',
-    checkOutTime: '次日 12:00 前', cancellationRule: '', joinRule: '', description: '', imageUrlsText: '',
+    checkOutTime: '次日 12:00 前', cancellationRule: '', joinRule: '', description: '',
     imageUrlsJson: '', facilitiesJson: '', tagsJson: '', servicesJson: '', bathroomFacilitiesJson: '', nearbyFacilitiesJson: '',
     isPublished: false, approvalStatus: 'PendingReview', isDraft: true, rejectionReason: '', sortOrder: 0
   }
@@ -464,18 +503,18 @@ function unitStatus(value) { return ({ Available: '可售', Occupied: '已占用
 function imageList(row) { return parseArray(row.imageUrlsJson) }
 function firstImage(row) { return imageList(row)[0] || '' }
 function imageCount(row) { return imageList(row).length }
-const roomImageList = computed(() => parseArray(roomForm.imageUrlsText))
 function handleRoomImageChange(uploadFile) {
   const raw = uploadFile?.raw
   if (!raw) return
+  if (!raw.type?.startsWith('image/')) return ElMessage.warning('请选择图片文件')
   const reader = new FileReader()
   reader.onload = () => {
-    roomForm.imageUrlsText = [...roomImageList.value, String(reader.result)].join('\n')
+    roomImages.value = [...roomImages.value, String(reader.result)].slice(0, 9)
   }
   reader.readAsDataURL(raw)
 }
 function removeRoomImage(index) {
-  roomForm.imageUrlsText = roomImageList.value.filter((_, itemIndex) => itemIndex !== index).join('\n')
+  roomImages.value = roomImages.value.filter((_, itemIndex) => itemIndex !== index)
 }
 async function loadStores() { stores.value = await get('/admin/stores') }
 async function loadRooms() {
@@ -495,24 +534,24 @@ async function loadRooms() {
     }
   } catch (error) { ElMessage.error(error.message) } finally { loading.value = false }
 }
-async function loadSchedule(mode = activeTab.value) {
+async function loadSchedule(mode = activeTab.value, { silent = false } = {}) {
   if (!selectedRoomId.value) return
   const [from, to] = mode === 'prices' ? monthRange(calendarDate.value) : (scheduleRange.value || [])
   if (!from || !to) return
-  scheduleLoading.value = true
+  if (!silent) scheduleLoading.value = true
   try {
     const query = `roomTypeId=${selectedRoomId.value}&from=${from}&to=${to}`
     const [prices, inventory] = await Promise.all([get(`/admin/prices?${query}`), get(`/admin/inventory?${query}`)])
     priceItems.value = prices
     inventoryItems.value = inventory
     inventoryPage.value = 1
-  } catch (error) { ElMessage.error(error.message) } finally { scheduleLoading.value = false }
+  } catch (error) { if (!silent) ElMessage.error(error.message) } finally { if (!silent) scheduleLoading.value = false }
 }
 function shiftMonth(delta) {
   calendarDate.value = new Date(calendarDate.value.getFullYear(), calendarDate.value.getMonth() + delta, 1)
   loadSchedule('prices')
 }
-function openRoomCreate() { Object.assign(roomForm, emptyRoom(), { storeId: stores.value[0]?.id || '' }); roomDialog.value = true }
+function openRoomCreate() { Object.assign(roomForm, emptyRoom(), { storeId: stores.value[0]?.id || '' }); roomImages.value = []; roomDialog.value = true }
 function openRoomEdit(row) {
   const base = emptyRoom()
   Object.assign(base, row, {
@@ -521,11 +560,11 @@ function openRoomEdit(row) {
     facilities: parseArray(row.facilitiesJson),
     bathroomFacilities: parseArray(row.bathroomFacilitiesJson),
     nearbyFacilities: parseArray(row.nearbyFacilitiesJson),
-    imageUrlsText: parseArray(row.imageUrlsJson).join('\n'),
     basePriceYuan: centsToYuan(row.basePriceCents),
     childCapacity: row.childCapacity || 0
   })
   Object.assign(roomForm, base)
+  roomImages.value = parseArray(row.imageUrlsJson)
   roomDialog.value = true
 }
 async function saveRoom() {
@@ -541,14 +580,13 @@ async function saveRoom() {
       servicesJson: jsonArray(roomForm.services),
       bathroomFacilitiesJson: jsonArray(roomForm.bathroomFacilities),
       nearbyFacilitiesJson: jsonArray(roomForm.nearbyFacilities),
-      imageUrlsJson: jsonArray(parseArray(roomForm.imageUrlsText))
+      imageUrlsJson: jsonArray(roomImages.value)
     }
     delete payload.tags
     delete payload.services
     delete payload.facilities
     delete payload.bathroomFacilities
     delete payload.nearbyFacilities
-    delete payload.imageUrlsText
     delete payload.basePriceYuan
     if (roomForm.id) await put(`/admin/room-types/${roomForm.id}`, payload)
     else await post('/admin/room-types', payload)
@@ -612,32 +650,110 @@ async function removeRows(rows) {
 }
 function removeSelected() { return removeRows(selectedRows.value) }
 function calendarEditKey(day, field) { return `${day.key}:${field}` }
-function isCalendarEditing(day, field) { return calendarEdit.key === calendarEditKey(day, field) }
-function resetCalendarEdit() {
-  Object.assign(calendarEdit, { key: '', field: '', value: '' })
-  calendarCellSavingKey.value = ''
-}
-function startCalendarEdit(day, field) {
-  if (!day.currentMonth || !selectedRoomId.value) return
+function calendarFieldLabel(field) { return CALENDAR_FIELD_LABELS[field] || '' }
+// 编辑框的初始值（也是「没改动就关掉」的判断依据）。
+function calendarOriginalValue(day, field) {
   const value = field === 'price'
     ? centsToYuan(day.priceCents ?? selectedRoom.value?.basePriceCents ?? 0)
     : field === 'total'
       ? day.totalQuantity ?? defaultInventoryForRoom(selectedRoom.value)
       : day.availableQuantity ?? defaultInventoryForRoom(selectedRoom.value)
-  Object.assign(calendarEdit, { key: calendarEditKey(day, field), field, value: String(value ?? '') })
+  return String(value ?? '')
 }
-async function commitCalendarEdit(day, field) {
-  const editKey = calendarEditKey(day, field)
-  if (calendarEdit.key !== editKey || calendarCellSavingKey.value) return
+function clearCalendarCommitTimer() {
+  if (!calendarCommitTimer) return
+  clearTimeout(calendarCommitTimer)
+  calendarCommitTimer = null
+}
+function resetCalendarEdit() {
+  clearCalendarCommitTimer()
+  calendarCommitPending = false
+  calendarPendingClose = false
+  Object.assign(calendarEdit, { key: '', dayKey: '', field: '', value: '' })
+  calendarCellSavingKey.value = ''
+}
+// 写库后日历会静默刷新，算库存差要用最新的一格数据，不能拿闭包里那份旧对象。
+function currentCalendarDay() {
+  return calendarDays.value.find((day) => day.key === calendarEdit.dayKey) || null
+}
+function startCalendarEdit(day, field) {
+  if (!day.currentMonth || !selectedRoomId.value) return
+  clearCalendarCommitTimer()
+  calendarCommitPending = false
+  Object.assign(calendarEdit, {
+    key: calendarEditKey(day, field),
+    dayKey: day.key,
+    field,
+    value: calendarOriginalValue(day, field)
+  })
+  // 等编辑面板渲染出来再聚焦，点一下就能直接改数字。
+  nextTick(() => {
+    calendarEditInput?.focus?.()
+    calendarEditInput?.select?.()
+  })
+}
+// input 事件：停止输入 500ms 就自动写库，面板保持打开，不弹提示打断输入。
+function handleCalendarInput() {
+  if (!calendarEdit.key) return
+  clearCalendarCommitTimer()
+  calendarCommitTimer = setTimeout(() => {
+    calendarCommitTimer = null
+    commitCalendarEdit({ silent: true, keepOpen: true })
+  }, CALENDAR_AUTO_SAVE_DELAY)
+}
+// 失焦（点其他任何地方）/ 回车 / Esc：把还没写库的内容立刻写掉，然后收起面板。
+function finishCalendarEdit(event) {
+  const field = calendarEdit.field
+  if (!field) return
+  clearCalendarCommitTimer()
+  const related = event && event.relatedTarget
+  // 点弹窗右上角 X 是「退出」，焦点落到关闭按钮上时丢弃草稿，别把它当成普通失焦写进日历。
+  if (related && typeof related.closest === 'function' && related.closest('.el-dialog__headerbtn')) {
+    resetCalendarEdit()
+    return
+  }
+  const day = currentCalendarDay()
+  if (!day) {
+    resetCalendarEdit()
+    return
+  }
+  if (String(calendarEdit.value ?? '').trim() === calendarOriginalValue(day, field)) {
+    resetCalendarEdit()
+    return
+  }
+  commitCalendarEdit({ keepOpen: false, closeOnInvalid: true })
+}
+async function commitCalendarEdit({ silent = false, keepOpen = false, closeOnInvalid = false } = {}) {
+  const field = calendarEdit.field
+  if (!field) return
+  const editKey = calendarEdit.key
+  const day = currentCalendarDay()
+  if (!day) return
   const rawValue = Number(calendarEdit.value)
-  if (!Number.isFinite(rawValue) || rawValue < 0 || (field !== 'price' && !Number.isInteger(rawValue))) {
-    return ElMessage.warning(field === 'price' ? '请输入有效的价格' : '请输入大于等于 0 的整数')
+  const invalid = !Number.isFinite(rawValue)
+    || (field === 'price' ? rawValue <= 0 : rawValue < 0 || !Number.isInteger(rawValue))
+  if (invalid) {
+    // 输入过程中的半成品（清空、只输了个小数点）先不提示，等失焦/回车再说。
+    if (silent) return
+    ElMessage.warning(field === 'price' ? '请输入有效的价格' : '请输入大于等于 0 的整数')
+    if (closeOnInvalid) resetCalendarEdit()
+    return
+  }
+  if (calendarCellSavingKey.value === editKey) {
+    // 上一次保存还没回来：标记一下，等它结束后再补写最后一次输入（失焦的还要记得收面板）。
+    calendarCommitPending = true
+    if (!keepOpen) calendarPendingClose = true
+    return
+  }
+  if (String(calendarEdit.value ?? '').trim() === calendarOriginalValue(day, field)) {
+    if (!keepOpen) resetCalendarEdit()
+    return
   }
 
   calendarCellSavingKey.value = editKey
+  let saved = false
   try {
     if (field === 'price') {
-      if (rawValue <= 0) return ElMessage.warning('价格必须大于 0')
       await put('/admin/prices/bulk', {
         roomTypeId: selectedRoomId.value,
         from: day.key,
@@ -650,7 +766,9 @@ async function commitCalendarEdit(day, field) {
       const currentTotal = Number(day.totalQuantity ?? defaultInventoryForRoom(selectedRoom.value) ?? 0)
       const nextTotal = field === 'total' ? rawValue : rawValue + lockedQuantity + soldQuantity
       if (nextTotal < lockedQuantity + soldQuantity) {
-        return ElMessage.warning('库存不能低于锁定和已售数量')
+        ElMessage.warning('库存不能低于锁定和已售数量')
+        if (closeOnInvalid) resetCalendarEdit()
+        return
       }
       const delta = nextTotal - currentTotal
       if (delta !== 0) {
@@ -663,13 +781,33 @@ async function commitCalendarEdit(day, field) {
         })
       }
     }
-    await loadSchedule('prices')
-    resetCalendarEdit()
-    ElMessage.success(field === 'price' ? '单价已更新' : '库存已更新')
+    saved = true
+    // 面板还开着时不能转圈，否则输入会被打断；静默刷新让格子数据跟上服务端。
+    await loadSchedule('prices', { silent: true })
+    // 保存期间用户可能已经点开了另一格，别把新的编辑面板一起清掉。
+    if (!keepOpen && calendarEdit.key === editKey) {
+      resetCalendarEdit()
+      if (!silent) ElMessage.success(field === 'price' ? '单价已更新' : '库存已更新')
+    }
   } catch (error) {
     ElMessage.error(error.message)
   } finally {
     if (calendarCellSavingKey.value === editKey) calendarCellSavingKey.value = ''
+    // 保存期间又输入/又点了别处：这里补一次，别丢掉最后一次输入，也别让面板挂着不消失。
+    const stillEditing = calendarEdit.key === editKey
+    const pending = calendarCommitPending && stillEditing
+    const shouldClose = calendarPendingClose
+    calendarCommitPending = false
+    calendarPendingClose = false
+    if (saved && pending) {
+      const latest = currentCalendarDay()
+      const dirty = latest && String(calendarEdit.value ?? '').trim() !== calendarOriginalValue(latest, field)
+      if (dirty) {
+        commitCalendarEdit(shouldClose ? { keepOpen: false, closeOnInvalid: true } : { silent: true, keepOpen: true })
+      } else if (shouldClose) {
+        resetCalendarEdit()
+      }
+    }
   }
 }
 async function savePrices() {
@@ -756,17 +894,22 @@ onMounted(async () => {
 .dot-status.warning{color:#ba7915}.dot-status.warning i{background:#e9a11c}
 .dot-status.danger{color:#c85a63}.dot-status.danger i{background:#d96872}
 .dot-status.muted{color:var(--admin-muted)}
-.capacity-fields{display:flex;align-items:center;gap:5px;min-width:0}
-.capacity-fields :deep(.el-input-number){min-width:88px}
-.capacity-fields span{font-size:12px;color:var(--admin-muted);white-space:nowrap}
-.asset-field{display:flex;align-items:flex-start;gap:10px;width:100%}
-.asset-field :deep(.el-textarea){flex:1}
+.capacity-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;width:100%;min-width:0}
+.capacity-fields :deep(.el-input-number){width:100%;min-width:0}
 .room-image-editor{width:100%}
-.room-image-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:10px}
-.room-image-item{position:relative;min-height:92px;overflow:hidden;border:1px solid var(--admin-border);border-radius:7px;background:var(--admin-surface-soft)}
-.room-image-item img{display:block;width:100%;height:92px;object-fit:cover}
+.room-image-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.room-image-item,.room-image-upload{position:relative;height:92px;border-radius:7px}
+.room-image-item{overflow:hidden;border:1px solid var(--admin-border);background:var(--admin-surface-soft)}
+.room-image-item img{display:block;width:100%;height:100%;object-fit:cover}
+.room-image-cover{position:absolute;top:0;left:0;padding:2px 7px;border-bottom-right-radius:7px;background:rgba(15,119,119,.86);color:#fff;font-size:11px;line-height:1.6}
 .room-image-item button{position:absolute;top:5px;right:5px;display:grid;width:25px;height:25px;place-items:center;border:0;border-radius:50%;background:rgba(201,91,98,.92);color:#fff;cursor:pointer}
 .room-image-item button:hover{background:#b74953}
+.room-image-upload{display:block;width:100%}
+.room-image-upload :deep(.el-upload){display:block;width:100%;height:100%}
+.room-image-add{display:flex;height:100%;align-items:center;justify-content:center;flex-direction:column;gap:5px;border:1px dashed var(--admin-border);border-radius:7px;background:var(--admin-surface-soft);color:var(--admin-primary-dark);font-size:12px;cursor:pointer;transition:border-color .18s ease,background .18s ease}
+.room-image-add:hover{border-color:var(--admin-primary);background:var(--admin-primary-soft)}
+.room-image-add .el-icon{font-size:18px}
+.form-help{margin-top:8px;color:var(--admin-muted);font-size:12px;line-height:1.5}
 .room-status-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
 .room-status-tabs button{border:1px solid var(--admin-border);background:var(--admin-surface-soft);color:var(--admin-muted);border-radius:7px;padding:8px 14px;cursor:pointer;font:inherit}
 .room-status-tabs button.active{background:var(--admin-primary-soft);border-color:var(--admin-primary);color:var(--admin-primary);font-weight:700}
@@ -806,14 +949,20 @@ onMounted(async () => {
 .calendar-edit-value{width:100%;min-height:24px;padding:2px 1px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--admin-text);cursor:pointer;font:inherit;font-weight:700;line-height:1.3;text-align:center}
 .calendar-edit-value:hover:not(:disabled){border-color:var(--admin-primary);background:#f7fffd}
 .calendar-edit-value:disabled{cursor:default}
+/* 日历格只有 ~130px 宽，三列指标各占 1/3；编辑时整格换成一块输入面板，避免输入框被压到看不清。 */
+.calendar-edit{display:flex;flex-direction:column;gap:6px}
+.calendar-edit-label{font-size:11px;color:var(--admin-muted);line-height:1;text-align:center}
 .calendar-edit-input{width:100%}
-.calendar-edit-input :deep(.el-input__wrapper){padding:0 4px}
-.calendar-edit-input :deep(.el-input__inner){padding:0;text-align:center}
+.calendar-edit-input :deep(.el-input__wrapper){padding:1px 8px}
+.calendar-edit-input :deep(.el-input__inner){padding:0;text-align:center;font-weight:700}
+.calendar-edit-input :deep(.el-input__inner)::-webkit-outer-spin-button,
+.calendar-edit-input :deep(.el-input__inner)::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.calendar-edit-status{font-size:11px;line-height:1.3;color:var(--admin-muted);text-align:center}
+.calendar-edit-status.saving{color:var(--admin-primary);font-weight:700}
 .form-section-title{font-size:14px;font-weight:700;color:var(--admin-text);padding:12px 0 8px;border-top:1px solid var(--admin-border);margin-top:4px}
 .form-section-title:first-child{border-top:0;padding-top:0}
 .room-form :deep(.el-form-item){margin-bottom:14px}
 .room-form :deep(.el-select),.room-form :deep(.el-input-number){width:100%}
-.form-grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
-@media (max-width: 900px){.form-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}.calendar-day{min-height:112px}}
-@media (max-width: 640px){.room-image-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.asset-field{align-items:stretch;flex-direction:column}.toolbar-left{width:100%}.price-settings-summary{align-items:stretch;flex-direction:column}.price-settings-controls{justify-content:space-between}.month-picker-label{min-width:0;flex:1}}
+@media (max-width: 900px){.calendar-day{min-height:112px}}
+@media (max-width: 640px){.room-image-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar-left{width:100%}.price-settings-summary{align-items:stretch;flex-direction:column}.price-settings-controls{justify-content:space-between}.month-picker-label{min-width:0;flex:1}}
 </style>

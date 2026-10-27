@@ -1,18 +1,10 @@
-import { demoGuests, demoOrders, demoRooms, demoStores, prototypeImages } from './prototype.js'
+import { demoOrders, demoRooms, demoStores, prototypeImages } from './prototype.js'
 
 const storageKeys = {
 	auth: 'tcpms.auth',
 	apiToken: 'tcpms.apiToken',
 	profile: 'tcpms.profile',
 	merchant: 'tcpms.merchant',
-	merchantRooms: 'tcpms.merchantRooms',
-	merchantOrders: 'tcpms.merchantOrders',
-	merchantVerifyRecords: 'tcpms.merchantVerifyRecords',
-	merchantReviews: 'tcpms.merchantReviews',
-	merchantCoupons: 'tcpms.merchantCoupons',
-	merchantStaff: 'tcpms.merchantStaff',
-	merchantSettings: 'tcpms.merchantSettings',
-	merchantMessages: 'tcpms.merchantMessages',
 	reviews: 'tcpms.reviews',
 	guests: 'tcpms.guests',
 	orders: 'tcpms.orders',
@@ -71,105 +63,6 @@ const defaultMerchant = {
 	roomCount: 3,
 	pendingOrderCount: 0
 }
-
-const defaultMerchantRooms = [
-	{
-		id: 'merchant-room-001',
-		name: '阳光实木标准大床房',
-		type: '独立房间',
-		status: '已上架',
-		key: 'online',
-		price: '300',
-		stock: '2',
-		capacity: '可住2人 · 1张1.8m大床',
-		area: '28㎡',
-		image: prototypeImages.roomOne,
-		updatedAt: '2026-10-06 10:20'
-	},
-	{
-		id: 'merchant-room-002',
-		name: '城市花园观景双床房',
-		type: '独立房间',
-		status: '草稿',
-		key: 'draft',
-		price: '368',
-		stock: '1',
-		capacity: '可住4人 · 2张1.5m双人床',
-		area: '35㎡',
-		image: prototypeImages.roomTwo,
-		updatedAt: '2026-10-05 16:40'
-	}
-]
-
-const defaultMerchantOrders = [
-	{
-		id: 'M202610060001',
-		roomName: '阳光实木标准大床房',
-		guest: '张三 等2人',
-		date: '10月07日 - 10月08日',
-		amount: '300.00',
-		status: '待入住',
-		statusKey: 'stay',
-		image: prototypeImages.roomOne,
-		createdAt: '2026-10-06 09:18'
-	},
-	{
-		id: 'M202610050002',
-		roomName: '城市花园观景双床房',
-		guest: '李四',
-		date: '10月06日 - 10月08日',
-		amount: '736.00',
-		status: '待处理',
-		statusKey: 'pending',
-		image: prototypeImages.roomTwo,
-		createdAt: '2026-10-05 20:32'
-	}
-]
-
-const defaultMerchantReviews = [
-	{
-		id: 'review-001',
-		guest: '鑫',
-		rating: 5,
-		date: '2026-09-28',
-		content: '房子很干净，入住流程顺畅。',
-		reply: ''
-	},
-	{
-		id: 'review-002',
-		guest: '心',
-		rating: 4,
-		date: '2026-09-21',
-		content: '周边交通方便，房间采光很好。',
-		reply: '感谢您的入住与反馈。'
-	}
-]
-
-const defaultMerchantCoupons = [
-	{ id: 'coupon-001', name: '新客立减券', amount: '20', threshold: '满200可用', stock: 50, used: 8, status: '生效中' },
-	{ id: 'coupon-002', name: '周末房费券', amount: '50', threshold: '满400可用', stock: 20, used: 20, status: '已结束' }
-]
-
-const defaultMerchantStaff = [
-	{ id: 'staff-001', name: '张三', phone: '138****8888', role: '店主', status: '正常' },
-	{ id: 'staff-002', name: '李四', phone: '139****9999', role: '前台', status: '正常' }
-]
-
-const defaultMerchantSettings = {
-	storeName: '天空之蓝',
-	phone: '0371-88886622',
-	checkIn: '14:00',
-	checkOut: '12:00',
-	cancelRule: '入住前 24 小时可免费取消',
-	autoAccept: true,
-	showPhone: true
-}
-
-const defaultMerchantMessages = [
-	{ key: 'order', title: '订单状态提醒', desc: '新订单、入住和退款状态变化', enabled: true },
-	{ key: 'review', title: '评价提醒', desc: '收到新评价时通知', enabled: true },
-	{ key: 'finance', title: '财务结算提醒', desc: '提现和结算状态变化', enabled: false }
-]
 
 const defaultUserReviews = [
 	{
@@ -249,7 +142,8 @@ const defaultBooking = {
 	roomCount: 1,
 	guestCount: 2,
 	bedCount: 0,
-	guests: clone(demoGuests)
+	// 入住信息默认留空：订单页不预填任何入住人，必须由用户手动选择/新增。
+	guests: []
 }
 
 export const getProfile = () => read(storageKeys.profile, defaultProfile)
@@ -286,138 +180,6 @@ export const saveMerchantProfile = (merchant = {}) => write(storageKeys.merchant
 	...defaultMerchant,
 	...merchant
 })
-
-export const updateMerchantStatus = (status, patch = {}) => saveMerchantProfile({
-	...patch,
-	status,
-	enabled: status === 'approved'
-})
-
-export const getMerchantRooms = () => read(storageKeys.merchantRooms, defaultMerchantRooms)
-
-export const saveMerchantRooms = (rooms) => write(storageKeys.merchantRooms, rooms)
-
-export const findMerchantRoom = (id) => getMerchantRooms().find((room) => String(room.id) === String(id))
-
-export const upsertMerchantRoom = (room = {}) => {
-	const rooms = getMerchantRooms()
-	const index = rooms.findIndex((item) => String(item.id) === String(room.id))
-	const value = {
-		id: room.id || `merchant-room-${Date.now()}`,
-		name: room.name || '未命名房间',
-		type: room.type || '独立房间',
-		status: room.status || '草稿',
-		key: room.key || (room.status === '已上架' ? 'online' : 'draft'),
-		price: String(room.price || '0'),
-		stock: String(room.stock || '1'),
-		capacity: room.capacity || '可住2人',
-		area: room.area || '待完善',
-		image: room.image || prototypeImages.roomOne,
-		updatedAt: room.updatedAt || new Date().toISOString().slice(0, 16).replace('T', ' '),
-		...room
-	}
-	if (index >= 0) rooms.splice(index, 1, { ...rooms[index], ...value })
-	else rooms.unshift(value)
-	saveMerchantRooms(rooms)
-	return value
-}
-
-export const updateMerchantRoom = (id, patch = {}) => {
-	const rooms = getMerchantRooms()
-	const index = rooms.findIndex((room) => String(room.id) === String(id))
-	if (index < 0) return null
-	rooms[index] = { ...rooms[index], ...patch, updatedAt: new Date().toISOString().slice(0, 16).replace('T', ' ') }
-	return saveMerchantRooms(rooms).find((room) => String(room.id) === String(id))
-}
-
-export const getMerchantOrders = () => read(storageKeys.merchantOrders, defaultMerchantOrders)
-
-export const saveMerchantOrders = (orders) => write(storageKeys.merchantOrders, orders)
-
-export const updateMerchantOrder = (id, patch = {}) => {
-	const orders = getMerchantOrders()
-	const index = orders.findIndex((order) => String(order.id) === String(id))
-	if (index < 0) return null
-	orders[index] = { ...orders[index], ...patch }
-	saveMerchantOrders(orders)
-	return orders[index]
-}
-
-export const getMerchantVerifyRecords = () => read(storageKeys.merchantVerifyRecords, [])
-
-export const saveMerchantVerifyRecords = (records) => write(storageKeys.merchantVerifyRecords, records)
-
-export const addMerchantVerifyRecord = (record = {}) => {
-	const records = getMerchantVerifyRecords()
-	const value = {
-		id: record.id || `verify-${Date.now()}`,
-		code: record.code || '',
-		guest: record.guest || '待核验住客',
-		roomName: record.roomName || '未指定房间',
-		status: record.status || '已核销',
-		time: record.time || new Date().toISOString().slice(0, 16).replace('T', ' ')
-	}
-	records.unshift(value)
-	saveMerchantVerifyRecords(records)
-	return value
-}
-
-export const getMerchantReviews = () => read(storageKeys.merchantReviews, defaultMerchantReviews)
-
-export const saveMerchantReviews = (reviews) => write(storageKeys.merchantReviews, reviews)
-
-export const updateMerchantReview = (id, patch = {}) => {
-	const reviews = getMerchantReviews()
-	const index = reviews.findIndex((review) => String(review.id) === String(id))
-	if (index < 0) return null
-	reviews[index] = { ...reviews[index], ...patch }
-	saveMerchantReviews(reviews)
-	return reviews[index]
-}
-
-export const getMerchantCoupons = () => read(storageKeys.merchantCoupons, defaultMerchantCoupons)
-
-export const saveMerchantCoupons = (coupons) => write(storageKeys.merchantCoupons, coupons)
-
-export const addMerchantCoupon = (coupon = {}) => {
-	const coupons = getMerchantCoupons()
-	const value = {
-		id: coupon.id || `coupon-${Date.now()}`,
-		name: coupon.name || '新建优惠券',
-		amount: String(coupon.amount || '20'),
-		threshold: coupon.threshold || '满200可用',
-		stock: Number(coupon.stock || 20),
-		used: 0,
-		status: '生效中'
-	}
-	coupons.unshift(value)
-	saveMerchantCoupons(coupons)
-	return value
-}
-
-export const updateMerchantCoupon = (id, patch = {}) => {
-	const coupons = getMerchantCoupons()
-	const index = coupons.findIndex((coupon) => String(coupon.id) === String(id))
-	if (index < 0) return null
-	coupons[index] = { ...coupons[index], ...patch }
-	saveMerchantCoupons(coupons)
-	return coupons[index]
-}
-
-export const getMerchantStaff = () => read(storageKeys.merchantStaff, defaultMerchantStaff)
-
-export const saveMerchantStaff = (staff) => write(storageKeys.merchantStaff, staff)
-
-export const getMerchantSettings = () => read(storageKeys.merchantSettings, defaultMerchantSettings)
-
-export const saveMerchantSettings = (settings = {}) => write(storageKeys.merchantSettings, {
-	...defaultMerchantSettings,
-	...settings
-})
-
-export const getMerchantMessageSettings = () => read(storageKeys.merchantMessages, defaultMerchantMessages)
-
-export const saveMerchantMessageSettings = (messages) => write(storageKeys.merchantMessages, messages)
 
 export const getUserReviews = () => read(storageKeys.reviews, defaultUserReviews)
 
@@ -474,19 +236,6 @@ export const addUserReview = (review = {}) => {
 	else existing.unshift(value)
 	saveUserReviews(existing)
 
-	const merchantReviews = getMerchantReviews()
-	const merchantIndex = merchantReviews.findIndex((item) => String(item.id) === String(value.id))
-	const merchantValue = {
-		id: value.id,
-		guest: value.nickname,
-		rating: value.roomRating,
-		date: value.checkIn || value.createdAt.slice(0, 10),
-		content: value.content,
-		reply: ''
-	}
-	if (merchantIndex >= 0) merchantReviews.splice(merchantIndex, 1, { ...merchantReviews[merchantIndex], ...merchantValue })
-	else merchantReviews.unshift(merchantValue)
-	saveMerchantReviews(merchantReviews)
 	return value
 }
 
@@ -500,7 +249,8 @@ export const logout = () => {
 	return saveProfile({ ...defaultProfile, loggedIn: false })
 }
 
-export const getGuests = () => read(storageKeys.guests, demoGuests)
+// 常用入住人只来自用户自己添加/服务端同步，不再塞演示数据（张三、李四）。
+export const getGuests = () => read(storageKeys.guests, [])
 
 export const saveGuests = (guests) => write(storageKeys.guests, guests)
 
@@ -549,45 +299,6 @@ export const resolveReviewTarget = (order = {}) => {
 	}
 }
 
-export const createOrder = (booking = {}) => {
-	const orders = getOrders()
-	const now = new Date()
-	const stamp = [
-		now.getFullYear(),
-		String(now.getMonth() + 1).padStart(2, '0'),
-		String(now.getDate()).padStart(2, '0'),
-		String(now.getHours()).padStart(2, '0'),
-		String(now.getMinutes()).padStart(2, '0'),
-		String(now.getSeconds()).padStart(2, '0')
-	].join('')
-	const order = {
-		id: `TCP${stamp}`,
-		store: booking.store || defaultBooking.store,
-		storeId: booking.storeId || defaultBooking.storeId,
-		address: booking.address || defaultBooking.address,
-		room: booking.room || defaultBooking.room,
-		roomId: booking.roomId || defaultBooking.roomId,
-		image: booking.roomImage || defaultBooking.roomImage,
-		status: '待支付',
-		statusKey: 'pay',
-		date: booking.date || defaultBooking.date,
-		checkIn: booking.checkIn || defaultBooking.checkIn,
-		checkOut: booking.checkOut || defaultBooking.checkOut,
-		isoCheckIn: booking.isoCheckIn || defaultBooking.isoCheckIn,
-		isoCheckOut: booking.isoCheckOut || defaultBooking.isoCheckOut,
-		nights: Number(booking.nights || 1),
-		roomCount: Number(booking.roomCount || 1),
-		guest: (booking.guests || defaultBooking.guests).map((guest) => guest.name).join(' 等'),
-		guests: clone(booking.guests || defaultBooking.guests),
-		price: String(Number(booking.total || booking.roomPrice || defaultBooking.roomPrice)),
-		action: '立即支付',
-		createdAt: now.toISOString()
-	}
-	orders.unshift(order)
-	saveOrders(orders)
-	return order
-}
-
 export const getBooking = () => {
 	const booking = read(storageKeys.booking, defaultBooking)
 	if (!booking.isoCheckIn || new Date(booking.isoCheckIn) < today) {
@@ -606,18 +317,11 @@ export const getBooking = () => {
 export const saveBooking = (booking) => write(storageKeys.booking, {
 	...defaultBooking,
 	...booking,
-	guests: clone(booking.guests || defaultBooking.guests)
+	// 空数组也是有效值（用户主动清空入住人），不能再用默认入住人兜底。
+	guests: Array.isArray(booking.guests) ? clone(booking.guests) : []
 })
 
 export const getFavorites = () => read(storageKeys.favorites, [])
-
-export const getFavoriteRecords = () => {
-	const metadata = read(storageKeys.favoriteMeta, {})
-	return getFavorites().map((id) => ({
-		id: String(id),
-		...(metadata[String(id)] || {})
-	}))
-}
 
 export const toggleFavorite = (id, metadata = {}) => {
 	const favorites = getFavorites()

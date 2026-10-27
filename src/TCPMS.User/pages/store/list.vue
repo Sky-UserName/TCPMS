@@ -91,6 +91,7 @@
 	import { demoStores, goPage, showToast } from '@/common/prototype.js'
 	import { ALLOW_DEMO_DATA } from '@/common/env.js'
 	import { fetchStores } from '@/common/api.js'
+	import { openStoreRoom } from '@/common/navigation.js'
 	import { getBooking } from '@/common/app-store.js'
 	import { takeTabParams } from '@/common/tab-params.js'
 
@@ -199,7 +200,7 @@
 				}
 			},
 			goDetail(store) {
-				goPage(`/pages/store/detail?id=${store.id}`)
+				openStoreRoom(store)
 			},
 			goMap() {
 				goPage('/pages/store/map')
@@ -242,151 +243,12 @@
 </script>
 
 <style lang="scss" scoped>
-	.store-search-row {
-		display: flex;
-		align-items: center;
-		width: 100%;
-		min-height: 92rpx;
-		gap: 10rpx;
-		padding: 14rpx 24rpx 10rpx;
-		background: var(--proto-surface);
-	}
 
-	.city-filter {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex: 0 0 154rpx;
-		width: 154rpx;
-		min-width: 154rpx;
-		height: 68rpx;
-		padding: 0 14rpx;
-		color: var(--proto-text);
-		background: var(--proto-surface-low);
-		border-radius: 14rpx;
-		font-size: 21rpx;
-		white-space: nowrap;
-	}
-
-	.city-filter .proto-icon {
-		margin-right: 5rpx;
-	}
-
-	.city-filter .proto-icon:last-child {
-		margin-right: 0;
-		margin-left: 4rpx;
-	}
-
-	.store-search {
-		display: flex;
-		align-items: center;
-		flex: 1;
-		min-width: 0;
-		height: 68rpx;
-		padding: 0 14rpx;
-		background: var(--proto-surface-low);
-		border-radius: 14rpx;
-	}
-
-	.store-search > .proto-icon {
-		margin-right: 10rpx;
-	}
-
-	.store-search input {
-		min-width: 0;
-		flex: 1;
-		height: 64rpx;
-		color: var(--proto-text);
-		font-size: 20rpx;
-	}
 
 	.search-placeholder {
 		color: var(--proto-muted);
 	}
 
-	.view-toggle {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex: 0 0 58rpx;
-		width: 62rpx;
-		min-width: 58rpx;
-		height: 68rpx;
-		padding: 0;
-		color: var(--proto-muted);
-		background: var(--proto-surface-low);
-		border-radius: 14rpx;
-	}
-
-	.view-toggle.active {
-		color: #ffffff;
-		background: var(--proto-primary);
-	}
-
-	.filter-row {
-		width: 100%;
-		padding: 12rpx 24rpx 14rpx;
-		background: var(--proto-surface);
-		white-space: nowrap;
-	}
-
-	.filter-chip {
-		display: inline-flex;
-		align-items: center;
-		width: auto;
-		min-width: 0;
-		flex: 0 0 auto;
-		gap: 4rpx;
-		height: 58rpx;
-		margin-right: 10rpx;
-		padding: 0 18rpx;
-		color: var(--proto-text);
-		background: var(--proto-surface-low);
-		border-radius: 29rpx;
-		font-size: 20rpx;
-	}
-
-	.filter-chip.active {
-		color: var(--proto-primary-dark);
-		background: var(--proto-surface-tint);
-	}
-
-	.location-notice {
-		display: flex;
-		align-items: center;
-		min-height: 68rpx;
-		padding: 14rpx 24rpx;
-		color: var(--proto-primary-dark);
-		background: #d8f6f5;
-		font-size: 20rpx;
-	}
-
-	.notice-icon {
-		margin-right: 8rpx;
-	}
-
-	.location-notice > .proto-icon {
-		margin-right: 8rpx;
-		flex: 0 0 auto;
-	}
-
-	.location-notice > text {
-		flex: 1;
-		overflow: hidden;
-		white-space: nowrap;
-		text-overflow: ellipsis;
-	}
-
-	.location-notice button {
-		width: auto;
-		min-width: 0;
-		flex: 0 0 auto;
-		margin-left: 12rpx;
-		padding: 0;
-		color: var(--proto-primary-dark);
-		background: transparent;
-		font-size: 19rpx;
-	}
 
 	.store-list {
 		padding: 10rpx 0 20rpx;
@@ -401,23 +263,6 @@
 		box-shadow: 0 8rpx 24rpx rgba(42, 169, 169, 0.06);
 	}
 
-	.store-photo-wrap {
-		position: relative;
-		height: 326rpx;
-	}
-
-	.store-photo {
-		width: 100%;
-		height: 100%;
-	}
-
-	.photo-badges {
-		position: absolute;
-		top: 18rpx;
-		left: 18rpx;
-		display: flex;
-		gap: 8rpx;
-	}
 
 	.store-rating {
 		display: flex;
@@ -502,18 +347,6 @@
 		flex-wrap: wrap;
 	}
 
-	.available-text {
-		margin-left: 6rpx;
-		color: var(--proto-primary-dark);
-		font-size: 19rpx;
-	}
-
-	.old-price {
-		margin-left: 12rpx;
-		color: var(--proto-muted);
-		font-size: 18rpx;
-		text-decoration: line-through;
-	}
 
 	.store-price {
 		margin-left: 6rpx;
@@ -527,39 +360,6 @@
 		font-size: 18rpx;
 	}
 
-	.skeleton-list {
-		padding: 20rpx 24rpx;
-	}
-
-	.skeleton-card {
-		margin-bottom: 20rpx;
-		padding: 18rpx;
-		background: var(--proto-surface);
-		border-radius: 24rpx;
-	}
-
-	.skeleton-image,
-	.skeleton-line {
-		background: #e5eeee;
-		border-radius: 12rpx;
-	}
-
-	.skeleton-image {
-		height: 340rpx;
-	}
-
-	.skeleton-line {
-		height: 28rpx;
-		margin-top: 18rpx;
-	}
-
-	.skeleton-line-long {
-		width: 75%;
-	}
-
-	.skeleton-line-short {
-		width: 42%;
-	}
 
 	.city-grid,
 	.option-grid {

@@ -139,8 +139,7 @@ image {
 }
 
 .proto-header-icon-button,
-.proto-header-user-button,
-.proto-window-action {
+.proto-header-user-button {
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -165,9 +164,6 @@ image {
 	margin-right: 2rpx;
 }
 
-.proto-header-placeholder {
-	width: 64rpx;
-}
 
 .proto-header-overlay {
 	position: absolute;
@@ -212,14 +208,6 @@ image {
 	margin-left: 0;
 }
 
-.proto-brand-dot {
-	display: inline-block;
-	width: 18rpx;
-	height: 18rpx;
-	margin-right: 10rpx;
-	background: var(--proto-primary);
-	border-radius: 50%;
-}
 
 .proto-pill {
 	display: inline-flex;
@@ -273,9 +261,6 @@ image {
 	box-shadow: 0 8rpx 24rpx rgba(42, 169, 169, 0.06);
 }
 
-.proto-card-tight {
-	padding: 18rpx;
-}
 
 .proto-section-title {
 	display: flex;
@@ -300,16 +285,6 @@ image {
 	flex: 1;
 }
 
-.proto-row {
-	display: flex;
-	align-items: center;
-}
-
-.proto-row-between {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-}
 
 .proto-muted {
 	color: var(--proto-muted);
@@ -498,11 +473,6 @@ image {
 	font-weight: 750;
 }
 
-.proto-image {
-	display: block;
-	width: 100%;
-	height: 100%;
-}
 
 .proto-input,
 .proto-textarea {
@@ -538,32 +508,6 @@ image {
 	font-weight: 700;
 }
 
-.proto-empty {
-	display: flex;
-	align-items: center;
-	flex-direction: column;
-	padding: 90rpx 30rpx;
-	color: var(--proto-muted);
-	text-align: center;
-}
-
-.proto-empty-icon {
-	color: var(--proto-primary);
-	font-size: 80rpx;
-}
-
-.proto-empty-title {
-	margin-top: 20rpx;
-	color: var(--proto-text);
-	font-size: 28rpx;
-	font-weight: 750;
-}
-
-.proto-empty-desc {
-	margin-top: 10rpx;
-	font-size: 21rpx;
-	line-height: 1.5;
-}
 
 .proto-mask {
 	position: fixed;
@@ -651,34 +595,4 @@ image {
 	border-color: var(--proto-primary);
 }
 
-.proto-divider {
-	height: 1rpx;
-	margin: 20rpx 0;
-	background: rgba(197, 199, 202, 0.5);
-}
 
-.proto-grid-2 {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 18rpx;
-}
-
-.proto-grid-2 > view,
-.proto-grid-2 > text,
-.proto-grid-2 > button,
-.proto-grid-2 > image {
-	width: calc(50% - 9rpx);
-}
-
-.proto-grid-3 {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 14rpx;
-}
-
-.proto-grid-3 > view,
-.proto-grid-3 > text,
-.proto-grid-3 > button,
-.proto-grid-3 > image {
-	width: calc(33.333% - 10rpx);
-}

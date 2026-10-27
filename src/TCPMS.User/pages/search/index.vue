@@ -18,55 +18,44 @@
 				</button>
 			</view>
 
-			<view class="location-toolbar">
-				<view class="location-heading">
-					<text>区域选择</text>
+			<view class="region-heading">
+				<view class="region-heading-copy">
+					<ProtoIcon name="location" :size="30" />
+					<text class="region-heading-title">区域选择</text>
 				</view>
-				<button class="current-location-button" hover-class="none" @tap="useCurrentLocation">
-					<text>{{ locationStatus }}</text>
+				<button class="region-city-button" hover-class="none" @tap="openCityPicker">
+					<text>{{ activeCity || '全部城市' }}</text>
+					<ProtoIcon name="chevron-down" :size="18" />
 				</button>
 			</view>
 
-			<scroll-view class="city-scroll" scroll-x enable-flex>
-				<view class="city-list">
-					<text
-						v-for="item in cityOptions"
-						:key="item"
-						class="city-chip"
-						:class="{ selected: activeCity === item }"
-						@tap="selectCity(item)"
-					>{{ item }}</text>
-				</view>
-			</scroll-view>
+			<view v-if="regionState === 'loading'" class="region-state">
+				<text>正在加载 {{ activeCity }} 的区域…</text>
+			</view>
 
-			<view class="region-panel">
-				<view class="region-panel-heading">
-					<text>{{ activeCity }}区域</text>
-					<text v-if="keyword" class="region-result-count">匹配“{{ keyword }}”</text>
-				</view>
-				<view v-if="filteredAreas.length" class="region-grid">
-					<text
-						v-for="area in filteredAreas"
-						:key="area"
-						class="region-chip"
-						:class="{ selected: selectedArea === area }"
-						@tap="selectArea(area)"
-					>{{ area }}</text>
-				</view>
-				<view v-else class="region-empty">
-					<ProtoEmptyState compact />
-				</view>
+			<view v-else-if="filteredAreas.length" class="region-grid">
+				<text
+					v-for="area in filteredAreas"
+					:key="area"
+					class="region-chip"
+					:class="{ selected: selectedArea === area }"
+					@tap="selectArea(area)"
+				>{{ area }}</text>
+			</view>
+
+			<view v-else class="region-state region-state-empty">
+				<text v-if="!activeCity || activeCity === '全部城市'">先选择城市，即可按区域筛选</text>
+				<text v-else-if="keyword">没有匹配「{{ keyword }}」的区域</text>
+				<text v-else>{{ activeCity }}暂未收录区域，可直接搜索门店名称或地址</text>
+				<button v-if="!activeCity || activeCity === '全部城市'" class="region-state-action" hover-class="none" @tap="openCityPicker">
+					选择城市
+				</button>
 			</view>
 
 			<view class="search-hint">
 				<ProtoIcon name="info" :size="22" />
-				<text>区域数据先使用本地城市目录，接入高德后将按定位和关键词实时更新。</text>
+				<text>区域数据按所选城市实时加载，选择后会带入门店列表筛选。</text>
 			</view>
-
-			<button class="confirm-search-button" hover-class="none" @tap="confirmKeyword">
-				<ProtoIcon name="search" tone="white" :size="28" />
-				<text>使用当前条件</text>
-			</button>
 		</view>
 	</view>
 </template>
@@ -74,36 +63,11 @@
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
-	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
+	import { fetchDistricts } from '@/common/amap.js'
 	import { getBooking, saveBooking } from '@/common/app-store.js'
+	import { fetchStoreFilters } from '@/common/api.js'
+	import { ALL_CITY_LABEL, DISTRICT_FALLBACK } from '@/common/city-data.js'
 	import { showToast } from '@/common/prototype.js'
-
-	const REGION_GROUPS = [
-		{
-			city: '郑州市',
-			areas: ['金水区', '二七区', '中原区', '管城回族区', '惠济区', '郑东新区', '高新区', '经开区', '新密市', '荥阳市', '中牟县']
-		},
-		{
-			city: '开封市',
-			areas: ['龙亭区', '鼓楼区', '禹王台区', '顺河回族区', '祥符区', '尉氏县', '杞县', '通许县']
-		},
-		{
-			city: '洛阳市',
-			areas: ['涧西区', '西工区', '老城区', '瀍河回族区', '洛龙区', '孟津区', '偃师区', '栾川县']
-		},
-		{
-			city: '安阳市',
-			areas: ['文峰区', '北关区', '殷都区', '龙安区', '安阳县', '林州市', '滑县']
-		},
-		{
-			city: '新乡市',
-			areas: ['红旗区', '卫滨区', '凤泉区', '牧野区', '新乡县', '辉县市', '卫辉市']
-		},
-		{
-			city: '焦作市',
-			areas: ['解放区', '山阳区', '中站区', '马村区', '修武县', '沁阳市', '孟州市']
-		}
-	]
 
 	const decodeValue = (value = '') => {
 		try {
@@ -114,40 +78,85 @@
 	}
 
 	export default {
-		components: { ProtoHeader, ProtoIcon, ProtoEmptyState },
+		components: { ProtoHeader, ProtoIcon },
 		data() {
 			return {
 				keyword: '',
-				activeCity: '郑州市',
+				activeCity: '',
 				selectedArea: '',
-				locationStatus: '我的位置',
-				regionGroups: REGION_GROUPS
+				regionState: 'idle',
+				areas: [],
+				remoteAreas: {}
 			}
 		},
 		computed: {
-			cityOptions() {
-				return this.regionGroups.map((item) => item.city)
-			},
-			activeGroup() {
-				return this.regionGroups.find((item) => item.city === this.activeCity) || this.regionGroups[0]
-			},
 			filteredAreas() {
 				const value = this.keyword.trim().toLowerCase()
-				if (!value) return this.activeGroup.areas
-				return this.activeGroup.areas.filter((area) => area.toLowerCase().indexOf(value) >= 0)
+				if (!value) return this.areas
+				return this.areas.filter((area) => area.toLowerCase().indexOf(value) >= 0)
 			}
 		},
-		onLoad(options) {
+		async onLoad(options) {
 			const booking = getBooking()
-			const city = decodeValue(options && options.city) || booking.city || '郑州市'
-			this.activeCity = this.cityOptions.indexOf(city) >= 0 ? city : '郑州市'
+			this.activeCity = decodeValue(options && options.city) || booking.city || ''
 			this.keyword = decodeValue(options && options.keyword) || booking.searchKeyword || ''
 			this.selectedArea = decodeValue(options && options.region) || booking.region || ''
+
+			// 后端门店覆盖的区域留作兜底：高德查不到时至少还能列出平台已有门店的区县。
+			await this.loadRemoteAreas()
+			await this.loadRegions()
 		},
-		methods: {
-			selectCity(city) {
+		onShow() {
+			// 从「选择城市」页返回时城市可能已变，重新拉该城市的区域。
+			const booking = getBooking()
+			const city = booking.city || ''
+			if (city && city !== this.activeCity) {
 				this.activeCity = city
 				this.selectedArea = ''
+				this.loadRegions()
+			}
+		},
+		methods: {
+			async loadRemoteAreas() {
+				try {
+					const data = await fetchStoreFilters()
+					const cities = Array.isArray(data && data.cities) ? data.cities : []
+					const map = {}
+					cities.forEach((item) => {
+						if (!item || !item.city) return
+						map[item.city] = Array.isArray(item.areas) ? item.areas.filter(Boolean) : []
+					})
+					this.remoteAreas = map
+				} catch (error) {
+					this.remoteAreas = {}
+				}
+			},
+			async loadRegions() {
+				const city = this.activeCity
+				if (!city || city === ALL_CITY_LABEL) {
+					this.areas = []
+					this.regionState = 'ready'
+					return
+				}
+				this.regionState = 'loading'
+				let items = []
+				try {
+					// 高德行政区划：能拿到该城市全部区县，不依赖平台是否已在该城市开门店。
+					items = await fetchDistricts(city)
+				} catch (error) {
+					console.warn('[搜索] 区域加载失败：', error && (error.message || error.errMsg || error))
+					items = []
+				}
+				if (!items.length) items = DISTRICT_FALLBACK[city] || []
+				if (!items.length) items = this.remoteAreas[city] || []
+				// 保留已选区域：接口返回的顺序可能和本地兜底不一致，这里不做删除。
+				this.areas = items
+				this.regionState = 'ready'
+			},
+			openCityPicker() {
+				uni.navigateTo({
+					url: `/pages/city/select?city=${encodeURIComponent(this.activeCity || ALL_CITY_LABEL)}`
+				})
 			},
 			selectArea(area) {
 				this.selectedArea = area
@@ -155,20 +164,6 @@
 			},
 			clearKeyword() {
 				this.keyword = ''
-			},
-			useCurrentLocation() {
-				this.locationStatus = '定位中'
-				uni.getLocation({
-					type: 'gcj02',
-					success: () => {
-						this.locationStatus = '已定位'
-						showToast('已获取当前位置，请选择区域')
-					},
-					fail: () => {
-						this.locationStatus = '我的位置'
-						showToast('定位未开启，可手动选择城市')
-					}
-				})
 			},
 			confirmKeyword() {
 				if (!this.keyword.trim() && !this.selectedArea) {
@@ -198,7 +193,7 @@
 	.location-search-page {
 		min-height: 100vh;
 		padding-bottom: 56rpx;
-		background: var(--proto-page);
+		background: #ffffff;
 	}
 
 	.search-content {
@@ -208,11 +203,11 @@
 	.search-input-shell {
 		display: flex;
 		align-items: center;
-		min-height: 92rpx;
+		min-height: 88rpx;
 		padding: 0 24rpx;
-		background: var(--proto-surface-low);
-		border: 1rpx solid var(--proto-border);
-		border-radius: 48rpx;
+		background: #f4f5f7;
+		border: 1rpx solid transparent;
+		border-radius: 44rpx;
 	}
 
 	.search-input-shell > .proto-icon {
@@ -222,13 +217,13 @@
 	.search-input {
 		flex: 1;
 		min-width: 0;
-		height: 92rpx;
+		height: 88rpx;
 		color: var(--proto-text);
 		font-size: 28rpx;
 	}
 
 	.search-input::placeholder {
-		color: var(--proto-muted);
+		color: #a8b0b8;
 	}
 
 	.clear-keyword {
@@ -238,157 +233,115 @@
 		width: 44rpx;
 		height: 44rpx;
 		margin-left: 8rpx;
-		background: var(--proto-border);
+		background: #dfe3e8;
 		border-radius: 50%;
 	}
 
-	.location-toolbar {
+	.region-heading {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin-top: 44rpx;
+		margin: 44rpx 0 24rpx;
 	}
 
-	.location-heading {
+	.region-heading-copy {
 		display: flex;
 		align-items: center;
-		color: var(--proto-text);
-		font-size: 30rpx;
-		font-weight: 800;
+		gap: 8rpx;
 	}
 
-	.current-location-button {
-		display: flex;
-		align-items: center;
-		padding: 10rpx 4rpx;
-		color: var(--proto-primary-dark);
-		background: transparent;
-		border: 0;
-		border-radius: 0;
-		font-size: 20rpx;
-	}
-
-	.current-location-button .proto-icon {
-		margin-right: 6rpx;
-	}
-
-	.city-scroll {
-		width: 100%;
-		margin-top: 22rpx;
-		white-space: nowrap;
-	}
-
-	.city-list {
-		display: inline-flex;
-		gap: 16rpx;
-		padding-bottom: 4rpx;
-	}
-
-	.city-chip,
-	.region-chip {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		min-height: 62rpx;
-		padding: 0 24rpx;
-		color: var(--proto-muted);
-		background: var(--proto-surface-low);
-		border: 1rpx solid transparent;
-		border-radius: 32rpx;
-		font-size: 22rpx;
-		white-space: nowrap;
-	}
-
-	.city-chip.selected,
-	.region-chip.selected {
-		color: var(--proto-primary-dark);
-		background: var(--proto-surface-tint);
-		border-color: rgba(0, 106, 106, 0.14);
+	.region-heading-title {
+		color: #1a1a1a;
+		font-size: 32rpx;
 		font-weight: 700;
 	}
 
-	.region-panel {
-		margin-top: 24rpx;
-		padding: 26rpx 24rpx 30rpx;
-		background: var(--proto-surface);
-		border-radius: 24rpx;
-		box-shadow: 0 12rpx 30rpx rgba(23, 29, 30, 0.05);
-	}
-
-	.region-panel-heading {
+	.region-city-button {
 		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		color: var(--proto-text);
+		align-items: center;
+		gap: 4rpx;
+		padding: 8rpx 0;
+		color: var(--proto-primary-deep);
+		background: transparent;
+		border: 0;
+		border-radius: 0;
 		font-size: 24rpx;
-		font-weight: 750;
 	}
 
-	.region-result-count {
-		color: var(--proto-muted);
-		font-size: 18rpx;
-		font-weight: 400;
+	.region-city-button::after {
+		border: 0;
 	}
 
 	.region-grid {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 18rpx 14rpx;
-		margin-top: 24rpx;
+		gap: 26rpx;
 	}
 
 	.region-chip {
-		min-width: 132rpx;
-		min-height: 66rpx;
-		padding: 0 18rpx;
-		font-size: 21rpx;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 156rpx;
+		height: 64rpx;
+		box-sizing: border-box;
+		overflow: hidden;
+		color: #333333;
+		font-size: 22rpx;
+		line-height: 1;
+		text-align: center;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		background: #f5f6f8;
+		border: 1rpx solid transparent;
+		border-radius: 10rpx;
 	}
 
-	.region-empty {
+	.region-chip.selected {
+		color: var(--proto-primary-deep);
+		font-weight: 600;
+		background: #eaf8f6;
+		border-color: rgba(24, 133, 143, 0.28);
+	}
+
+	.region-state {
 		display: flex;
 		align-items: center;
 		flex-direction: column;
-		padding: 42rpx 24rpx 26rpx;
-		color: var(--proto-muted);
-		font-size: 20rpx;
-		line-height: 1.5;
+		padding: 44rpx 24rpx 30rpx;
+		color: #9aa4ad;
+		font-size: 22rpx;
+		line-height: 1.6;
 		text-align: center;
 	}
 
-	.region-empty .proto-icon {
-		margin-bottom: 12rpx;
+	.region-state-empty {
+		padding-top: 56rpx;
+	}
+
+	.region-state-action {
+		margin-top: 20rpx;
+		padding: 0 34rpx;
+		height: 62rpx;
+		line-height: 62rpx;
+		color: var(--proto-primary-deep);
+		font-size: 22rpx;
+		font-weight: 600;
+		background: #eaf8f6;
+		border-radius: 32rpx;
 	}
 
 	.search-hint {
 		display: flex;
 		align-items: flex-start;
-		margin-top: 20rpx;
-		color: var(--proto-muted);
-		font-size: 18rpx;
+		margin-top: 34rpx;
+		color: #9aa4ad;
+		font-size: 20rpx;
 		line-height: 1.5;
 	}
 
 	.search-hint .proto-icon {
 		margin-top: 2rpx;
 		margin-right: 8rpx;
-	}
-
-	.confirm-search-button {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 100%;
-		height: 86rpx;
-		margin-top: 24rpx;
-		color: #ffffff;
-		background: var(--proto-primary);
-		border-radius: 44rpx;
-		box-shadow: 0 10rpx 24rpx rgba(42, 169, 169, 0.24);
-		font-size: 27rpx;
-		font-weight: 750;
-	}
-
-	.confirm-search-button .proto-icon {
-		margin-right: 10rpx;
 	}
 </style>

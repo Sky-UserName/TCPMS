@@ -134,16 +134,31 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="dialog.visible" :title="dialog.mode === 'create' ? `添加${config.title}` : `编辑${config.title}`" width="620px" destroy-on-close>
+    <el-dialog v-model="dialog.visible" :title="dialog.mode === 'create' ? `添加${config.title}` : `编辑${config.title}`" :width="props.viewKey === 'carousel' ? '760px' : '620px'" destroy-on-close>
       <el-form :model="form" label-width="96px" class="dialog-form">
         <div class="form-grid">
-          <el-form-item v-for="field in config.fields" :key="field.key" :class="{ 'field-wide': field.type === 'textarea' }" :label="field.label" :required="field.required">
+          <el-form-item v-for="field in config.fields" :key="field.key" :class="{ 'field-wide': field.type === 'textarea' || field.type === 'image-upload' }" :label="field.label" :required="field.required">
             <el-select v-if="field.type === 'select'" v-model="form[field.key]" :placeholder="field.placeholder || `请选择${field.label}`" clearable>
               <el-option v-for="option in field.options" :key="option.value" :label="option.label" :value="option.value" />
             </el-select>
             <el-switch v-else-if="field.type === 'switch'" v-model="form[field.key]" active-text="启用" />
             <el-input-number v-else-if="field.type === 'number'" v-model="form[field.key]" :min="field.min ?? 0" controls-position="right" />
             <el-input v-else-if="field.type === 'textarea'" v-model="form[field.key]" type="textarea" :rows="3" :placeholder="field.placeholder" />
+            <div v-else-if="field.type === 'image-upload'" class="image-upload-control">
+              <el-image v-if="form[field.key]" class="image-upload-preview" :src="form[field.key]" fit="cover" :preview-src-list="[form[field.key]]" preview-teleported />
+              <div class="image-upload-actions">
+                <el-upload
+                  :show-file-list="false"
+                  accept="image/jpeg,image/png,image/webp"
+                  :disabled="uploadingField === field.key"
+                  :http-request="(options) => uploadImage(options, field.key)"
+                >
+                  <el-button type="primary" plain :icon="Upload" :loading="uploadingField === field.key">上传图片</el-button>
+                </el-upload>
+                <el-button v-if="form[field.key]" text type="danger" @click="form[field.key] = ''">移除</el-button>
+                <small>支持 JPG、PNG、WEBP，单张不超过 10MB</small>
+              </div>
+            </div>
             <el-input v-else v-model="form[field.key]" :placeholder="field.placeholder" />
           </el-form-item>
         </div>
@@ -159,8 +174,8 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CircleCheck, Delete, Edit, MoreFilled, Picture, Plus, Refresh, Search } from '@element-plus/icons-vue'
-import { del, get, post, put } from '../api'
+import { CircleCheck, Delete, Edit, MoreFilled, Picture, Plus, Refresh, Search, Upload } from '@element-plus/icons-vue'
+import { del, get, post, put, uploadFile } from '../api'
 import { requestNotificationRefresh } from '../notifications'
 
 const props = defineProps({
@@ -349,6 +364,24 @@ const configs = {
     columns: [{ key: 'name', label: '应用名称', minWidth: 240 }, { key: 'description', label: '应用说明', minWidth: 280 }, { key: 'status', label: '状态', width: 110, kind: 'status' }, { key: 'updatedAt', label: '更新时间', minWidth: 170 }],
     fields: [{ key: 'name', label: '应用名称', required: true }, { key: 'description', label: '应用说明', type: 'textarea' }, { key: 'status', label: '状态', type: 'select', options: [{ label: '已启用', value: 'active' }, { label: '未启用', value: 'disabled' }] }]
   },
+  carousel: {
+    eyebrow: 'HOME CAROUSEL',
+    title: '轮播图配置',
+    description: '管理当前小程序首页轮播图，上传图片并设置展示顺序和启停状态。',
+    tabs: [{ key: 'all', label: '全部' }, { key: 'active', label: '已启用' }, { key: 'disabled', label: '已停用' }],
+    columns: [
+      { key: 'image', label: '图片', width: 92, kind: 'image' },
+      { key: 'name', label: '轮播名称', minWidth: 170 },
+      { key: 'sort', label: '排序', width: 82 },
+      { key: 'status', label: '状态', width: 110, kind: 'status' }
+    ],
+    fields: [
+      { key: 'name', label: '轮播名称', required: true, placeholder: '例如：首页首屏' },
+      { key: 'image', label: '轮播图片', type: 'image-upload', required: true },
+      { key: 'sort', label: '排序', type: 'number', min: 0 },
+      { key: 'status', label: '状态', type: 'select', options: [{ label: '已启用', value: 'active' }, { label: '已停用', value: 'disabled' }] }
+    ]
+  },
   storePermissions: {
     eyebrow: 'STORE ACCESS',
     title: '门店权限',
@@ -368,7 +401,7 @@ const configs = {
 }
 
 const config = computed(() => configs[props.viewKey] || configs.common)
-const managedResourceKeys = new Set(['decoration', 'pages', 'levels', 'facilities', 'tags', 'guideTypes', 'guides', 'search', 'messages', 'subscriptions', 'plugins', 'storePermissions', 'common'])
+const managedResourceKeys = new Set(['decoration', 'pages', 'levels', 'facilities', 'tags', 'guideTypes', 'guides', 'search', 'messages', 'subscriptions', 'plugins', 'storePermissions', 'common', 'carousel'])
 const canCreate = computed(() => config.value.canCreate !== false && !config.value.readOnly)
 const canEdit = computed(() => config.value.canEdit !== false && !config.value.readOnly)
 const canDelete = computed(() => config.value.canDelete !== false && !config.value.readOnly)
@@ -382,6 +415,7 @@ const loading = ref(false)
 const brokenImages = ref(new Set())
 const dialog = reactive({ visible: false, mode: 'create', saving: false })
 const form = reactive({})
+const uploadingField = ref('')
 
 const filteredRows = computed(() => {
   const query = keyword.value.trim().toLowerCase()
@@ -597,13 +631,29 @@ function openCreate() {
   if (!canCreate.value) return
   Object.assign(form, newForm())
   dialog.mode = 'create'
+  uploadingField.value = ''
   dialog.visible = true
 }
 function openEdit(row) {
   if (!row || !canEdit.value) return
   Object.assign(form, newForm(row), { id: row.id })
   dialog.mode = 'edit'
+  uploadingField.value = ''
   dialog.visible = true
+}
+async function uploadImage(options, fieldKey) {
+  uploadingField.value = fieldKey
+  try {
+    const result = await uploadFile('/admin/uploads/carousel', options.file)
+    form[fieldKey] = result?.url || ''
+    options.onSuccess?.(result)
+    ElMessage.success('图片上传成功')
+  } catch (error) {
+    options.onError?.(error)
+    ElMessage.error(error.message || '图片上传失败')
+  } finally {
+    uploadingField.value = ''
+  }
 }
 async function save() {
   const required = config.value.fields.filter((field) => field.required)
@@ -731,3 +781,60 @@ function exportRows() {
   ElMessage.success('导出已开始')
 }
 </script>
+
+<style scoped>
+.image-upload-control {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 14px;
+  min-height: 88px;
+}
+
+.image-upload-preview {
+  width: 140px;
+  height: 78px;
+  flex: 0 0 140px;
+  overflow: hidden;
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: var(--admin-surface-soft);
+}
+
+.image-upload-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 1 1 180px;
+  min-width: 0;
+  gap: 8px;
+}
+
+.image-upload-actions small {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  color: var(--admin-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .image-upload-control {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .image-upload-preview {
+    width: 120px;
+    height: 68px;
+    flex-basis: 120px;
+  }
+
+  .image-upload-actions {
+    flex-basis: 100%;
+  }
+}
+</style>

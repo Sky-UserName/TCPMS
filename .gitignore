@@ -44,6 +44,10 @@ src/backend/TCPMS.Api/appsettings.Production.json
 *.user
 !src/TCPMS.User/
 !src/TCPMS.User/**
+# 小程序本机环境配置：地址、开关随开发机/发布环境变化，不入库。
+src/TCPMS.User/.env
+src/TCPMS.User/.env.*
+!src/TCPMS.User/.env.example
 src/TCPMS.User/**/*.user
 src/TCPMS.User/unpackage/
 *.suo

@@ -19,7 +19,7 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
-	import { getMerchantReviews, saveMerchantReviews } from '@/common/app-store.js'
+	import { fetchMerchantReviews, replyMerchantReview } from '@/common/api.js'
 	import { showToast } from '@/common/prototype.js'
 
 	export default {
@@ -32,7 +32,14 @@
 				return this.reviews
 			}
 		},
-		onShow() { this.reviews = getMerchantReviews() },
+		async onShow() {
+			try {
+				this.reviews = await fetchMerchantReviews()
+			} catch (error) {
+				this.reviews = []
+				showToast(error?.message || '评价加载失败')
+			}
+		},
 		methods: {
 			reply(review) {
 				uni.showModal({
@@ -40,11 +47,15 @@
 					editable: true,
 					placeholderText: '请输入回复内容',
 					confirmText: '发布',
-					success: ({ confirm, content = '' }) => {
+					success: async ({ confirm, content = '' }) => {
 						if (!confirm || !content.trim()) return
-						const reviews = this.reviews.map((item) => item.id === review.id ? { ...item, reply: content.trim() } : item)
-						this.reviews = saveMerchantReviews(reviews)
-						showToast('回复已保存（本地演示）')
+						try {
+							await replyMerchantReview(review.id, content.trim())
+							this.reviews = this.reviews.map((item) => item.id === review.id ? { ...item, reply: content.trim() } : item)
+							showToast('回复已发布')
+						} catch (error) {
+							showToast(error?.message || '回复失败')
+						}
 					}
 				})
 			}

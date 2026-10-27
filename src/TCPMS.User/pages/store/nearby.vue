@@ -53,6 +53,7 @@
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { goPage, showToast } from '@/common/prototype.js'
 	import { fetchNearbyStores } from '@/common/api.js'
+	import { openStoreRoom } from '@/common/navigation.js'
 
 	export default {
 		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
@@ -115,7 +116,7 @@
 				})
 			},
 			goDetail(store) {
-				goPage(`/pages/store/detail?id=${store.id}`)
+				openStoreRoom(store)
 			},
 			goAllStores() {
 				uni.reLaunch({ url: '/pages/store/list' })

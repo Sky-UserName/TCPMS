@@ -55,7 +55,8 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { goPage, goRoot, prototypeImages, showToast } from '@/common/prototype.js'
 	import { findOrder, getOrders } from '@/common/app-store.js'
-	import { fetchRemoteOrder, confirmRemotePayment, requestRemotePayment } from '@/common/api.js'
+	import { fetchRemoteOrder, confirmRemotePayment, mockPayRemoteOrder, requestRemotePayment } from '@/common/api.js'
+	import { ALLOW_MOCK_PAY } from '@/common/env.js'
 	import { formatYuan } from '@/common/format.js'
 
 	export default {
@@ -122,6 +123,18 @@
 						})
 					})
 				} catch (error) {
+					// 本地联调：微信支付没配好时走开发态模拟支付，服务端状态仍然真实落库，不伪造本地订单。
+					if (error?.code === 'wechat_pay_not_configured' && ALLOW_MOCK_PAY) {
+						try {
+							this.order = await mockPayRemoteOrder(orderId)
+							this.status = 'success'
+							showToast('已使用本地模拟支付')
+						} catch (mockError) {
+							this.status = 'pending'
+							showToast(mockError?.message || '模拟支付失败')
+						}
+						return
+					}
 					this.status = 'pending'
 					showToast(error?.errMsg?.includes('cancel') ? '已取消支付' : error?.message || '微信支付失败')
 					return

@@ -6,25 +6,36 @@
 			<view v-for="item in messages" :key="item.key" class="message-row"><view class="message-row-icon"><ProtoIcon :name="item.key === 'order' ? 'receipt' : item.key === 'review' ? 'star' : 'wallet'" :size="30" /></view><view class="message-copy"><text>{{ item.title }}</text><text>{{ item.desc }}</text></view><switch :checked="item.enabled" color="#2aa9a9" @change="toggle(item, $event.detail.value)" /></view>
 		</view>
 		<button class="proto-primary-button message-save" hover-class="none" @tap="save">保存偏好</button>
-		<view class="tool-note"><ProtoIcon name="info" :size="21" /><text>当前仅保存本地偏好，微信订阅授权和推送服务将在后台接入后生效。</text></view>
+		<view class="tool-note"><ProtoIcon name="info" :size="21" /><text>订阅偏好已保存到服务端，微信订阅消息需配置模板后生效。</text></view>
 	</view>
 </template>
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
-	import { getMerchantMessageSettings, saveMerchantMessageSettings } from '@/common/app-store.js'
+	import { fetchMerchantMessageSettings, saveMerchantMessageSettingsRemote } from '@/common/api.js'
 	import { showToast } from '@/common/prototype.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
-		data() { return { messages: getMerchantMessageSettings() } },
-		onShow() { this.messages = getMerchantMessageSettings() },
+		data() { return { messages: [] } },
+		async onShow() {
+			try {
+				this.messages = await fetchMerchantMessageSettings()
+			} catch (error) {
+				this.messages = []
+				showToast(error?.message || '订阅设置加载失败')
+			}
+		},
 		methods: {
 			toggle(item, value) { item.enabled = value },
-			save() {
-				this.messages = saveMerchantMessageSettings(this.messages)
-				showToast('订阅偏好已保存（本地演示）')
+			async save() {
+				try {
+					this.messages = await saveMerchantMessageSettingsRemote(this.messages)
+					showToast('订阅偏好已保存')
+				} catch (error) {
+					showToast(error?.message || '保存失败')
+				}
 			}
 		}
 	}

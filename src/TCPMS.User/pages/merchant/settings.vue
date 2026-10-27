@@ -22,21 +22,45 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
-	import { getMerchantSettings, saveMerchantSettings } from '@/common/app-store.js'
+	import { fetchMerchantSettings, saveMerchantSettingsRemote } from '@/common/api.js'
 	import { showToast } from '@/common/prototype.js'
 
 	export default {
 		components: { ProtoHeader },
-		data() { return { form: getMerchantSettings() } },
-		onShow() { this.form = getMerchantSettings() },
+		data() {
+			return {
+				form: {
+					storeName: '',
+					phone: '',
+					checkIn: '14:00',
+					checkOut: '12:00',
+					cancelRule: '',
+					autoAccept: true,
+					showPhone: true
+				}
+			}
+		},
+		async onShow() {
+			try {
+				const settings = await fetchMerchantSettings()
+				if (settings) this.form = { ...this.form, ...settings }
+			} catch (error) {
+				showToast(error?.message || '设置加载失败')
+			}
+		},
 		methods: {
-			save() {
+			async save() {
 				if (!this.form.storeName.trim()) {
 					showToast('请填写民宿名称')
 					return
 				}
-				this.form = saveMerchantSettings(this.form)
-				showToast('设置已保存（本地演示）')
+				try {
+					const settings = await saveMerchantSettingsRemote(this.form)
+					if (settings) this.form = { ...this.form, ...settings }
+					showToast('设置已保存')
+				} catch (error) {
+					showToast(error?.message || '保存失败')
+				}
 			}
 		}
 	}

@@ -4,7 +4,7 @@
 			<view class="hero-shell">
 				<swiper class="hero-swiper" :current="heroIndex" circular autoplay :interval="4600" :duration="420" @change="handleHeroChange">
 					<swiper-item v-for="(slide, index) in heroSlides" :key="slide.image">
-						<view class="hero-media">
+						<view class="hero-media" @tap="handleHeroTap(slide)">
 							<image class="hero-image" :src="slide.image" mode="aspectFill" @error="handleHeroImageError(index)"></image>
 							<view class="hero-shade"></view>
 							<view class="hero-copy">
@@ -28,7 +28,7 @@
 					<view class="search-destination-row">
 						<button class="destination-main" hover-class="none" @tap="openLocationSearch">
 							<view class="destination-copy">
-								<view class="destination-city-row">
+								<view class="destination-city-row" @tap.stop="openCityPicker">
 									<text class="destination-city">{{ city }}</text>
 									<ProtoIcon name="chevron-down" :size="20" />
 								</view>
@@ -120,7 +120,7 @@
 				<view class="popular-heading">
 					<view class="popular-title-group">
 						<text class="popular-title">本地热门精选</text>
-						<text class="popular-badge">{{ catalogState === 'demo' ? '演示数据' : catalogState === 'loading' ? '正在同步' : '实时好房' }}</text>
+						<text class="popular-badge">{{ catalogState === 'error' ? '加载失败' : catalogState === 'loading' ? '正在同步' : '实时好房' }}</text>
 					</view>
 					<button class="sort-button" hover-class="none" @tap="sortStores">
 						<text>{{ sortLabel }}</text>
@@ -128,56 +128,71 @@
 					</button>
 				</view>
 
-				<view v-if="visibleStores.length" class="store-list">
+				<view v-if="cityFallback" class="city-fallback-tip">
+					<ProtoIcon name="info" :size="22" />
+					<text>{{ city }}暂无在售房型，以下为你推荐其他城市房源</text>
+					<text class="city-fallback-action" @tap.stop="openCityPicker">切换城市</text>
+				</view>
+
+				<view v-if="!userLocation && catalogState === 'synced'" class="distance-hint" @tap="triggerLocation">
+					<ProtoIcon name="navigation" :size="20" />
+					<text>开启定位即可查看房源距您的距离</text>
+					<text class="distance-hint-action">去开启</text>
+				</view>
+
+				<view v-if="visibleRooms.length" class="store-list">
 					<view
-						v-for="store in visibleStores"
-						:key="store.id"
+						v-for="room in visibleRooms"
+						:key="room.key"
 						class="store-card"
-						@tap="openStore(store)"
+						@tap="openRoom(room)"
 					>
 						<view class="store-image-wrap">
-							<view class="store-media-grid" :class="`store-media-grid-${Math.min(store.images.length, 3)}`">
+							<view class="store-media-grid" :class="`store-media-grid-${Math.min(room.images.length, 3)}`">
 								<image
-									v-for="(image, imageIndex) in store.images.slice(0, 3)"
-									:key="`${store.id}-${imageIndex}-${image}`"
+									v-for="(image, imageIndex) in room.images.slice(0, 3)"
+									:key="`${room.key}-${imageIndex}-${image}`"
 									class="store-image"
 									:src="image"
 									mode="aspectFill"
 								></image>
 							</view>
 							<view class="store-image-tags">
-								<text class="distance-badge">距您 {{ store.distance }}</text>
-								<text class="area-badge" :class="store.badgeTone">{{ store.badge }}</text>
-							</view>
-							<view class="rating-badge">
-								<ProtoIcon name="star" :size="18" />
-								<text class="rating-number">{{ store.rating }}</text>
-								<text class="rating-reviews">· {{ store.reviews }}条好评</text>
+								<text v-if="room.hasDistance" class="distance-badge">距您 {{ room.distance }}</text>
+								<text class="area-badge" :class="room.badgeTone">{{ room.type }}</text>
 							</view>
 						</view>
 						<view class="store-card-body">
 							<view class="store-heading">
 								<view class="store-heading-copy">
-									<text class="store-card-title">{{ store.name }}</text>
-									<text class="store-room">{{ store.room }}</text>
+									<text class="store-card-title">{{ room.name }}</text>
+									<text class="store-room">{{ room.spec }}</text>
 								</view>
-								<text class="stock-badge" :class="store.stockTone">{{ store.stock }}</text>
 							</view>
-							<view class="tag-list">
-								<text v-for="tag in store.tags" :key="tag" class="store-tag">{{ tag }}</text>
+							<view v-if="room.tags.length" class="tag-list">
+								<text v-for="tag in room.tags.slice(0, 3)" :key="tag" class="store-tag">{{ tag }}</text>
 							</view>
 							<view class="store-footer">
 								<view class="price-block">
 									<text class="price-currency">¥</text>
-									<text class="price-value">{{ store.price }}</text>
-									<text class="price-unit">/ {{ store.unit }}起</text>
+									<text class="price-value">{{ room.price }}</text>
+									<text class="price-unit">/ 晚起</text>
 								</view>
-								<button class="book-button" hover-class="none" @tap.stop="bookStore(store)">立即预订</button>
+								<button class="book-button" hover-class="none" @tap.stop="bookRoom(room)">立即预订</button>
 							</view>
 						</view>
 					</view>
 				</view>
-				<ProtoEmptyState v-else action-text="清除筛选" @action="resetSearch" />
+				<view v-else-if="catalogState === 'loading'" class="popular-loading">
+					<text>正在同步在售房型…</text>
+				</view>
+				<ProtoEmptyState
+					v-else
+					:title="allRooms.length ? '没有符合条件的房型' : '暂无在售房型'"
+					:description="allRooms.length ? '' : '门店在后台发布房型后会自动出现在这里'"
+					:action-text="allRooms.length ? '清除筛选' : ''"
+					@action="resetSearch"
+				/>
 			</view>
 
 			<view class="brand-footer">
@@ -204,39 +219,21 @@
 					</button>
 				</view>
 
-				<view v-if="sheetType === 'city'" class="sheet-content">
-					<text class="sheet-caption">当前城市</text>
-					<view class="current-city" @tap="selectCity(city)">
-						<text>{{ city }}</text>
-						<text class="current-city-state">已定位</text>
-					</view>
-					<text class="sheet-caption">热门城市</text>
-					<view class="city-grid">
-						<text
-							v-for="item in cities"
-							:key="item"
-							class="city-option"
-							:class="{ selected: city === item }"
-							@tap="selectCity(item)"
-						>{{ item }}</text>
-					</view>
-				</view>
-
-				<view v-else-if="sheetType === 'store'" class="sheet-content">
+				<view v-if="sheetType === 'store'" class="sheet-content">
 					<text class="sheet-caption">选择入住门店</text>
 					<view class="store-option-list">
 						<view
 							v-for="store in stores"
 							:key="store.id"
 							class="store-option"
-							:class="{ selected: selectedStore.id === store.id }"
+							:class="{ selected: selectedStore && selectedStore.id === store.id }"
 							@tap="selectStore(store)"
 						>
 							<view class="store-option-copy">
 								<text class="store-option-title">{{ store.name }}</text>
-								<text class="store-option-desc">{{ store.subtitle }} · 距您 {{ store.distance }}</text>
+								<text class="store-option-desc">{{ store.subtitle }} · {{ storeDistanceLabel(store) }}</text>
 							</view>
-							<ProtoIcon v-if="selectedStore.id === store.id" name="check" :size="24" />
+							<ProtoIcon v-if="selectedStore && selectedStore.id === store.id" name="check" :size="24" />
 						</view>
 					</view>
 				</view>
@@ -326,8 +323,11 @@
 
 <script>
 	import { demoRooms, demoStores, goPage, prototypeImages } from '@/common/prototype.js'
-	import { getBooking, recordRecent, saveBooking } from '@/common/app-store.js'
-	import { fetchStores } from '@/common/api.js'
+	import { getBooking, saveBooking } from '@/common/app-store.js'
+	import { fetchCarousel, fetchStores } from '@/common/api.js'
+	import { reverseGeocode } from '@/common/amap.js'
+	import { distanceKmBetween, formatDistanceKm } from '@/common/geo.js'
+	import { storeRoomPath } from '@/common/navigation.js'
 	import { setTabParams } from '@/common/tab-params.js'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
@@ -386,6 +386,15 @@
 		return city === '郑州市' && (store.address || '').indexOf('郑州') >= 0
 	}
 
+	// 逆地理编码返回的城市名不一定带「市」（直辖市/自治州另有写法），统一成后端门店的写法。
+	const normalizeCityName = (name) => {
+		const value = String(name || '').trim()
+		if (!value) return ''
+		if (/(省|自治区|特别行政区)$/.test(value)) return ''
+		if (/[市州盟县区]$/.test(value)) return value
+		return `${value}市`
+	}
+
 	const normalizeStoreImages = (store = {}, fallback = {}) => {
 		const candidates = [store.images, store.imageUrls, store.gallery, store.photos]
 			.find((images) => Array.isArray(images) && images.length)
@@ -433,6 +442,14 @@
 		}
 	}
 
+	const toCarouselSlide = (slide, index = 0) => ({
+		image: slide.image || [PROTOTYPE_IMAGES.hero, PROTOTYPE_IMAGES.storeTwo, PROTOTYPE_IMAGES.hostel][index % 3],
+		badge: slide.badge || 'TCPMS 智选旅宿',
+		title: slide.title || '住进城市，走近风景',
+		subtitle: slide.subtitle || '为每一次出发，准备一个舒服的落脚点',
+		link: slide.link || ''
+	})
+
 	export default {
 		components: {
 			ProtoIcon,
@@ -449,24 +466,24 @@
 					{ image: PROTOTYPE_IMAGES.storeTwo, badge: '城市精选 · 即时房态', title: '住进城市，走近风景', subtitle: '通勤、旅行与周末短住，都有合适的落脚点' },
 					{ image: PROTOTYPE_IMAGES.hostel, badge: '青年友好 · 轻装出发', title: '今晚就住得舒服', subtitle: '整洁床位与安心服务，轻松开启下一段行程' }
 				],
-				city: booking.city || '郑州市',
+				city: booking.city || '全部城市',
 				region: booking.region || '',
 				searchKeyword: booking.searchKeyword || '',
-				storeCount: demoStores.length,
+				storeCount: 0,
 				catalogState: 'loading',
-				selectedStoreId: booking.storeId || demoStores[0].id,
+				selectedStoreId: booking.storeId || '',
 				checkIn: booking.checkIn,
 				checkOut: booking.checkOut,
 				checkInDay: weekdayOf(booking.isoCheckIn),
 				checkOutDay: weekdayOf(booking.isoCheckOut),
 				nights: `共 ${booking.nights || 1} 晚`,
 				guestSummary: `${booking.roomCount || 1}间 · ${booking.guestCount || 1}位成人 · 0位儿童`,
-				priceSummary: '不限价格 / ¥150-¥500',
+				priceSummary: '不限价格 / ¥0-¥500',
 				preferenceDraft: {
 					guestCount: Number(booking.guestCount || 1),
 					bedCount: Number(booking.bedCount || 0),
 					roomCount: Number(booking.roomCount || 1),
-					priceMin: 150,
+					priceMin: 0,
 					priceMax: 500
 				},
 				preferenceRows: [
@@ -479,6 +496,9 @@
 				priceRangeWidth: 0,
 				booking,
 				locationState: 'idle',
+				// 用户当前定位（gcj02）。拿到后「本地热门精选」用它算房型距用户的公里数。
+				userLocation: null,
+				locatedCity: '',
 				sortLabel: '距离最近优先',
 				searching: false,
 				toast: '',
@@ -500,7 +520,7 @@
 					{ value: '1间 · 2位成人 · 1位儿童', roomCount: 1, guestCount: 3, desc: '适合亲子出行' },
 					{ value: '2间 · 4位成人 · 0位儿童', roomCount: 2, guestCount: 4, desc: '适合多人同行' }
 				],
-				priceOptions: ['不限价格 / ¥150-¥500', '¥0 - ¥200', '¥200 - ¥400', '¥400 - ¥800', '¥800以上'],
+				priceOptions: ['不限价格 / ¥0-¥500', '¥0 - ¥200', '¥200 - ¥400', '¥400 - ¥800', '¥800以上'],
 				houseTypeOptions: ['整套出租', '独立房间', '多人床位', '可带宠物'],
 				quickEntrances: [
 					{
@@ -533,73 +553,24 @@
 					{ icon: 'clock', title: '浏览记录', desc: '找回最近看过的房源', route: '/pages/me/history' },
 					{ icon: 'help', title: '帮助与反馈', desc: '需要帮助时联系我们', route: '/pages/service/contact' }
 				],
-				stores: [
-					{
-						id: 1,
-						featuredRoomId: 1,
-						name: '云舍民宿 · 郑州旗舰店',
-						subtitle: '金水区核心商圈 · 近二七广场',
-						room: '标准大床房 · 28㎡ | 独立卫浴 | 采光飘窗',
-						distance: '1.2km',
-						badge: '金水区商务核心区',
-						badgeTone: 'badge-primary',
-						rating: '4.9',
-						reviews: '1280',
-						stock: '仅剩 2 间',
-						stockTone: 'stock-danger',
-						tags: ['免费千兆WiFi', '智能客控', '免费行李寄存'],
-						price: '300',
-						unit: '晚',
-						image: PROTOTYPE_IMAGES.storeOne,
-						images: [PROTOTYPE_IMAGES.storeOne, PROTOTYPE_IMAGES.storeTwo, PROTOTYPE_IMAGES.hostel]
-					},
-					{
-						id: 2,
-						featuredRoomId: 2,
-						name: '城市花园民宿 · 郑州二七广场店',
-						subtitle: '近地铁 1/3 号线',
-						room: '西湖景观/城景双床房 · 35㎡ | 高清百寸投影',
-						distance: '2.5km',
-						badge: '近地铁1/3号线',
-						badgeTone: 'badge-secondary',
-						rating: '4.8',
-						reviews: '890',
-						stock: '库存充足',
-						stockTone: 'stock-success',
-						tags: ['巨幕影音', '乳胶床垫', '落日景观露台'],
-						price: '368',
-						unit: '晚',
-						image: PROTOTYPE_IMAGES.storeTwo,
-						images: [PROTOTYPE_IMAGES.storeTwo, PROTOTYPE_IMAGES.storeOne]
-					},
-					{
-						id: 3,
-						featuredRoomId: 3,
-						name: '青年旅舍床位专区 · 郑州大学科技园店',
-						subtitle: '大学科技园区',
-						room: '女生四人间单床位 · 独立隐私帘/专属密码柜',
-						distance: '4.8km',
-						badge: '大学科技园区',
-						badgeTone: 'badge-tertiary',
-						rating: '4.9',
-						reviews: '452',
-						stock: '今日余 3 床位',
-						stockTone: 'stock-neutral',
-						tags: ['自习阅读吧', '咖啡共享公区', '干湿分离卫浴'],
-						price: '69',
-						unit: '床',
-						image: PROTOTYPE_IMAGES.storeThree,
-						images: [PROTOTYPE_IMAGES.storeThree]
-					}
-				]
+				stores: [],
 			}
 		},
 		onLoad() {
+			this.loadCarousel()
 			this.loadStores()
+			// 进入首页就申请微信定位授权（腾讯定位能力），拿到城市后覆盖默认城市。
+			this.requestLocationCity({ silent: true })
 		},
 		onShow() {
 			uni.hideTabBar({ animation: false, fail: () => {} })
-			this.applyBooking(getBooking())
+			const booking = getBooking()
+			const previousCity = this.city
+			this.applyBooking(booking)
+			// 从「选择城市」页返回时城市可能已经变了，这里重算一次条数。
+			if (this.stores.length && previousCity !== this.city) {
+				this.storeCount = this.stores.filter((store) => storeMatchesCity(store, this.city)).length
+			}
 		},
 		computed: {
 			preferenceSummary() {
@@ -623,29 +594,87 @@
 			selectedStore() {
 				return this.stores.find((store) => store.id === this.selectedStoreId) || this.stores[0]
 			},
-			visibleStores() {
-				if (!this.storeCount) {
+			// 门店 → 距用户公里数。用户定位或门店经纬度缺失时不进表，卡片就不显示距离。
+			storeDistanceMap() {
+				const location = this.userLocation
+				if (!location) return {}
+				const distances = {}
+				this.stores.forEach((store) => {
+					const km = distanceKmBetween(location, { latitude: store.latitude, longitude: store.longitude })
+					if (km === null) return
+					distances[store.id] = km
+				})
+				return distances
+			},
+			// 首页热门只展示房型：把各门店的在售房型摊平，带上门店的城市/距离用于本地筛选。
+			allRooms() {
+				const rooms = []
+				this.stores.forEach((store) => {
+					const storeRooms = Array.isArray(store.rooms) ? store.rooms : []
+					storeRooms.forEach((room, index) => {
+						if (!room || !room.id) return
+						const source = (room.images && room.images.length ? room.images : store.images) || []
+						const images = source
+							.filter(Boolean)
+							.slice(0, 3)
+						// 优先用定位算出来的真实距离；没有定位时退回门店自带文案（可能是「距离未知」）。
+						const distanceKm = this.storeDistanceMap[store.id]
+						const hasDistance = Number.isFinite(distanceKm)
+						rooms.push({
+							...room,
+							key: `${store.id}-${room.id}`,
+							storeId: store.id,
+							city: store.city || '',
+							address: store.address || '',
+							rating: store.rating,
+							distance: hasDistance ? formatDistanceKm(distanceKm) : store.distance,
+							hasDistance,
+							distanceValue: hasDistance ? distanceKm : Number.MAX_SAFE_INTEGER,
+							images: images.length ? images : [PROTOTYPE_IMAGES.hero],
+							spec: [room.capacity, room.beds, room.area].filter(Boolean).join(' · ') || room.type || '',
+							badgeTone: room.type === '多人间床位' ? 'badge-secondary' : '',
+							price: room.price || store.price || '--',
+							tags: (room.tags || []).filter(Boolean),
+							sortIndex: index
+						})
+					})
+				})
+				return rooms
+			},
+			// 当前城市没有在售房型：改为推荐其他城市房源，同时提示原因。
+			cityFallback() {
+				if (!this.allRooms.length) return false
+				if (!this.city || this.city === '全部城市') return false
+				return !this.allRooms.some((room) => storeMatchesCity({ city: room.city, address: room.address }, this.city))
+			},
+			visibleRooms() {
+				if (!this.allRooms.length) {
 					return []
 				}
-				const stores = this.stores.filter((store) => {
-					const cityMatch = storeMatchesCity(store, this.city)
-					const price = Number(store.price)
-					const priceMatch = store.price === '--' || Number.isNaN(price)
-						|| (price >= Number(this.preferenceDraft.priceMin || 0) && price <= Number(this.preferenceDraft.priceMax || 500))
-					const text = `${store.name} ${store.room} ${(store.tags || []).join(' ')}`
+				const priceMin = Number(this.preferenceDraft.priceMin || 0)
+				const priceMax = Number(this.preferenceDraft.priceMax || 500)
+				// 滑块两端（0-500）表示不限价格，只有用户收窄区间时才真正过滤。
+				const priceLimited = priceMin > 0 || priceMax < 500
+				const cityFilterActive = this.city !== '全部城市' && !this.cityFallback
+				const rooms = this.allRooms.filter((room) => {
+					const cityMatch = !cityFilterActive || storeMatchesCity({ city: room.city, address: room.address }, this.city)
+					const price = Number(room.price)
+					const priceMatch = !priceLimited || room.price === '--' || Number.isNaN(price)
+						|| (price >= priceMin && price <= priceMax)
+					const text = `${room.name} ${room.type} ${room.tags.join(' ')}`
 					const featureMatch = this.selectedFilters.every((filter) => {
-						if (filter === '独立房间') return text.indexOf('房') >= 0 && text.indexOf('床位') < 0
-						if (filter === '多人床位') return text.indexOf('床位') >= 0 || text.indexOf('青年') >= 0
-						if (filter === '整套出租') return text.indexOf('整套') >= 0 || text.indexOf('度假') >= 0
+						if (filter === '独立房间') return text.indexOf('床位') < 0
+						if (filter === '多人床位') return text.indexOf('床位') >= 0
+						if (filter === '整套出租') return room.type !== '多人间床位'
 						if (filter === '可带宠物') return text.indexOf('宠物') >= 0
 						return true
 					})
 					return cityMatch && priceMatch && featureMatch
 				})
 				if (this.sortLabel === '评分最高优先') {
-					return stores.sort((left, right) => Number(right.rating) - Number(left.rating))
+					return rooms.sort((left, right) => Number(right.rating) - Number(left.rating))
 				}
-				return stores.sort((left, right) => parseFloat(left.distance) - parseFloat(right.distance))
+				return rooms.sort((left, right) => left.distanceValue - right.distanceValue)
 			},
 			sheetTitle() {
 				const titles = {
@@ -660,8 +689,23 @@
 			}
 		},
 		methods: {
+			async loadCarousel() {
+				try {
+					const slides = await fetchCarousel()
+					if (slides.length) {
+						this.heroSlides = slides.map(toCarouselSlide)
+						this.heroIndex = 0
+					}
+				} catch (error) {
+					// 轮播配置不可用时保留本地兜底，首页其他数据不受影响。
+				}
+			},
 			handleHeroChange(event) {
 				this.heroIndex = event.detail.current
+			},
+			handleHeroTap(slide) {
+				if (!slide || !slide.link || !slide.link.startsWith('/pages/')) return
+				uni.navigateTo({ url: slide.link })
 			},
 			async loadStores() {
 				try {
@@ -673,22 +717,22 @@
 						return
 					}
 					this.stores = remoteStores.map((store, index) => toHomeStore(store, index))
-					if (!this.stores.some((store) => storeMatchesCity(store, this.city))) {
-						this.city = this.stores[0].city || '全部城市'
-					}
-					this.storeCount = this.stores.length
+					// 城市筛选交给 visibleRooms 处理：该城市没有在售房型时改为推荐其他城市房源，
+					// 但顶部城市名保持定位/手选的城市不变，不再悄悄改回「全部城市」。
 					this.storeCount = this.stores.filter((store) => storeMatchesCity(store, this.city)).length
 					const booking = getBooking()
 					const selected = this.stores.find((store) => String(store.id) === String(booking.storeId))
 					this.selectedStoreId = selected ? selected.id : this.stores[0].id
 					if (!selected) this.persistBooking(this.stores[0])
 				} catch (error) {
-					this.catalogState = 'demo'
+					this.catalogState = 'error'
+					this.stores = []
+					this.storeCount = 0
 				}
 			},
 			applyBooking(booking) {
 				this.booking = booking
-				this.city = booking.city || this.city || '郑州市'
+				this.city = booking.city || this.city || '全部城市'
 				this.region = booking.region || ''
 				this.searchKeyword = booking.searchKeyword || ''
 				this.checkIn = booking.checkIn
@@ -738,9 +782,15 @@
 				this.sheetVisible = false
 				this.sheetType = ''
 			},
+			// 城市切换走独立页面（当前定位 / 热门城市 / A-Z 索引），不再用底部弹层。
+			openCityPicker() {
+				uni.navigateTo({
+					url: `/pages/city/select?city=${encodeURIComponent(this.city || '全部城市')}`
+				})
+			},
 			openLocationSearch() {
 				const query = [
-					`city=${encodeURIComponent(this.city || '郑州市')}`,
+					`city=${encodeURIComponent(this.city || '全部城市')}`,
 					`region=${encodeURIComponent(this.region || '')}`,
 					`keyword=${encodeURIComponent(this.searchKeyword || '')}`
 				].join('&')
@@ -753,12 +803,6 @@
 					url: '/pages/booking/date?from=home'
 				})
 			},
-			selectCity(city) {
-				this.city = city
-				this.storeCount = this.stores.filter((store) => storeMatchesCity(store, city)).length
-				this.closeSheet()
-				this.showMessage(this.storeCount ? `已切换到${city}` : `${city}暂无可展示门店`)
-			},
 			selectStore(store) {
 				this.selectedStoreId = store.id
 				this.persistBooking(store)
@@ -766,11 +810,17 @@
 				this.showMessage(`已选择${store.name}`)
 			},
 			selectDatePreset(preset) {
+				const store = this.selectedStore
+				if (!store || !store.id) {
+					this.closeSheet()
+					this.showMessage(this.catalogState === 'loading' ? '门店信息正在加载，请稍后再试' : '暂无可用门店，请先添加门店')
+					return
+				}
 				this.booking = saveBooking({
 					...this.booking,
-					storeId: this.selectedStore.id,
-					store: this.selectedStore.name,
-					address: this.selectedStore.address,
+					storeId: store.id,
+					store: store.name,
+					address: store.address,
 					checkIn: preset.checkIn,
 					checkOut: preset.checkOut,
 					isoCheckIn: preset.isoCheckIn,
@@ -842,23 +892,113 @@
 			triggerNearby() {
 				this.triggerLocation()
 			},
-			triggerLocation() {
+			async triggerLocation() {
 				if (this.locationState === 'locating') {
 					return
 				}
-				this.locationState = 'locating'
 				this.showMessage('正在获取你的位置')
-				uni.getLocation({
-					type: 'gcj02',
-					success: () => {
-						this.locationState = 'ready'
-						this.showMessage('已更新定位：距离郑州二七路店 1.2km')
-					},
-					fail: () => {
-						this.locationState = 'failed'
-						this.showMessage('定位未开启，仍为你展示全部门店')
-					}
+				const city = await this.requestLocationCity()
+				if (city) return
+				// 定位失败时：授权被拒过的，微信不会再弹窗，只能引导用户去设置页重新打开。
+				this.openLocationSetting()
+			},
+			// 只有「用户明确拒绝过位置授权」才跳设置页，系统级定位关闭时跳过去也没用。
+			async openLocationSetting() {
+				const setting = await new Promise((resolve) => {
+					uni.getSetting({ success: resolve, fail: () => resolve(null) })
 				})
+				const authorized = setting && setting.authSetting
+					? setting.authSetting['scope.userLocation']
+					: undefined
+				if (authorized === false && uni.openSetting) {
+					uni.openSetting({
+						success: (result) => {
+							if (result && result.authSetting && result.authSetting['scope.userLocation']) {
+								this.requestLocationCity()
+							}
+						}
+					})
+				}
+			},
+			// 微信定位授权（腾讯定位）→ 逆地理编码换城市名 → 用城市刷新「本地热门精选」。
+			async requestLocationCity(options = {}) {
+				if (this.locationState === 'locating') return ''
+				const silent = Boolean(options.silent)
+				this.locationState = 'locating'
+				const position = await new Promise((resolve) => {
+					uni.getLocation({
+						type: 'gcj02',
+						success: (result) => resolve(result),
+						fail: (error) => {
+							// 定位失败时把原始错误打出来：常见为 auth deny（未授权）、
+							// system permission denied（系统定位关闭）、ERROR_NOCELL&WIFI_LOCATIONSWITCHOFF。
+							console.warn('[定位] getLocation 失败：', error && (error.errMsg || error.message || error))
+							resolve(null)
+						}
+					})
+				})
+				if (!position || typeof position.latitude !== 'number' || typeof position.longitude !== 'number') {
+					this.locationState = 'failed'
+					if (!silent) this.showMessage('未开启定位授权，为你展示全部城市')
+					return ''
+				}
+				// 先记住用户坐标：即使后面逆地理编码失败，热门房型卡片也能算出「距您 x km」。
+				this.userLocation = { latitude: position.latitude, longitude: position.longitude }
+				// 关键排查点：这里打的是定位源真正给的坐标。
+				// 开发者工具没开模拟位置时，坐标来自电脑系统定位 / 网络出口 IP，经常不是本机所在城市；
+				// accuracy 为 65、speed 为 -1 基本就是开发者工具的模拟点位。
+				console.log('[定位] 原始坐标：', {
+					latitude: position.latitude,
+					longitude: position.longitude,
+					accuracy: position.accuracy,
+					horizontalAccuracy: position.horizontalAccuracy,
+					verticalAccuracy: position.verticalAccuracy,
+					speed: position.speed,
+					provider: position.provider || '',
+					coordType: 'gcj02'
+				})
+				let city = ''
+				try {
+					const address = await reverseGeocode(position.latitude, position.longitude)
+					console.log('[定位] 逆地理结果：', address)
+					city = normalizeCityName(address.city || address.district || '')
+				} catch (error) {
+					console.warn('[定位] 逆地理编码失败：', error && (error.message || error.errMsg || error))
+					city = ''
+				}
+				if (!city) {
+					this.locationState = 'failed'
+					if (!silent) this.showMessage('定位成功，但未能识别所在城市')
+					return ''
+				}
+				this.locationState = 'ready'
+				this.locatedCity = city
+				// 缓存定位城市，「选择城市」页打开时能直接展示，不用重新定位。
+				try {
+					uni.setStorageSync('tcpms:located-city', city)
+				} catch (error) {
+					// 存储失败不影响当前页面。
+				}
+				this.applyLocatedCity(city, silent)
+				return city
+			},
+			// 城市切换后同步列表条数、城市可选项与预订上下文。
+			applyLocatedCity(city, silent = false) {
+				if (!this.cities.includes(city)) {
+					const rest = this.cities.filter((item) => item !== '全部城市')
+					this.cities = ['全部城市', city, ...rest]
+				}
+				// 定位到的城市始终作为当前城市展示。
+				// 以前这里在「该城市暂无门店」时会改回「全部城市」，导致用户定位到郑州却看到「全部城市」，
+				// 现在保留城市名，列表改由 visibleRooms 推荐其他城市房源，并用 cityFallback 说明原因。
+				this.city = city
+				this.storeCount = this.stores.filter((store) => storeMatchesCity(store, city)).length
+				this.booking = saveBooking({ ...this.booking, city })
+				if (this.storeCount > 0) {
+					if (!silent) this.showMessage(`已定位到${city}`)
+					return
+				}
+				this.showMessage(`${city}暂无在售房型，为你推荐其他城市房源`)
 			},
 			handleService() {
 				goPage('/pages/service/contact')
@@ -874,12 +1014,21 @@
 				if (this.searching) {
 					return
 				}
+				const store = this.selectedStore
+				if (!store || !store.id) {
+					this.showMessage(this.catalogState === 'loading'
+						? '门店信息正在加载，请稍后再试'
+						: this.catalogState === 'error'
+							? '门店数据加载失败，请稍后重试'
+							: '暂无可查询的民宿，请先添加门店')
+					return
+				}
 				this.searching = true
-				this.persistBooking()
+				this.persistBooking(store)
 				setTimeout(() => {
 					this.searching = false
 					const query = [
-						`storeId=${encodeURIComponent(this.selectedStore.id)}`,
+						`storeId=${encodeURIComponent(store.id)}`,
 						`city=${encodeURIComponent(this.city || '')}`,
 						`region=${encodeURIComponent(this.region || '')}`,
 						`keyword=${encodeURIComponent(this.searchKeyword || '')}`
@@ -890,6 +1039,14 @@
 			sortStores() {
 				this.sortLabel = this.sortLabel === '距离最近优先' ? '评分最高优先' : '距离最近优先'
 				this.showMessage(`已按“${this.sortLabel}”重排房态`)
+			},
+			// 门店距离文案：有定位就用实时算出来的公里数，没定位时退回门店自带文案。
+			storeDistanceLabel(store) {
+				if (!store) return ''
+				const km = this.storeDistanceMap[store.id]
+				if (Number.isFinite(km)) return `距您 ${formatDistanceKm(km)}`
+				if (store.unknownDistance || !store.distance) return '距离未知'
+				return `距您 ${store.distance}`
 			},
 			handleQuickEntrance(item) {
 				if (item.key === 'popular') {
@@ -923,42 +1080,18 @@
 				}
 				this.showMessage('已为你准备好推荐房源')
 			},
-			openStore(store) {
-				recordRecent({
-					id: store.id,
-					type: 'store',
-					title: store.name,
-					subtitle: store.address,
-					image: store.image,
-					path: `/pages/store/detail?id=${store.id}`
-				})
-				uni.navigateTo({
-					url: `/pages/store/detail?id=${store.id}`
-				})
-			},
-			bookStore(store) {
-				if (!store) return
-				if (store.isRemote && !store.featuredRoomId) {
+			// 房型卡片与「立即预订」都进入房型详情，同时把门店上下文写进预订信息。
+			openRoom(room) {
+				if (!room || !room.id) return
+				const store = this.stores.find((item) => String(item.id) === String(room.storeId))
+				if (store) {
+					this.selectedStoreId = store.id
 					this.persistBooking(store)
-					showToast('该门店尚未配置可预订房型')
-					goPage(`/pages/room/list?storeId=${encodeURIComponent(store.id)}`)
-					return
 				}
-				this.selectedStoreId = store.id
-				this.persistBooking(store)
-				const roomId = store.featuredRoomId || store.roomId || demoRooms[0].id
-				const room = demoRooms.find((item) => String(item.id) === String(roomId))
-				this.booking = saveBooking({
-					...getBooking(),
-					storeId: store.id,
-					store: store.name,
-					address: store.address,
-					roomId,
-					room: room ? room.name : store.room,
-					roomImage: room ? room.image : store.image,
-					roomPrice: Number(room ? room.price : store.price || 0)
-				})
-				goPage(`/pages/room/detail?id=${encodeURIComponent(roomId)}&storeId=${encodeURIComponent(store.id)}`)
+				goPage(storeRoomPath(room.storeId, room.id))
+			},
+			bookRoom(room) {
+				this.openRoom(room)
 			},
 			goMap() {
 				uni.navigateTo({
@@ -975,14 +1108,14 @@
 				this.showMessage(item.message)
 			},
 			resetSearch() {
-				const hasZhengzhou = this.stores.some((store) => storeMatchesCity(store, '郑州市'))
-				this.city = hasZhengzhou ? '郑州市' : (this.stores[0] && this.stores[0].city || '全部城市')
+				// 重置回用户所在城市；没有定位结果时才回到「全部城市」，不再用写死的郑州兜底。
+				this.city = this.locatedCity || '全部城市'
 				this.region = ''
 				this.searchKeyword = ''
 				this.storeCount = this.stores.filter((store) => storeMatchesCity(store, this.city)).length
-				this.preferenceDraft.priceMin = 150
+				this.preferenceDraft.priceMin = 0
 				this.preferenceDraft.priceMax = 500
-				this.priceSummary = '不限价格 / ¥150-¥500'
+				this.priceSummary = '不限价格 / ¥0-¥500'
 				this.selectedFilters = []
 				this.booking = saveBooking({
 					...this.booking,
@@ -1054,63 +1187,6 @@
 		border: 0;
 	}
 
-	.topbar {
-		position: fixed;
-		top: 0;
-		right: 0;
-		left: 0;
-		z-index: 50;
-		display: flex;
-		align-items: center;
-		justify-content: flex-start;
-		height: 128rpx;
-		height: calc(128rpx + constant(safe-area-inset-top));
-		height: calc(128rpx + env(safe-area-inset-top));
-		padding: 20rpx 32rpx 14rpx;
-		padding: calc(20rpx + constant(safe-area-inset-top)) 32rpx 14rpx;
-		padding: calc(20rpx + env(safe-area-inset-top)) 32rpx 14rpx;
-		background: #f5fafb;
-		background: rgba(245, 250, 251, 0.96);
-		box-shadow: 0 2rpx 16rpx rgba(0, 0, 0, 0.03);
-	}
-
-	.brand-block {
-		display: flex;
-		align-items: center;
-		min-width: 0;
-	}
-
-	.brand-avatar {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 64rpx;
-		height: 64rpx;
-		margin-right: 16rpx;
-		color: #ffffff;
-		background: $primary;
-		border-radius: 50%;
-	}
-
-	.brand-copy {
-		display: flex;
-		flex-direction: column;
-		min-width: 0;
-	}
-
-	.brand-name {
-		color: $text-muted;
-		font-size: 22rpx;
-		line-height: 1.25;
-	}
-
-	.topbar-title {
-		margin-top: 2rpx;
-		color: $text;
-		font-size: 38rpx;
-		font-weight: 700;
-		line-height: 1.1;
-	}
 
 	.page-content {
 		padding-top: 0;
@@ -1118,82 +1194,6 @@
 		padding-top: env(safe-area-inset-top);
 	}
 
-	.location-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 10rpx 32rpx 16rpx;
-	}
-
-	.city-picker {
-		display: flex;
-		align-items: center;
-		min-width: 0;
-		padding: 12rpx 18rpx;
-		color: $text;
-		background: $surface-container;
-		border-radius: 34rpx;
-		box-shadow: 0 4rpx 12rpx rgba(23, 29, 30, 0.03);
-		text-align: left;
-	}
-
-	.city-picker .proto-icon {
-		margin-right: 8rpx;
-	}
-
-	.city-name {
-		font-size: 30rpx;
-		font-weight: 700;
-		white-space: nowrap;
-	}
-
-	.city-chevron {
-		margin: 0 8rpx;
-	}
-
-	.open-count {
-		padding: 4rpx 10rpx;
-		color: #004f55;
-		background: $secondary-fixed;
-		border-radius: 16rpx;
-		font-size: 18rpx;
-		font-weight: 700;
-		white-space: nowrap;
-	}
-
-	.location-tools {
-		display: flex;
-		align-items: center;
-		gap: 14rpx;
-	}
-
-	.service-button,
-	.scan-button {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		color: $text-variant;
-		background: $surface;
-		box-shadow: 0 4rpx 14rpx rgba(23, 29, 30, 0.06);
-	}
-
-	.service-button {
-		height: 56rpx;
-		padding: 0 18rpx;
-		gap: 6rpx;
-		border-radius: 28rpx;
-		font-size: 20rpx;
-	}
-
-	.service-button .proto-icon {
-		margin-right: 4rpx;
-	}
-
-	.scan-button {
-		width: 56rpx;
-		height: 56rpx;
-		border-radius: 50%;
-	}
 
 	.hero-shell {
 		padding: 0;
@@ -1384,7 +1384,6 @@
 		margin-bottom: 3rpx;
 	}
 
-	.store-row,
 	.date-row,
 	.preference-row {
 		display: flex;
@@ -1392,17 +1391,6 @@
 		justify-content: space-between;
 	}
 
-	.store-row {
-		min-height: 86rpx;
-	}
-
-	.store-summary {
-		display: flex;
-		flex: 1;
-		flex-direction: column;
-		min-width: 0;
-		padding-right: 16rpx;
-	}
 
 	.field-label {
 		display: flex;
@@ -1416,52 +1404,6 @@
 		margin-right: 6rpx;
 	}
 
-	.store-name {
-		margin-top: 4rpx;
-		overflow: hidden;
-		color: $text;
-		font-size: 28rpx;
-		font-weight: 650;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.store-subtitle {
-		margin-top: 2rpx;
-		overflow: hidden;
-		color: $text-muted;
-		font-size: 18rpx;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.nearby-button {
-		display: flex;
-		align-items: center;
-		flex-direction: column;
-		justify-content: center;
-		min-width: 92rpx;
-		padding: 10rpx 12rpx;
-		color: $primary;
-		background: $surface-low;
-		border-radius: 14rpx;
-	}
-
-	.nearby-button .proto-icon {
-		margin-bottom: 2rpx;
-	}
-
-	.nearby-distance {
-		margin-top: 2rpx;
-		font-size: 18rpx;
-		font-weight: 700;
-	}
-
-	.nearby-label {
-		margin-top: 2rpx;
-		color: $text-muted;
-		font-size: 16rpx;
-	}
 
 	.booking-divider {
 		width: 100%;
@@ -1670,10 +1612,6 @@
 		background: rgba(131, 244, 244, 0.42);
 	}
 
-	.quick-card-green .quick-icon {
-		color: $secondary;
-		background: rgba(210, 231, 229, 0.76);
-	}
 
 	.quick-card-gray .quick-icon {
 		color: $text-variant;
@@ -1705,11 +1643,69 @@
 		padding: 0 24rpx 30rpx;
 	}
 
+	.popular-loading {
+		padding: 60rpx 0;
+		color: $text-muted;
+		font-size: 22rpx;
+		text-align: center;
+	}
+
 	.popular-heading {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		margin-bottom: 18rpx;
+	}
+
+	.city-fallback-tip {
+		display: flex;
+		align-items: center;
+		gap: 10rpx;
+		margin-bottom: 20rpx;
+		padding: 18rpx 22rpx;
+		color: #8a6d3b;
+		font-size: 22rpx;
+		line-height: 1.4;
+		background: #fdf6e7;
+		border: 1rpx solid #f5e3bd;
+		border-radius: 16rpx;
+	}
+
+	.city-fallback-tip text {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.city-fallback-tip .city-fallback-action {
+		flex: 0 0 auto;
+		color: var(--proto-primary-deep);
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.distance-hint {
+		display: flex;
+		align-items: center;
+		gap: 8rpx;
+		margin-bottom: 18rpx;
+		padding: 14rpx 20rpx;
+		color: $text-variant;
+		font-size: 20rpx;
+		background: rgba(149, 241, 252, 0.22);
+		border: 1rpx solid rgba(42, 169, 169, 0.22);
+		border-radius: 14rpx;
+	}
+
+	.distance-hint text {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.distance-hint .distance-hint-action {
+		flex: 0 0 auto;
+		color: $primary;
+		font-weight: 600;
+		white-space: nowrap;
 	}
 
 	.popular-title-group {
@@ -1838,9 +1834,6 @@
 		background: $secondary;
 	}
 
-	.area-badge.badge-tertiary {
-		background: #4f6261;
-	}
 
 	.rating-badge {
 		position: absolute;
@@ -1912,20 +1905,12 @@
 		white-space: nowrap;
 	}
 
-	.stock-danger {
-		color: #93000a;
-		background: #ffdad6;
-	}
 
 	.stock-success {
 		color: #006f78;
 		background: $secondary-fixed;
 	}
 
-	.stock-neutral {
-		color: #384a49;
-		background: #d2e7e5;
-	}
 
 	.tag-list {
 		display: flex;
@@ -1987,43 +1972,6 @@
 		line-height: 66rpx;
 	}
 
-	.empty-state {
-		display: flex;
-		align-items: center;
-		flex-direction: column;
-		padding: 90rpx 30rpx;
-		background: $surface;
-		border-radius: 20rpx;
-	}
-
-	.empty-icon {
-		color: $primary;
-		font-size: 64rpx;
-	}
-
-	.empty-title {
-		margin-top: 16rpx;
-		color: $text;
-		font-size: 28rpx;
-		font-weight: 700;
-	}
-
-	.empty-desc {
-		margin-top: 8rpx;
-		color: $text-muted;
-		font-size: 20rpx;
-	}
-
-	.empty-reset {
-		height: 64rpx;
-		margin-top: 24rpx;
-		padding: 0 24rpx;
-		color: $primary;
-		background: $surface-low;
-		border-radius: 16rpx;
-		font-size: 21rpx;
-		line-height: 64rpx;
-	}
 
 	.brand-footer {
 		display: flex;
@@ -2056,48 +2004,6 @@
 		font-size: 16rpx;
 	}
 
-	.bottom-nav {
-		position: fixed;
-		right: 0;
-		bottom: 0;
-		left: 0;
-		z-index: 40;
-		display: flex;
-		align-items: center;
-		justify-content: space-around;
-		padding: 12rpx 24rpx;
-		padding-bottom: calc(12rpx + constant(safe-area-inset-bottom));
-		padding-bottom: calc(12rpx + env(safe-area-inset-bottom));
-		background: #ffffff;
-		background: rgba(255, 255, 255, 0.96);
-		box-shadow: 0 -8rpx 30rpx rgba(42, 169, 169, 0.08);
-	}
-
-	.nav-item {
-		display: flex;
-		align-items: center;
-		flex: 1;
-		flex-direction: column;
-		justify-content: center;
-		height: 76rpx;
-		color: $text-variant;
-		background: transparent;
-	}
-
-	.nav-item.active {
-		color: $primary;
-		font-weight: 700;
-	}
-
-	.nav-icon {
-		height: 34rpx;
-		font-size: 30rpx;
-	}
-
-	.nav-label {
-		margin-top: 8rpx;
-		font-size: 18rpx;
-	}
 
 	.toast-message {
 		position: fixed;
@@ -2336,7 +2242,6 @@
 	.current-city,
 	.store-option,
 	.date-preset,
-	.guest-option,
 	.menu-option {
 		display: flex;
 		align-items: center;
@@ -2368,8 +2273,7 @@
 		gap: 14rpx;
 	}
 
-	.city-option,
-	.price-option {
+	.city-option {
 		padding: 20rpx 8rpx;
 		color: $text;
 		background: $surface-low;
@@ -2384,9 +2288,7 @@
 	}
 
 	.city-option.selected,
-	.price-option.selected,
-	.store-option.selected,
-	.guest-option.selected {
+	.store-option.selected {
 		color: $primary;
 		background: #eaf8f6;
 		border-color: #c1e3e0;
@@ -2394,7 +2296,6 @@
 
 	.store-option-list,
 	.date-preset-list,
-	.guest-option-list,
 	.menu-sheet-content {
 		display: flex;
 		flex-direction: column;
@@ -2402,7 +2303,6 @@
 	}
 
 	.store-option-copy,
-	.guest-option > view,
 	.menu-option-copy {
 		flex: 1;
 		min-width: 0;
@@ -2410,7 +2310,6 @@
 
 	.store-option-title,
 	.preset-title,
-	.guest-option-title,
 	.menu-option-title {
 		display: block;
 		color: $text;
@@ -2420,7 +2319,6 @@
 
 	.store-option-desc,
 	.preset-detail,
-	.guest-option-desc,
 	.menu-option-desc {
 		display: block;
 		margin-top: 6rpx;
@@ -2429,9 +2327,6 @@
 		line-height: 1.45;
 	}
 
-	.option-check {
-		margin-left: 14rpx;
-	}
 
 	.date-sheet-summary {
 		display: flex;
@@ -2476,19 +2371,6 @@
 		justify-content: space-between;
 	}
 
-	.price-option-list {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 14rpx;
-	}
-
-	.price-option {
-		padding: 16rpx 18rpx;
-	}
-
-	.sheet-caption-spaced {
-		margin-top: 28rpx;
-	}
 
 	.sheet-primary-button {
 		display: flex;

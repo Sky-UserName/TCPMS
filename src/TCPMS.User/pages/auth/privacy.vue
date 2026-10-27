@@ -17,15 +17,15 @@
 		<view class="privacy-card">
 			<view class="privacy-title-row">
 				<view>
-					<text class="privacy-title">欢迎使用 TCPMS</text>
-					<text class="privacy-subtitle">多门店快捷预订 · 智能客房管理</text>
+					<text class="privacy-title">{{ page.title || '欢迎使用 TCPMS' }}</text>
+					<text class="privacy-subtitle">{{ page.subtitle }}</text>
 				</view>
-				<text class="proto-pill info">安全合规保障</text>
+				<text class="proto-pill info">{{ page.badge || '安全合规保障' }}</text>
 			</view>
 
-			<view class="privacy-intro">
+			<view v-if="page.intro" class="privacy-intro">
 				<view class="privacy-intro-icon"><ProtoIcon name="check" tone="white" :size="20" /></view>
-				<text>为了向您提供<text class="strong">门店浏览、精准定位、房源预订、微信支付及极速退款</text>等核心服务，我们将依据合法、正当、必要的原则收集与使用您的相关信息。</text>
+				<text>{{ page.intro }}</text>
 			</view>
 
 			<view class="privacy-summary-title">
@@ -33,13 +33,22 @@
 				<text class="proto-link">可向下滑动阅读全文 ↓</text>
 			</view>
 			<scroll-view scroll-y class="privacy-scroll">
-				<view v-for="item in privacyPoints" :key="item.title" class="privacy-point">
+				<view v-if="loadState !== 'ready'" class="privacy-point">
 					<text class="privacy-point-dot"></text>
 					<view>
-						<text class="privacy-point-title">{{ item.index }}. {{ item.title }}</text>
-						<text class="privacy-point-body">{{ item.body }}</text>
+						<text class="privacy-point-title">{{ loadState === 'error' ? '隐私要点加载失败' : '正在加载隐私要点' }}</text>
+						<text class="privacy-point-body">{{ loadState === 'error' ? '请检查网络后重新进入本页面。' : '稍候即可查看完整的授权说明。' }}</text>
 					</view>
 				</view>
+				<block v-else>
+					<view v-for="item in page.points" :key="item.title" class="privacy-point">
+						<text class="privacy-point-dot"></text>
+						<view>
+							<text class="privacy-point-title">{{ item.index }}. {{ item.title }}</text>
+							<text class="privacy-point-body">{{ item.body }}</text>
+						</view>
+					</view>
+				</block>
 			</scroll-view>
 		</view>
 
@@ -59,12 +68,10 @@
 					<button class="proto-close" hover-class="none" @tap="showAgreement = false"><ProtoIcon name="close" :size="24" /></button>
 				</view>
 				<view class="proto-body agreement-body">
-					<text class="agreement-heading">位置权限原则</text>
-					<text>定位仅用于附近门店排序，不是下单必填项。用户拒绝授权后仍可手动切换城市并浏览完整房源。</text>
-					<text class="agreement-heading">入住人信息</text>
-					<text>预订整套民宿或青年旅舍床位时需要核验真实姓名、联系电话和身份证件号，页面展示时默认脱敏。</text>
-					<text class="agreement-heading">支付与退款</text>
-					<text>交易通过微信官方支付完成，平台仅记录订单和支付流水，不保存银行卡密码。</text>
+					<block v-for="(block, index) in page.blocks" :key="index">
+						<text v-if="block.type === 'heading'" class="agreement-heading">{{ block.text }}</text>
+						<text v-else>{{ block.text }}</text>
+					</block>
 				</view>
 				<button class="proto-primary-button" hover-class="none" @tap="showAgreement = false">已阅读并同意</button>
 			</view>
@@ -74,6 +81,16 @@
 
 <script>
 	import ProtoIcon from '@/components/ProtoIcon.vue'
+	import { fetchPageContent } from '@/common/api.js'
+
+	const EMPTY_PAGE = {
+		title: '',
+		subtitle: '',
+		badge: '',
+		intro: '',
+		points: [],
+		blocks: []
+	}
 
 	export default {
 		components: { ProtoIcon },
@@ -82,31 +99,29 @@
 				agreed: false,
 				showAgreement: false,
 				errorMessage: '',
-				privacyPoints: [
-					{
-						index: 1,
-						title: '地理位置与多门店查找',
-						body: '仅在您明确授权后获取当前位置，用于智能推荐距离最近的直营门店及显示路线导航；若您拒绝授权，仍可手动切换城市。'
-					},
-					{
-						index: 2,
-						title: '入住人身份与预订信息',
-						body: '根据旅馆业实名管理要求，预订整套民宿或青年旅舍床位时需核验真实姓名、联系电话与身份证件号。'
-					},
-					{
-						index: 3,
-						title: '微信安全支付与退款结算',
-						body: '平台只记录订单编号与支付流水，不保存银行卡密码或敏感支付凭据。'
-					},
-					{
-						index: 4,
-						title: '您的权利与授权撤回',
-						body: '您可以在我的页面查看、更正个人资料或注销账户，撤回权限后我们将停止采集后续信息。'
-					}
-				]
+				loadState: 'loading',
+				page: { ...EMPTY_PAGE }
 			}
 		},
+		onLoad() {
+			this.loadPage()
+		},
 		methods: {
+			async loadPage() {
+				try {
+					const data = await fetchPageContent('auth-privacy')
+					this.page = {
+						...EMPTY_PAGE,
+						...data,
+						points: Array.isArray(data.points) ? data.points : [],
+						blocks: Array.isArray(data.blocks) ? data.blocks : []
+					}
+					this.loadState = 'ready'
+				} catch (error) {
+					this.page = { ...EMPTY_PAGE }
+					this.loadState = 'error'
+				}
+			},
 			continueAuth() {
 				if (!this.agreed) {
 					this.errorMessage = '请先阅读并勾选同意相关协议'
@@ -241,12 +256,8 @@
 		line-height: 1.55;
 	}
 
-	.privacy-intro .strong {
-		font-weight: 800;
-	}
 
-	.privacy-intro-icon,
-	.load-error-icon {
+	.privacy-intro-icon {
 		display: flex;
 		align-items: center;
 		justify-content: center;

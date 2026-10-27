@@ -1,23 +1,23 @@
 <template>
 	<view class="proto-page proto-page-plain rule-page">
-		<ProtoHeader title="规则与政策" theme="green" />
+		<ProtoHeader :title="activeTab === 'privacy' ? '用户隐私手册' : '规则与政策'" theme="green" />
 		<view class="rule-summary proto-card">
 			<view class="rule-summary-top">
 				<view>
-					<view class="proto-pill info"><ProtoIcon name="shield" :size="18" /><text>合规与数字隐私标准</text></view>
-					<text class="rule-summary-title">TCPMS 智选旅宿服务条款</text>
-					<text class="rule-summary-desc">我们致力于守护您的旅途隐私与数据安全，为您提供透明、值得信赖的数字化入住体验。</text>
+					<view class="proto-pill info"><ProtoIcon name="shield" :size="18" /><text>{{ page.kicker || '合规与数字隐私标准' }}</text></view>
+					<text class="rule-summary-title">{{ page.subtitle || page.title || 'TCPMS 智选旅宿服务条款' }}</text>
+					<text class="rule-summary-desc">{{ page.summary }}</text>
 				</view>
 				<view class="rule-summary-mark"><ProtoIcon name="shield" tone="white" :size="30" /></view>
 			</view>
-			<view class="rule-summary-meta">
-				<view><text>版本更新</text><text class="rule-summary-date">2026年09月30日</text></view>
-				<view><text>正式生效</text><text class="rule-summary-date">2026年10月01日</text></view>
+			<view v-if="page.version || page.effectiveAt" class="rule-summary-meta">
+				<view><text>版本更新</text><text class="rule-summary-date">{{ page.version || '--' }}</text></view>
+				<view><text>正式生效</text><text class="rule-summary-date">{{ page.effectiveAt || '--' }}</text></view>
 			</view>
 		</view>
-		<view class="proto-tabs rule-tabs">
+		<view v-if="page.tabs.length" class="proto-tabs rule-tabs">
 			<text
-				v-for="item in tabs"
+				v-for="item in page.tabs"
 				:key="item.key"
 				class="proto-tab"
 				:class="{ active: activeTab === item.key }"
@@ -28,65 +28,49 @@
 		</view>
 
 		<scroll-view scroll-y class="rule-scroll">
-			<view v-if="activeTab === 'service'" class="rule-document">
-				<text class="rule-kicker">TCPMS 智选旅宿服务协议</text>
-				<text class="rule-updated">更新日期：2026年09月30日</text>
-				<text class="rule-title">让每一次入住，都有清晰的规则和可预期的服务</text>
-				<text class="rule-paragraph">欢迎使用 TCPMS 智选旅宿小程序。使用门店浏览、房型预订、支付、入住、退款和客服等服务前，请阅读并理解本协议。完成登录、勾选同意或继续使用服务，视为你已阅读并同意本协议。</text>
-				<text class="rule-heading">核心隐私与合规摘要</text>
-				<view class="rule-compliance-list">
-					<view v-for="item in complianceItems" :key="item.title" class="rule-compliance-item">
-						<view class="rule-compliance-icon"><ProtoIcon :name="item.icon" :size="26" /></view>
-						<view><text class="rule-compliance-title">{{ item.title }} <text class="proto-pill info">{{ item.tag }}</text></text><text class="rule-compliance-desc">{{ item.desc }}</text></view>
-					</view>
-				</view>
-				<text class="rule-heading">一、服务范围</text>
-				<text class="rule-paragraph">平台提供多门店旅宿信息展示、房型预订、订单管理、支付退款申请、入住指引和官方客服入口。具体服务内容以页面实际展示和订单确认页为准。</text>
-				<text class="rule-heading">二、预订与订单</text>
-				<text class="rule-paragraph">你需要提供真实、准确的入住日期、入住人数和入住人信息。订单提交后，房型库存会在指定时间内锁定；未在规定时间完成支付的订单可能自动取消并释放库存。</text>
-				<text class="rule-heading">三、入住与退订</text>
-				<text class="rule-paragraph">入住时间、离店时间、身份核验、房间或床位分配以及退改规则由订单详情页和门店政策共同确定。申请退款后，平台会按照规则审核并更新退款状态。</text>
-				<text class="rule-heading">四、用户行为</text>
-				<text class="rule-paragraph">不得使用平台从事违法活动，不得冒用他人身份，不得恶意占用库存、重复提交订单或干扰平台正常运行。发生违规时，平台可以采取限制服务、取消订单等措施。</text>
+			<view v-if="loadState !== 'ready'" class="rule-document rule-state">
+				<text class="rule-state-title">{{ loadState === 'error' ? '协议内容加载失败' : '正在加载协议内容' }}</text>
+				<text class="rule-state-desc">{{ loadState === 'error' ? '请检查网络后点击下方按钮重试。' : '稍候即可查看完整的服务条款与隐私说明。' }}</text>
+				<button v-if="loadState === 'error'" class="proto-primary-button" hover-class="none" @tap="loadPage"><text>重新加载</text></button>
 			</view>
-
-			<view v-else-if="activeTab === 'privacy'" class="rule-document">
-				<text class="rule-kicker">TCPMS 智选旅宿隐私政策</text>
-				<text class="rule-updated">更新日期：2026年09月30日</text>
-				<text class="rule-title">我们只为完成旅宿服务而使用必要信息</text>
-				<view class="privacy-highlights">
-					<view v-for="item in privacyHighlights" :key="item.title" class="privacy-highlight">
-						<ProtoIcon class="privacy-icon" :name="item.icon" :size="30" />
-						<text class="privacy-title">{{ item.title }}</text>
-						<text class="privacy-desc">{{ item.desc }}</text>
-					</view>
-				</view>
-				<text class="rule-heading">一、我们收集的信息</text>
-				<text class="rule-paragraph">为完成登录、下单、支付、入住核验和售后服务，我们可能处理微信身份、手机号、入住人姓名、证件信息、订单信息和必要的设备及日志信息。</text>
-				<text class="rule-heading">二、位置信息的使用</text>
-				<text class="rule-paragraph">获得授权后，位置信息仅用于附近门店排序、距离展示和地图导航入口。拒绝授权不会影响你浏览全部门店、预订房型和查看订单。</text>
-				<text class="rule-heading">三、敏感信息保护</text>
-				<text class="rule-paragraph">身份证等敏感信息会进行加密存储和页面脱敏，仅在订单履约、入住核验和相关售后场景中由经过授权的人员访问。</text>
-				<text class="rule-heading">四、你的权利</text>
-				<text class="rule-paragraph">你可以通过客服入口查询、更正或申请删除相关个人信息，也可以在微信设置中管理位置、手机号和订阅消息等授权。</text>
-			</view>
-
 			<view v-else class="rule-document">
-				<text class="rule-kicker">权限与第三方 SDK 说明</text>
-				<text class="rule-updated">更新日期：2026年09月30日</text>
-				<text class="rule-title">每一项权限，都有明确的使用场景</text>
-				<view v-for="item in sdkItems" :key="item.title" class="sdk-item">
-					<view class="sdk-icon"><ProtoIcon :name="item.icon" :size="28" /></view>
-					<view class="sdk-main">
-						<text class="sdk-title">{{ item.title }}</text>
-						<text class="sdk-desc">{{ item.desc }}</text>
+				<text class="rule-kicker">{{ activeContent.kicker }}</text>
+				<text class="rule-updated">{{ activeContent.updatedAt }}</text>
+				<text class="rule-title">{{ activeContent.title }}</text>
+				<block v-for="(block, index) in activeContent.blocks" :key="index">
+					<text v-if="block.type === 'heading'" class="rule-heading">{{ block.text }}</text>
+					<view v-else-if="block.type === 'highlights'" :class="block.style === 'cards' ? 'privacy-highlights' : 'rule-compliance-list'">
+						<view
+							v-for="item in activeContent.highlights"
+							:key="item.title"
+							:class="block.style === 'cards' ? 'privacy-highlight' : 'rule-compliance-item'"
+						>
+							<block v-if="block.style === 'cards'">
+								<ProtoIcon class="privacy-icon" :name="item.icon" :size="30" />
+								<text class="privacy-title">{{ item.title }}</text>
+								<text class="privacy-desc">{{ item.desc }}</text>
+							</block>
+							<block v-else>
+								<view class="rule-compliance-icon"><ProtoIcon :name="item.icon" :size="26" /></view>
+								<view>
+									<text class="rule-compliance-title">{{ item.title }} <text class="proto-pill info">{{ item.tag }}</text></text>
+									<text class="rule-compliance-desc">{{ item.desc }}</text>
+								</view>
+							</block>
+						</view>
 					</view>
-					<text class="proto-pill" :class="item.required ? 'warn' : 'info'">{{ item.required ? '必要' : '可选' }}</text>
-				</view>
-				<text class="rule-heading">第三方服务</text>
-				<text class="rule-paragraph">地图与地址解析能力由高德开放平台提供，用于门店定位、地址标准化和距离计算。微信登录、支付、订阅消息和官方客服入口由微信相关能力提供。</text>
-				<text class="rule-heading">授权管理</text>
-				<text class="rule-paragraph">你可以根据页面提示选择是否授权可选权限。关闭可选权限后，相关功能可能无法提供，但不影响不依赖该权限的其他旅宿服务。</text>
+					<view v-else-if="block.type === 'permissions'" class="rule-permissions">
+						<view v-for="item in activeContent.permissions" :key="item.title" class="sdk-item">
+							<view class="sdk-icon"><ProtoIcon :name="item.icon" :size="28" /></view>
+							<view class="sdk-main">
+								<text class="sdk-title">{{ item.title }}</text>
+								<text class="sdk-desc">{{ item.desc }}</text>
+							</view>
+							<text class="proto-pill" :class="item.required ? 'warn' : 'info'">{{ item.required ? '必要' : '可选' }}</text>
+						</view>
+					</view>
+					<text v-else class="rule-paragraph">{{ block.text }}</text>
+				</block>
 			</view>
 		</scroll-view>
 	</view>
@@ -95,34 +79,53 @@
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
+	import { fetchPageContent } from '@/common/api.js'
+
+	const EMPTY_PAGE = {
+		key: 'rule',
+		title: '',
+		subtitle: '',
+		kicker: '',
+		summary: '',
+		version: '',
+		effectiveAt: '',
+		tabs: []
+	}
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
 		data() {
 			return {
-				activeTab: 'service',
-				tabs: [
-					{ key: 'service', label: '服务协议' },
-					{ key: 'privacy', label: '隐私政策' },
-					{ key: 'sdk', label: '权限与SDK' }
-				],
-				complianceItems: [
-					{ icon: 'location', title: '位置权限原则', tag: '非必需', desc: '仅用于附近门店排序与推荐，拒绝授权仍可手动切换城市。' },
-					{ icon: 'shield', title: '身份证件严格脱敏加密', tag: 'AES-256', desc: '实名信息仅用于入住核验与报备，页面统一脱敏展示。' },
-					{ icon: 'wallet', title: '直连清算与资金安全', tag: '官方通道', desc: '支付由微信官方渠道完成，平台不保存银行卡密码等敏感凭据。' }
-				],
-				privacyHighlights: [
-					{ icon: 'info', title: '目的明确', desc: '只为完成预订与履约使用' },
-					{ icon: 'location', title: '位置可选', desc: '拒绝定位仍可正常预订' },
-					{ icon: 'shield', title: '安全保护', desc: '敏感信息加密与脱敏' }
-				],
-				sdkItems: [
-					{ icon: 'user', title: '微信登录与手机号', desc: '用于账号创建、身份识别和订单联系。', required: true },
-					{ icon: 'location', title: '位置权限', desc: '用于附近门店排序、距离展示和导航入口。', required: false },
-					{ icon: 'image', title: '相册与相机', desc: '用于后续客服举证、发票或入住材料上传。', required: false },
-					{ icon: 'book', title: '订阅消息', desc: '用于发送订单状态、入住提醒和退款结果。', required: false },
-					{ icon: 'map', title: '高德地图服务', desc: '用于门店地图、地址解析和坐标能力。', required: true }
-				]
+				activeTab: '',
+				loadState: 'loading',
+				page: { ...EMPTY_PAGE }
+			}
+		},
+		computed: {
+			activeContent() {
+				const tabs = this.page.tabs || []
+				return tabs.find((item) => item.key === this.activeTab) || tabs[0] || { blocks: [], highlights: [], permissions: [] }
+			}
+		},
+		onLoad(options) {
+			this.activeTab = options && options.tab ? options.tab : ''
+			this.loadPage()
+		},
+		methods: {
+			async loadPage() {
+				if (this.loadState !== 'loading') this.loadState = 'loading'
+				try {
+					const data = await fetchPageContent('rule')
+					this.page = { ...EMPTY_PAGE, ...data, tabs: Array.isArray(data.tabs) ? data.tabs : [] }
+					if (!this.activeTab || !this.page.tabs.some((item) => item.key === this.activeTab)) {
+						this.activeTab = this.page.tabs.length ? this.page.tabs[0].key : ''
+					}
+					this.loadState = 'ready'
+				} catch (error) {
+					// 文案接口异常时给出重试入口，不展示过期的硬编码条款。
+					this.page = { ...EMPTY_PAGE }
+					this.loadState = 'error'
+				}
 			}
 		}
 	}
@@ -230,6 +233,38 @@
 
 	.rule-document {
 		padding: 30rpx 28rpx 64rpx;
+	}
+
+	.rule-state {
+		display: flex;
+		align-items: center;
+		flex-direction: column;
+		padding-top: 120rpx;
+		text-align: center;
+	}
+
+	.rule-state-title {
+		color: var(--proto-text);
+		font-size: 28rpx;
+		font-weight: 800;
+	}
+
+	.rule-state-desc {
+		margin: 12rpx 0 32rpx;
+		color: var(--proto-muted);
+		font-size: 21rpx;
+		line-height: 1.6;
+	}
+
+	.rule-state .proto-primary-button {
+		width: 320rpx;
+	}
+
+	.rule-permissions {
+		display: flex;
+		flex-direction: column;
+		gap: 4rpx;
+		margin-top: 4rpx;
 	}
 
 	.rule-kicker,

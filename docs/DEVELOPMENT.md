@@ -52,8 +52,19 @@ npm run dev
 1. 使用 HBuilderX 打开 src/TCPMS.User。
 2. 运行到微信开发者工具。
 3. 开发阶段允许“不校验合法域名”。
-4. 开发联调可在设备存储中设置 `tcpms.apiBaseUrl`；构建环境也可设置 `VITE_API_BASE_URL`。生产小程序须使用 HTTPS 并配置微信 request 合法域名。
+4. 开发环境默认请求 `http://localhost:5180/api/v1`，地址由 `src/TCPMS.User/.env.development`（本机）和 `.env.production`（发行）控制；也可以在设备存储里设置 `tcpms.apiBaseUrl` 临时改地址。生产小程序须使用 HTTPS 并配置微信 request 合法域名。
 5. 修改页面后重新编译，不要编辑 unpackage/dist。
+
+**微信开发者工具要导入 `src/TCPMS.User/unpackage/dist/dev/mp-weixin`，不是 `src/TCPMS.User`。** 源码目录只有 `pages.json` 和 `manifest.json`，`app.json` 是编译产物；直接导入源码目录会报 `app.json is not found in the project root directory`。
+
+没有 HBuilderX 图形界面（或在 CI 上）时用脚本编译，产物位置相同：
+
+~~~
+powershell -ExecutionPolicy Bypass -File scripts/build-miniapp.ps1            # 开发包，接口指向 localhost:5180
+powershell -ExecutionPolicy Bypass -File scripts/build-miniapp.ps1 -Mode prod # 生产包，接口读 .env.production
+~~~
+
+脚本临时借用 HBuilderX 自带的 uni-app 编译器，编译后自动删除临时生成的 `package.json`、`vite.config.js` 和 `node_modules` 联接，不改变项目结构。HBuilderX 不在 `D:\SoftWare\HBuilderX` 时用 `-HBuilderXHome` 指定。
 
 ## 4.1 配置文件（不入库）
 
@@ -90,7 +101,7 @@ dotnet run --project src/backend/TCPMS.Api --urls http://localhost:5180
 
 生产环境必须替换默认密码、JWT 密钥、数据库连接、微信支付证书和高德 Key。
 
-生产配置默认开启 Swagger，接口文档地址为 `/swagger`，OpenAPI JSON 地址为 `/swagger/v1/swagger.json`。如需关闭公网访问，将 `Swagger__Enabled` 设为 `false`，或在网关层限制访问来源。
+Swagger 默认关闭（`appsettings.json` 与生产配置均为 `Swagger:Enabled=false`），本地开发由 `appsettings.Development.json` 打开。需要临时查看时把 `Swagger__Enabled` 设为 `true`，接口文档地址为 `/swagger`，OpenAPI JSON 地址为 `/swagger/v1/swagger.json`。
 
 ### 5.1 微信支付与高德地图配置
 
@@ -137,8 +148,38 @@ dotnet run --project src/backend/TCPMS.Api --urls http://localhost:5180
 回调地址只是下单参数，微信不会校验可达性，因此本地可以先填占位地址：
 
 - `appsettings.Development.json` 里 `WeChat:NotifyBaseUrl` 已设为 `https://example.com`，本地可以正常拉起支付，回调收不到，但 `pay-status` 查询与兜底任务会把订单补成已支付。
-- 真机预览时手机访问不到 `localhost`：后端需监听 `0.0.0.0`（开发配置已改为 `http://0.0.0.0:5180`），小程序端 `common/api.js` 的 `devMachineApiBaseUrl` 要改成开发机的局域网地址，并在开发者工具里勾选“不校验合法域名”。
+- 真机预览时手机访问不到 `localhost`：后端需监听 `0.0.0.0`（开发配置已改为 `http://0.0.0.0:5180`），小程序端用 `VITE_API_BASE_URL=http://<开发机局域网IP>:5180/api/v1` 构建，并在开发者工具里勾选“不校验合法域名”。
 - 域名下来后，只需把 `WeChat:NotifyBaseUrl` 改成真实域名、在小程序后台把域名加入 request 合法域名，其余代码不用动。
+
+### 5.3 本地样例数据与联调账号
+
+开发环境默认使用 InMemory 数据库，**每次重启后端都会重新初始化数据**，不需要手工清库。种子逻辑分两类：
+
+- 配置数据（始终存在）：地区、角色、权限菜单、筛选项字典、订阅消息模板。
+- 样例业务数据（空库且 `Seed:DemoData` 为 true 时写入）：2 家门店、4 个房型（含 1 个待审核）、2 个用户、4 张订单（待支付 / 已支付待入住 / 已完成带评价 / 退款审核中）、1 个门店管理员。
+
+本地联调账号：
+
+| 角色 | 账号 | 密码 |
+| --- | --- | --- |
+| 总部管理员 | `admin` | `Admin@123456`（首次登录强制改密） |
+| 门店管理员 | `shanghai_admin` | 同上 |
+| 小程序用户 | 无需输入 | 开发环境默认用 `dev-user-001` 登录 |
+
+小程序本地联调要点：
+
+- 接口地址：开发构建读 `.env.development` → `http://localhost:5180/api/v1`，发行构建读 `.env.production`。识别不出构建环境时按开发处理，避免误连线上。
+- 开发态默认跳过微信 code 换 openId，直接用 `dev-user-001` 登录，保证样例订单可复现。需要验证真实微信登录时，在开发者工具控制台执行 `uni.setStorageSync('tcpms.devUseWechatLogin', true)`。
+- 微信支付未配置时，支付页会自动走 `/orders/{id}/mock-pay`（仅后端 Development 环境存在），把订单真实标记为已支付。该行为由 `VITE_ALLOW_MOCK_PAY` 控制，开发默认开启，生产包恒为关闭。
+- 后端重启后样例订单会重新生成，小程序本地缓存里的旧订单需要在开发者工具里「清缓存 > 清除数据」清掉；开发环境的「我的」页面也有「清除本地缓存」入口，效果等同。
+
+如果本地改用 MySQL（`Database:Provider=MySql`），需要手工清库时执行：
+
+~~~powershell
+mysql -h 127.0.0.1 -u <user> -p <database> < docs/sql/2026-10-25_reset_local_data.sql
+~~~
+
+脚本只保留 `Regions`，其余表全部清空；重启后端会自动补齐角色、管理员和样例数据。生产库不要执行。
 
 ## 6. 生成发布包
 
@@ -203,4 +244,31 @@ npm run build
 | 管理后台接口地址 | 默认同源 `/api/v1`，开发由 vite 代理到 5180 | 分域名部署时用 `VITE_API_BASE_URL` 覆盖 |
 
 数据库字段变更（`MustChangePassword`、`PasswordChangedAt`）需要先执行 `docs/sql/2026-10-25_admin_password_policy.sql`，因为项目用的是 `EnsureCreated`，已有库不会自动加列。
+
+## 数据访问约定（手动事务）
+
+Pomelo 在 `Program.cs` 里开了 `EnableRetryOnFailure(3)`，执行策略**不允许**业务代码直接 `BeginTransactionAsync`，否则一进事务就抛：
+
+```
+The configured execution strategy 'MySqlRetryingExecutionStrategy' does not support user-initiated transactions.
+```
+
+创建订单曾因此稳定返回 500。需要手动事务时统一按下面的写法（参考 `POST /api/v1/orders`）：
+
+```csharp
+var strategy = db.Database.CreateExecutionStrategy();
+return await strategy.ExecuteAsync(async () =>
+{
+    db.ChangeTracker.Clear();               // 重试会重跑委托，先清干净跟踪状态
+    await using var tx = db.Database.IsRelational()
+        ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+        : null;
+    var roomType = await db.RoomTypes.SingleOrDefaultAsync(...); // 事务内重新读取，别复用外层实体
+    // ... 校验库存、改锁定数量、Add 订单、SaveChanges
+    await tx.CommitAsync(cancellationToken);
+    return Results.Created(...);
+});
+```
+
+要点：所有查询、写入、提交都放在委托内；重试可能重复执行，因此业务幂等依赖唯一索引（如 `OrderNumber`）兜底。
 

@@ -6,36 +6,50 @@
 		<view class="staff-list">
 			<view v-for="member in staff" :key="member.id" class="staff-card proto-card"><view class="staff-avatar"><ProtoIcon name="user" :size="30" /></view><view class="staff-copy"><text>{{ member.name }}</text><text>{{ member.phone }} · {{ member.role }}</text></view><text class="staff-status">{{ member.status }}</text></view>
 		</view>
-		<view class="tool-note"><ProtoIcon name="info" :size="21" /><text>真实邀请、权限配置和账号注销将在商家账号服务接入后开放。</text></view>
+		<view class="tool-note"><ProtoIcon name="info" :size="21" /><text>员工账号创建后需使用初始密码登录管理端并立即修改密码。</text></view>
 	</view>
 </template>
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
-	import { getMerchantStaff, saveMerchantStaff } from '@/common/app-store.js'
+	import { createMerchantStaff, fetchMerchantStaff } from '@/common/api.js'
 	import { showToast } from '@/common/prototype.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
 		data() { return { staff: [] } },
-		onShow() { this.staff = getMerchantStaff() },
+		async onShow() {
+			await this.loadStaff()
+		},
 		methods: {
+			async loadStaff() {
+				try {
+					this.staff = await fetchMerchantStaff()
+				} catch (error) {
+					this.staff = []
+					showToast(error?.message || '员工加载失败')
+				}
+			},
 			inviteStaff() {
 				if (!uni.showModal) {
 					showToast('当前环境暂不支持添加员工')
 					return
 				}
 				uni.showModal({
-					title: '添加演示员工',
+					title: '添加员工',
 					editable: true,
 					placeholderText: '请输入员工姓名',
 					confirmText: '添加',
-					success: ({ confirm, content = '' }) => {
+					success: async ({ confirm, content = '' }) => {
 						if (!confirm || !content.trim()) return
-						const next = [{ id: `staff-${Date.now()}`, name: content.trim(), phone: '待补充手机号', role: '前台', status: '待完善' }, ...this.staff]
-						this.staff = saveMerchantStaff(next)
-						showToast('员工已添加（本地演示）')
+						try {
+							await createMerchantStaff({ name: content.trim() })
+							showToast('员工已添加，初始密码为 Admin@123456')
+							await this.loadStaff()
+						} catch (error) {
+							showToast(error?.message || '添加失败')
+						}
 					}
 				})
 			}

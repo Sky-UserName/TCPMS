@@ -6,8 +6,8 @@
 			<view class="merchant-property-main">
 				<view class="merchant-property-mark"><ProtoIcon name="house" :size="34" /></view>
 				<view class="merchant-property-copy">
-					<text class="merchant-property-name">天空之蓝</text>
-					<text class="merchant-property-sub">已入驻 · 资料状态正常</text>
+					<text class="merchant-property-name">{{ storeName }}</text>
+					<text class="merchant-property-sub">{{ storeSubtitle }}</text>
 				</view>
 			</view>
 			<button class="merchant-property-switch" hover-class="none" @tap="switchProperty">
@@ -31,7 +31,7 @@
 
 		<view class="merchant-tip">
 			<ProtoIcon name="info" :size="24" />
-			<text>商家资料、房间信息和订单数据将在服务端接入后实时同步。</text>
+			<text>门店资料、房型库存和订单数据均来自服务端，操作后会实时生效。</text>
 		</view>
 	</view>
 </template>
@@ -40,13 +40,15 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { goPage, showToast } from '@/common/prototype.js'
-	import { getMerchantOrders, getMerchantRooms } from '@/common/app-store.js'
+	import { fetchMerchantProfile } from '@/common/api.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
 		data() {
 			return {
 				pendingCount: 0,
+				storeName: '门店加载中',
+				storeSubtitle: '正在同步门店资料',
 				modules: [
 					{ key: 'finance', title: '财务统计', caption: '收入与提现', icon: 'wallet', route: '/pages/merchant/finance' },
 					{ key: 'rooms', title: '房间管理', caption: '发布与上下架', icon: 'house', route: '/pages/merchant/rooms' },
@@ -62,10 +64,19 @@
 				]
 			}
 		},
-		onShow() {
-			const orders = getMerchantOrders()
-			const rooms = getMerchantRooms()
-			this.pendingCount = orders.filter((order) => ['pending', 'stay'].includes(order.statusKey)).length + rooms.filter((room) => room.status === '草稿' || room.status === '待审核').length
+		async onShow() {
+			try {
+				const profile = await fetchMerchantProfile()
+				if (!profile || !profile.enabled) {
+					showToast('当前账号尚未绑定门店')
+					return
+				}
+				this.storeName = profile.storeName || '我的民宿'
+				this.storeSubtitle = `已入驻 · ${profile.roomCount || 0} 个房型 · ${profile.city || ''}`
+				this.pendingCount = Number(profile.pendingOrderCount || 0)
+			} catch (error) {
+				showToast(error?.message || '门店资料同步失败')
+			}
 		},
 		methods: {
 			openModule(item) {
@@ -73,13 +84,13 @@
 					goPage(item.route)
 					return
 				}
-				showToast('该功能将在商家服务接入后开放')
+				showToast('该功能暂未开放')
 			},
 			goOrders() {
 				goPage('/pages/merchant/orders')
 			},
 			switchProperty() {
-				showToast('当前仅有 1 个已入驻民宿')
+				showToast(this.storeName)
 			}
 		}
 	}

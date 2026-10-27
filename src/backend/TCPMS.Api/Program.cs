@@ -8,6 +8,7 @@ using System.Transactions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -17,7 +18,33 @@ using TCPMS.Api.Domain;
 using TCPMS.Api.Infrastructure;
 using TCPMS.Api.Services;
 
-var builder = WebApplication.CreateBuilder(args);
+// 开发环境即使从 bin 启动，也把 WebRoot 固定到项目 wwwroot；必须在创建 builder 时指定，
+// 否则上传图片会写到 bin/wwwroot，切换启动目录后全部 404。
+var environmentName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+    ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+string? developmentProjectDirectory = null;
+string? projectWebRoot = null;
+if (string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase))
+{
+    developmentProjectDirectory = StoragePaths.FindProjectDirectory();
+    if (developmentProjectDirectory is not null)
+    {
+        var candidateWebRoot = Path.Combine(developmentProjectDirectory, "wwwroot");
+        if (Directory.Exists(candidateWebRoot))
+        {
+            projectWebRoot = candidateWebRoot;
+        }
+    }
+}
+
+var builder = projectWebRoot is null
+    ? WebApplication.CreateBuilder(args)
+    : WebApplication.CreateBuilder(new WebApplicationOptions
+    {
+        Args = args,
+        WebRootPath = projectWebRoot
+    });
+
 var swaggerEnabled = builder.Configuration.GetValue(
     "Swagger:Enabled",
     builder.Environment.IsDevelopment());
@@ -154,9 +181,8 @@ builder.Services.AddSwaggerGen(options =>
     options.OperationFilter<ChineseOperationFilter>();
 });
 
-var webRootDirectory = Path.Combine(builder.Environment.ContentRootPath, "wwwroot");
-Directory.CreateDirectory(Path.Combine(webRootDirectory, "uploads", "avatars"));
 var app = builder.Build();
+Directory.CreateDirectory(StoragePaths.Uploads(app.Environment, "avatars"));
 
 if (swaggerEnabled)
 {
@@ -188,6 +214,16 @@ app.UseExceptionHandler(errorApp =>
 });
 
 app.UseStaticFiles();
+var miniappStaticDirectory = Path.GetFullPath(
+    Path.Combine(developmentProjectDirectory ?? builder.Environment.ContentRootPath, "..", "..", "TCPMS.User", "static"));
+if (Directory.Exists(miniappStaticDirectory))
+{
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(miniappStaticDirectory),
+        RequestPath = "/static"
+    });
+}
 app.UseCors("App");
 app.UseAuthentication();
 app.UseAuthorization();
@@ -603,7 +639,7 @@ auth.MapPost("/avatar", async (
         return Results.BadRequest(new ApiError("avatar_type_invalid", "头像必须是 JPG、PNG 或 WEBP 图片"));
     }
 
-    var avatarDirectoryPath = Path.Combine(environment.ContentRootPath, "wwwroot", "uploads", "avatars");
+    var avatarDirectoryPath = StoragePaths.Uploads(environment, "avatars");
     Directory.CreateDirectory(avatarDirectoryPath);
     var fileName = $"{user.Id:N}-{Guid.NewGuid():N}{extension}";
     var targetPath = Path.Combine(avatarDirectoryPath, fileName);
@@ -617,7 +653,7 @@ auth.MapPost("/avatar", async (
     user.UpdatedAt = DateTime.UtcNow;
     await db.SaveChangesAsync(cancellationToken);
 
-    DeleteStoredAvatar(oldAvatarUrl, environment.ContentRootPath);
+    DeleteStoredAvatar(oldAvatarUrl, StoragePaths.WebRoot(environment));
     return Results.Ok(ToMiniappProfile(user, request));
 }).RequireAuthorization("Miniapp");
 
@@ -738,7 +774,7 @@ stores.MapGet("/", async (
         storesData.Select(x => x.Id).ToArray(),
         cancellationToken);
     var data = storesData
-        .Select(x => ToStoreListItem(x, null, reviewCounts.GetValueOrDefault(x.Id)))
+        .Select(x => ToStoreListItem(x, null, reviewCounts.GetValueOrDefault(x.Id), includeRooms: true))
         .ToList();
     return Results.Ok(data);
 });
@@ -781,7 +817,7 @@ stores.MapGet("/nearby", async (
         .Where(x => x.distance <= maxDistance)
         .OrderBy(x => x.distance)
         .ThenBy(x => x.store.SortOrder)
-        .Select(x => ToStoreListItem(x.store, Math.Round(x.distance, 2), reviewCounts.GetValueOrDefault(x.store.Id)))
+        .Select(x => ToStoreListItem(x.store, Math.Round(x.distance, 2), reviewCounts.GetValueOrDefault(x.store.Id), includeRooms: true))
         .ToList();
     return Results.Ok(data);
 });
@@ -1038,6 +1074,7 @@ admin.MapPost("/stores", async (
         City = request.City,
         District = request.District,
         Address = request.Address,
+        StandardAddress = ComposeStandardAddress(request.Province, request.City, request.District, request.Address),
         Phone = request.Phone,
         Longitude = request.Longitude,
         Latitude = request.Latitude,
@@ -1096,6 +1133,7 @@ admin.MapPut("/stores/{id:guid}", async (
     store.City = request.City;
     store.District = request.District;
     store.Address = request.Address;
+    store.StandardAddress = ComposeStandardAddress(request.Province, request.City, request.District, request.Address);
     store.Phone = request.Phone;
     store.OwnerUsername = request.OwnerUsername;
     store.OwnerNickname = request.OwnerNickname;
@@ -1268,73 +1306,91 @@ orders.MapPost("/", async (
     }
 
     var nights = GetNights(request.CheckIn, request.CheckOut);
-    await using var transaction = db.Database.IsRelational()
-        ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
-        : null;
-
-    var inventories = await db.InventoryDailies
-        .Where(x => x.RoomTypeId == request.RoomTypeId &&
-                    x.Date >= request.CheckIn.Date &&
-                    x.Date < request.CheckOut.Date)
-        .OrderBy(x => x.Date)
-        .ToListAsync(cancellationToken);
-    if (inventories.Count != nights)
+    // Pomelo 开启了 EnableRetryOnFailure，执行策略不允许业务代码直接开事务：
+    // 原写法一进 BeginTransaction 就抛 InvalidOperationException，创建订单必然 500。
+    // 把「开事务 → 校验库存 → 锁定库存 → 落单」整体交给执行策略，由它决定是否重试。
+    var executionStrategy = db.Database.CreateExecutionStrategy();
+    return await executionStrategy.ExecuteAsync(async () =>
     {
-        return Results.Conflict(new ApiError("inventory_missing", "所选日期尚未配置库存"));
-    }
-    if (inventories.Any(x => x.AvailableQuantity < request.Quantity))
-    {
-        return Results.Conflict(new ApiError("inventory_insufficient", "所选日期库存不足"));
-    }
+        // 重试会重新执行整段委托，先清空跟踪状态，避免上一次尝试残留的实体被重复写入。
+        db.ChangeTracker.Clear();
+        await using var transaction = db.Database.IsRelational()
+            ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
+            : null;
 
-    var prices = await db.PriceCalendars
-        .Where(x => x.RoomTypeId == request.RoomTypeId &&
-                    x.Date >= request.CheckIn.Date &&
-                    x.Date < request.CheckOut.Date)
-        .ToDictionaryAsync(x => x.Date.Date, cancellationToken);
-    var dailyPrices = inventories.Select(x =>
-        prices.TryGetValue(x.Date.Date, out var price) ? price.PriceCents : roomType.BasePriceCents).ToArray();
-    var total = dailyPrices.Sum() * request.Quantity;
-
-    foreach (var inventory in inventories)
-    {
-        inventory.LockedQuantity += request.Quantity;
-        inventory.UpdatedAt = DateTime.UtcNow;
-    }
-
-    var order = new BookingOrder
-    {
-        Id = Guid.NewGuid(),
-        OrderNumber = CreateOrderNumber(),
-        WxUserId = userId.Value,
-        StoreId = request.StoreId,
-        RoomTypeId = request.RoomTypeId,
-        CheckIn = request.CheckIn.Date,
-        CheckOut = request.CheckOut.Date,
-        Quantity = request.Quantity,
-        GuestCount = request.GuestCount,
-        TotalAmountCents = total,
-        Status = OrderStatuses.PendingPayment,
-        PaymentStatus = "Unpaid",
-        GuestSnapshotJson = request.GuestSnapshotJson,
-        PriceSnapshotJson = JsonSerializer.Serialize(new
+        // 事务内重新读取房型：拿到干净的跟踪实体，同时拦住在提交瞬间被下架的情况。
+        var lockedRoomType = await db.RoomTypes.SingleOrDefaultAsync(
+            x => x.Id == request.RoomTypeId && x.StoreId == request.StoreId && x.IsPublished,
+            cancellationToken);
+        if (lockedRoomType is null)
         {
-            dailyPrices,
-            currency = "CNY",
-            nights,
-            quantity = request.Quantity
-        }),
-        PaymentExpiresAt = DateTime.UtcNow.AddMinutes(15)
-    };
-    db.BookingOrders.Add(order);
-    db.AuditLogs.Add(CreateAudit(principal, "order.create", "BookingOrder", order.Id.ToString(), order.OrderNumber));
-    await db.SaveChangesAsync(cancellationToken);
-    if (transaction is not null)
-    {
-        await transaction.CommitAsync(cancellationToken);
-    }
+            return Results.NotFound(new ApiError("room_type_not_found", "房型不存在或已下架"));
+        }
 
-    return Results.Created($"/api/v1/orders/{order.Id}", ToOrderListItem(order, roomType.Name, null));
+        var inventories = await db.InventoryDailies
+            .Where(x => x.RoomTypeId == request.RoomTypeId &&
+                        x.Date >= request.CheckIn.Date &&
+                        x.Date < request.CheckOut.Date)
+            .OrderBy(x => x.Date)
+            .ToListAsync(cancellationToken);
+        if (inventories.Count != nights)
+        {
+            return Results.Conflict(new ApiError("inventory_missing", "所选日期尚未配置库存"));
+        }
+        if (inventories.Any(x => x.AvailableQuantity < request.Quantity))
+        {
+            return Results.Conflict(new ApiError("inventory_insufficient", "所选日期库存不足"));
+        }
+
+        var prices = await db.PriceCalendars
+            .Where(x => x.RoomTypeId == request.RoomTypeId &&
+                        x.Date >= request.CheckIn.Date &&
+                        x.Date < request.CheckOut.Date)
+            .ToDictionaryAsync(x => x.Date.Date, cancellationToken);
+        var dailyPrices = inventories.Select(x =>
+            prices.TryGetValue(x.Date.Date, out var price) ? price.PriceCents : lockedRoomType.BasePriceCents).ToArray();
+        var total = dailyPrices.Sum() * request.Quantity;
+
+        foreach (var inventory in inventories)
+        {
+            inventory.LockedQuantity += request.Quantity;
+            inventory.UpdatedAt = DateTime.UtcNow;
+        }
+
+        var order = new BookingOrder
+        {
+            Id = Guid.NewGuid(),
+            OrderNumber = CreateOrderNumber(),
+            WxUserId = userId.Value,
+            StoreId = request.StoreId,
+            RoomTypeId = request.RoomTypeId,
+            CheckIn = request.CheckIn.Date,
+            CheckOut = request.CheckOut.Date,
+            Quantity = request.Quantity,
+            GuestCount = request.GuestCount,
+            TotalAmountCents = total,
+            Status = OrderStatuses.PendingPayment,
+            PaymentStatus = "Unpaid",
+            GuestSnapshotJson = request.GuestSnapshotJson,
+            PriceSnapshotJson = JsonSerializer.Serialize(new
+            {
+                dailyPrices,
+                currency = "CNY",
+                nights,
+                quantity = request.Quantity
+            }),
+            PaymentExpiresAt = DateTime.UtcNow.AddMinutes(15)
+        };
+        db.BookingOrders.Add(order);
+        db.AuditLogs.Add(CreateAudit(principal, "order.create", "BookingOrder", order.Id.ToString(), order.OrderNumber));
+        await db.SaveChangesAsync(cancellationToken);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        return Results.Created($"/api/v1/orders/{order.Id}", ToOrderListItem(order, lockedRoomType.Name, null));
+    });
 });
 
 orders.MapGet("/me", async (
@@ -1853,8 +1909,10 @@ adminOrders.MapPost("/{id:guid}/check-out", async (
 
 AdminEndpoints.Map(admin);
 MiniappOrderEndpoints.Map(orders);
+MiniappAccountEndpoints.Map(api);
+MerchantEndpoints.Map(api);
 
-static StoreListItem ToStoreListItem(Store store, double? distanceKm, int reviewCount = 0)
+static StoreListItem ToStoreListItem(Store store, double? distanceKm, int reviewCount = 0, bool includeRooms = false)
 {
     var featuredRoom = store.RoomTypes
         .Where(x => x.IsPublished)
@@ -1867,6 +1925,16 @@ static StoreListItem ToStoreListItem(Store store, double? distanceKm, int review
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .Take(8)
         .ToArray();
+    // 首页「本地热门精选」直接展示房型卡片，列表接口按需带上在售房型，避免前端逐个门店再请求详情。
+    var rooms = includeRooms
+        ? store.RoomTypes
+            .Where(x => x.IsPublished)
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.BasePriceCents)
+            .Take(6)
+            .Select(ToRoomTypeSummary)
+            .ToArray()
+        : null;
 
     return new StoreListItem(
         store.Id,
@@ -1891,7 +1959,8 @@ static StoreListItem ToStoreListItem(Store store, double? distanceKm, int review
         featuredRoom?.Name,
         reviewCount,
         tags,
-        store.Description);
+        store.Description,
+        rooms);
 }
 
 static RoomTypeSummary ToRoomTypeSummary(RoomType roomType)
@@ -2103,7 +2172,7 @@ static async Task<string?> DetectImageExtensionAsync(
     return null;
 }
 
-static void DeleteStoredAvatar(string? avatarUrl, string contentRootPath)
+static void DeleteStoredAvatar(string? avatarUrl, string webRootPath)
 {
     if (string.IsNullOrWhiteSpace(avatarUrl))
     {
@@ -2120,13 +2189,11 @@ static void DeleteStoredAvatar(string? avatarUrl, string contentRootPath)
     }
 
     var avatarRoot = Path.GetFullPath(Path.Combine(
-        contentRootPath,
-        "wwwroot",
+        webRootPath,
         "uploads",
         "avatars"));
     var candidate = Path.GetFullPath(Path.Combine(
-        contentRootPath,
-        "wwwroot",
+        webRootPath,
         avatarUrl.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
     var rootWithSeparator = avatarRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
     if (!candidate.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase))
@@ -2145,6 +2212,31 @@ static void DeleteStoredAvatar(string? avatarUrl, string contentRootPath)
     {
         // A stale avatar file should not make a successful profile update fail.
     }
+}
+
+// 管理后台保存门店时，把省市区和详细地址拼成对外展示的标准地址。
+// 门店列表和小程序详情展示的都是 StandardAddress，若不维护它会一直停留在申请时的旧地址。
+static string? ComposeStandardAddress(string? province, string? city, string? district, string? address)
+{
+    var detail = address?.Trim();
+    if (string.IsNullOrEmpty(detail)) return null;
+
+    var provinceValue = province?.Trim();
+    // 地图选点回填的是完整地址（省市区开头），直接用即可，避免重复拼接。
+    if (!string.IsNullOrEmpty(provinceValue) &&
+        detail.StartsWith(provinceValue, StringComparison.Ordinal))
+    {
+        return detail;
+    }
+
+    var prefix = string.Empty;
+    foreach (var part in new[] { provinceValue, city?.Trim(), district?.Trim() })
+    {
+        if (string.IsNullOrEmpty(part) || prefix.EndsWith(part, StringComparison.Ordinal)) continue;
+        prefix += part;
+    }
+
+    return string.IsNullOrEmpty(prefix) ? detail : prefix + detail;
 }
 
 static void ApplyGeoResult(Store store, GeoResult result, string source)

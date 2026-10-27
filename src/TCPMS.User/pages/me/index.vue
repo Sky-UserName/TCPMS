@@ -65,8 +65,13 @@
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { goPage, goTab, prototypeImages, showToast } from '@/common/prototype.js'
-	import { getApiToken, getFavorites, getGuests, getMerchantProfile, getOrders, getProfile, isLoggedIn, logout, setLoggedIn } from '@/common/app-store.js'
-	import { fetchMerchantPermissionMenus, fetchMiniappProfile, fetchRemoteOrders } from '@/common/api.js'
+	import { getApiToken, getGuests, getMerchantProfile, getOrders, getProfile, isLoggedIn, logout, saveMerchantProfile, setLoggedIn } from '@/common/app-store.js'
+	import { IS_DEV_BUILD } from '@/common/env.js'
+	import { fetchMerchantPermissionMenus, fetchMerchantProfile, fetchMiniappProfile, fetchMySummary, fetchRemoteOrders } from '@/common/api.js'
+
+	// 个人中心「民宿管理」不展示的入口：发布房源、订阅消息。
+	const HIDDEN_MERCHANT_MENU_KEYS = ['publish', 'subscriptions']
+	const HIDDEN_MERCHANT_MENU_ROUTES = ['/pages/merchant/publish', '/pages/merchant/messages']
 
 	export default {
 		components: { ProtoBottomNav, ProtoIcon },
@@ -92,23 +97,23 @@
 				ordersSyncError: false,
 				merchant: getMerchantProfile(),
 				guests: [],
-				favoriteCount: 0,
 				orderShortcuts: [
 					{ key: 'all', label: '全部', icon: 'wallet', badge: '' },
-					{ key: 'pay', label: '待付款', icon: 'clock', badge: '1' },
-					{ key: 'stay', label: '可使用', icon: 'receipt', badge: '1' },
-					{ key: 'done', label: '已使用', icon: 'check-circle', badge: '1' },
-					{ key: 'refund', label: '取消/退款', icon: 'refresh', badge: '1' }
+					{ key: 'pay', label: '待付款', icon: 'clock', badge: '' },
+					{ key: 'stay', label: '可使用', icon: 'receipt', badge: '' },
+					{ key: 'done', label: '已使用', icon: 'check-circle', badge: '' },
+					{ key: 'refund', label: '取消/退款', icon: 'refresh', badge: '' }
 				],
 				featureEntries: [
 					{ title: '入驻申请', icon: 'store', action: 'apply' },
 					{ title: '在线客服', icon: 'support', route: '/pages/service/contact' },
+					...(IS_DEV_BUILD ? [{ title: '清除本地缓存', icon: 'refresh', action: 'clearLocal' }] : []),
 					{ title: '退出登录', icon: 'refresh', action: 'logout' }
 				],
 				merchantEntries: [],
 				merchantMenuError: false,
 				travelEntries: [
-					{ title: '常用入住人', desc: '已登记2位常住人信息，免重复输入', icon: 'group', route: '/pages/me/guests' },
+					{ title: '常用入住人', desc: '添加常用入住人，预订时免重复输入', icon: 'group', route: '/pages/me/guests' },
 					{ title: '我的发票抬头', desc: '增值税电子普通/专用发票抬头管理', icon: 'document', action: 'invoice' }
 				],
 				serviceEntries: [
@@ -118,7 +123,7 @@
 				],
 				policyEntries: [
 					{ title: '用户服务协议', desc: '', icon: 'document', route: '/pages/rule/index' },
-					{ title: '隐私政策与授权权限', desc: '', icon: 'shield', route: '/pages/rule/index' },
+					{ title: '用户隐私手册', desc: '', icon: 'shield', route: '/pages/rule/index?tab=privacy' },
 					{ title: '关于 TCPMS 智选旅宿', desc: '', icon: 'info', version: 'v2.4.1', message: 'TCPMS 智选旅宿小程序' }
 				]
 			}
@@ -127,16 +132,6 @@
 			visibleFeatureEntries() {
 				const merchantApproved = this.loggedIn && this.merchant.enabled && this.merchant.status === 'approved'
 				return merchantApproved ? this.featureEntries.filter((item) => item.action !== 'apply') : this.featureEntries
-			},
-			stats() {
-				const completedNights = this.orders
-					.filter((order) => order.statusKey === 'done')
-					.reduce((total, order) => total + Number(order.nights || 1), 0)
-				return [
-					{ value: '1,280', label: '旅宿积分' },
-					{ value: String(completedNights), label: '入住天数' },
-					{ value: String(this.favoriteCount), label: '收藏门店' }
-				]
 			},
 			todayOrder() {
 				return this.orders.find((order) => order.statusKey === 'stay' || order.statusKey === 'pay')
@@ -149,10 +144,41 @@
 			uni.hideTabBar({ animation: false, fail: () => {} })
 			this.refreshData()
 			await this.refreshMiniappProfile()
+			await this.refreshAccount()
 			this.loadMerchantEntries()
 			this.refreshRemoteOrders()
 		},
 		methods: {
+			async refreshAccount() {
+				if (!getApiToken()) return
+				try {
+					const [profile, summary] = await Promise.all([fetchMerchantProfile(), fetchMySummary()])
+					if (profile) {
+						this.merchant = {
+							...this.merchant,
+							enabled: Boolean(profile.enabled),
+							status: profile.status || 'unapplied',
+							storeId: profile.storeId || '',
+							storeName: profile.storeName || '',
+							role: profile.role || '',
+							roomCount: Number(profile.roomCount || 0),
+							pendingOrderCount: Number(profile.pendingOrderCount || 0)
+						}
+						saveMerchantProfile(this.merchant)
+					}
+					if (summary) {
+						const guestCount = Number(summary.guestCount || 0)
+						const guestEntry = this.travelEntries.find((item) => item.title === '常用入住人')
+						if (guestEntry) {
+							guestEntry.desc = guestCount
+								? `已登记${guestCount}位常入住人，预订时免重复输入`
+								: '添加常用入住人，预订时免重复输入'
+						}
+					}
+				} catch (error) {
+					// 接口异常时保留上一次缓存，不阻塞个人中心其他数据。
+				}
+			},
 			async refreshMiniappProfile() {
 				if (!getApiToken()) return
 				try {
@@ -184,6 +210,7 @@
 					const items = await fetchMerchantPermissionMenus()
 					this.merchantEntries = items
 						.filter((item) => item.key && item.title && /^\/pages\/[A-Za-z0-9/_-]+$/.test(item.route || ''))
+						.filter((item) => !HIDDEN_MERCHANT_MENU_KEYS.includes(item.key) && !HIDDEN_MERCHANT_MENU_ROUTES.includes(item.route))
 						.map((item) => ({ ...item, icon: item.iconKey || 'store', iconUrl: item.iconUrl || '' }))
 				} catch (error) {
 					this.merchantEntries = []
@@ -197,7 +224,6 @@
 				this.orders = Array.isArray(remoteOrders) ? remoteOrders : getOrders()
 				this.merchant = getMerchantProfile()
 				this.guests = getGuests()
-				this.favoriteCount = getFavorites().length
 				this.orderShortcuts = [
 					{ key: 'all', label: '全部', icon: 'wallet', badge: String(this.orders.length) },
 					{ key: 'pay', label: '待付款', icon: 'clock', badge: String(this.orders.filter((order) => order.statusKey === 'pay').length) },
@@ -232,6 +258,23 @@
 					this.applyMerchant()
 					return
 				}
+				if (item.action === 'clearLocal') {
+					uni.showModal({
+						title: '清除本地缓存',
+						content: '会清空本地订单、收藏、常用入住人和登录状态，服务端数据不受影响。',
+						confirmText: '清除',
+						success: (result) => {
+							if (!result.confirm) return
+							try {
+								uni.clearStorageSync()
+							} catch (error) {
+								// 清缓存失败时保持页面不变，避免误导用户。
+							}
+							uni.reLaunch({ url: '/pages/index/index' })
+						}
+					})
+					return
+				}
 				showToast('功能即将开放')
 			},
 			applyMerchant() {
@@ -239,7 +282,7 @@
 					this.goLogin()
 					return
 				}
-				showToast('商家入驻申请接口尚未接入，请联系平台处理')
+				goPage('/pages/merchant/apply')
 			},
 			handleMerchantEntry(item) {
 				if (item.disabled) {
@@ -312,368 +355,7 @@
 		padding-bottom: calc(136rpx + env(safe-area-inset-bottom));
 	}
 
-	.profile-card {
-		position: relative;
-		display: flex;
-		align-items: flex-start;
-		gap: 14rpx;
-		min-height: 160rpx;
-	}
 
-	.profile-card > image {
-		width: 112rpx;
-		height: 112rpx;
-		border: 5rpx solid #8debf2;
-		border-radius: 50%;
-	}
-
-	.profile-main {
-		flex: 1;
-		min-width: 0;
-	}
-
-	.profile-name-row {
-		display: flex;
-		align-items: center;
-		gap: 10rpx;
-	}
-
-	.profile-name {
-		color: var(--proto-text);
-		font-size: 37rpx;
-		font-weight: 850;
-	}
-
-	.profile-name-row .proto-pill {
-		min-height: 34rpx;
-		padding: 0 10rpx;
-		font-size: 17rpx;
-	}
-
-	.profile-uid,
-	.profile-medal {
-		display: block;
-		margin-top: 7rpx;
-		color: var(--proto-muted);
-		font-size: 19rpx;
-	}
-
-	.profile-medal {
-		display: flex;
-		align-items: center;
-		color: var(--proto-primary-dark);
-	}
-
-	.profile-medal .proto-icon {
-		margin-right: 5rpx;
-	}
-
-	.profile-tools {
-		display: flex;
-		gap: 8rpx;
-	}
-
-	.profile-tools button {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 58rpx;
-		height: 58rpx;
-		padding: 0;
-		color: var(--proto-primary-dark);
-		background: var(--proto-surface-low);
-		border-radius: 50%;
-		font-size: 28rpx;
-	}
-
-	.member-progress {
-		position: absolute;
-		right: 24rpx;
-		bottom: 18rpx;
-		left: 24rpx;
-		display: flex;
-		justify-content: space-between;
-		padding: 14rpx 18rpx;
-		color: var(--proto-text);
-		background: var(--proto-surface-low);
-		border-radius: 18rpx;
-		font-size: 19rpx;
-	}
-
-	.member-progress > view {
-		display: flex;
-		align-items: center;
-	}
-
-	.member-progress .proto-icon {
-		margin-right: 5rpx;
-	}
-
-	.member-progress .proto-link {
-		display: flex;
-		align-items: center;
-	}
-
-	.guest-profile {
-		flex-direction: row;
-		align-items: center;
-	}
-
-	.guest-avatar {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 100rpx;
-		height: 100rpx;
-		color: var(--proto-primary-dark);
-		background: var(--proto-surface-tint);
-		border-radius: 50%;
-	}
-
-	.guest-profile .profile-name {
-		font-size: 27rpx;
-	}
-
-	.guest-profile .proto-button-small {
-		width: auto;
-		min-width: 0;
-		flex: 0 0 auto;
-		height: 60rpx;
-		padding: 0 16rpx;
-		font-size: 18rpx;
-	}
-
-	.stats-card {
-		display: flex !important;
-		flex-direction: row;
-		flex-wrap: nowrap;
-		align-items: stretch;
-		gap: 10rpx;
-		text-align: center;
-	}
-
-	.stats-card > view {
-		display: flex;
-		flex-direction: column;
-		flex: 1 1 0;
-		width: 0;
-		min-width: 0;
-	}
-
-	.stats-card .strong {
-		color: var(--proto-primary-dark);
-		font-size: 30rpx;
-		font-weight: 800;
-	}
-
-	.stats-card text {
-		margin-top: 8rpx;
-		color: var(--proto-text);
-		font-size: 18rpx;
-	}
-
-	.my-order-card,
-	.me-section {
-		padding: 24rpx;
-	}
-
-	.section-heading {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		color: var(--proto-text);
-		font-size: 27rpx;
-		font-weight: 800;
-	}
-
-	.section-heading > text:first-child::before {
-		display: inline-block;
-		width: 8rpx;
-		height: 28rpx;
-		margin-right: 10rpx;
-		background: var(--proto-primary);
-		border-radius: 6rpx;
-		content: "";
-		vertical-align: -4rpx;
-	}
-
-	.section-heading .proto-link {
-		display: flex;
-		align-items: center;
-		color: var(--proto-muted);
-		font-size: 19rpx;
-		font-weight: 400;
-	}
-
-	.section-heading .proto-link .proto-icon {
-		margin-left: 3rpx;
-	}
-
-	.order-shortcuts {
-		display: flex !important;
-		flex-direction: row;
-		flex-wrap: nowrap;
-		gap: 10rpx;
-		margin-top: 22rpx;
-	}
-
-	.order-shortcuts > view {
-		position: relative;
-		display: flex;
-		align-items: center;
-		flex-direction: column;
-		flex: 1 1 0;
-		width: 0;
-		min-width: 0;
-		color: var(--proto-text);
-		font-size: 19rpx;
-	}
-
-	.shortcut-icon {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 62rpx;
-		height: 62rpx;
-		margin-bottom: 10rpx;
-		color: var(--proto-primary-dark);
-		background: var(--proto-surface-low);
-		border-radius: 16rpx;
-		font-size: 31rpx;
-	}
-
-	.shortcut-badge {
-		position: absolute;
-		top: -8rpx;
-		right: 18rpx;
-		min-width: 28rpx;
-		height: 28rpx;
-		padding: 0 6rpx;
-		color: #ffffff;
-		background: var(--proto-error);
-		border-radius: 14rpx;
-		font-size: 16rpx;
-		line-height: 28rpx;
-		text-align: center;
-	}
-
-	.today-order {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-top: 22rpx;
-		padding: 14rpx 16rpx;
-		color: var(--proto-text);
-		background: var(--proto-surface-low);
-		border-radius: 16rpx;
-		font-size: 19rpx;
-	}
-
-	.today-order > view {
-		display: flex;
-		align-items: center;
-		min-width: 0;
-	}
-
-	.today-order > view > text {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.today-order > view .proto-icon {
-		flex: 0 0 auto;
-		margin-right: 5rpx;
-	}
-
-	.today-order .proto-button-small {
-		height: 48rpx;
-		padding: 0 14rpx;
-		font-size: 17rpx;
-	}
-
-	.section-label {
-		display: block;
-		margin-bottom: 8rpx;
-		color: var(--proto-muted);
-		font-size: 23rpx;
-		font-weight: 750;
-	}
-
-	.me-entry {
-		display: flex;
-		align-items: center;
-		gap: 14rpx;
-		padding: 20rpx 0;
-	}
-
-	.me-entry + .me-entry {
-		border-top: 1rpx solid #e3ebec;
-	}
-
-	.entry-icon {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 58rpx;
-		height: 58rpx;
-		color: var(--proto-primary-dark);
-		background: var(--proto-surface-tint);
-		border-radius: 18rpx;
-		font-size: 31rpx;
-	}
-
-	.me-entry > view {
-		flex: 1;
-	}
-
-	.entry-title,
-	.entry-desc {
-		display: block;
-	}
-
-	.entry-title {
-		color: var(--proto-text);
-		font-size: 25rpx;
-	}
-
-	.entry-desc {
-		margin-top: 5rpx;
-		color: var(--proto-muted);
-		font-size: 18rpx;
-	}
-
-	.entry-arrow,
-	.entry-version {
-		color: var(--proto-muted);
-	}
-
-	.entry-version {
-		font-size: 18rpx;
-	}
-
-	.me-footer {
-		display: flex;
-		align-items: center;
-		flex-direction: column;
-		gap: 8rpx;
-		padding: 18rpx 28rpx 58rpx;
-		color: var(--proto-muted);
-		font-size: 17rpx;
-		text-align: center;
-	}
-
-	.footer-brand {
-		display: flex;
-		align-items: center;
-		color: var(--proto-primary-dark);
-		font-size: 23rpx;
-		font-weight: 750;
-	}
-
-	.footer-brand .proto-icon {
-		margin-right: 5rpx;
-	}
 </style>
 
 <style lang="scss" scoped>

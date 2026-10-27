@@ -3,7 +3,7 @@
 		<ProtoHeader title="财务统计" theme="green" />
 
 		<view class="finance-wallet">
-			<view class="finance-wallet-heading"><view><text class="finance-property">天空之蓝</text><ProtoIcon name="chevron-down" :size="22" /></view><button hover-class="none" @tap="withdraw">提现</button></view>
+			<view class="finance-wallet-heading"><view><text class="finance-property">{{ storeName }}</text><ProtoIcon name="chevron-down" :size="22" /></view><button hover-class="none" @tap="withdraw">提现</button></view>
 			<text class="finance-total">¥{{ orderStats.totalAmount.toFixed(2) }}</text>
 			<text class="finance-total-label">累计金额</text>
 			<view class="finance-wallet-grid">
@@ -13,13 +13,11 @@
 
 		<view class="finance-section-title"><text>经营概览</text><text>数据实时同步</text></view>
 		<view v-for="section in sections" :key="section.title" class="finance-data-card proto-card">
-			<view class="finance-card-heading"><text>{{ section.title }}</text><text v-if="section.more" class="finance-more" @tap="openDetail(section)">更多 <ProtoIcon name="chevron-right" :size="20" /></text></view>
+			<view class="finance-card-heading"><text>{{ section.title }}</text><view v-if="section.more" class="finance-more" @tap="openDetail(section)"><text>更多</text><ProtoIcon name="chevron-right" :size="20" /></view></view>
 			<view class="finance-metric-grid">
 				<view v-for="metric in section.metrics" :key="metric.label" class="finance-metric"><text class="finance-metric-value" :class="{ money: metric.money }">{{ metric.value }}</text><text class="finance-metric-label">{{ metric.label }}</text></view>
 			</view>
 		</view>
-
-		<view class="finance-footnote"><ProtoIcon name="info" :size="22" /><text>当前为演示数据，服务端接入后将展示真实结算信息。</text></view>
 	</view>
 </template>
 
@@ -27,64 +25,94 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { showToast } from '@/common/prototype.js'
-	import { getMerchantOrders } from '@/common/app-store.js'
+	import { createMerchantWithdrawal, fetchMerchantFinance, fetchMerchantProfile } from '@/common/api.js'
+
+	const yuan = (cents) => (Number(cents || 0) / 100).toFixed(2)
+
+	const metricSection = (title, metric, more) => ({
+		title,
+		more,
+		metrics: [
+			{ value: String(metric.pendingCount || 0), label: '待使用订单' },
+			{ value: String(metric.doneCount || 0), label: '核销订单' },
+			{ value: String(metric.cancelCount || 0), label: '取消订单' },
+			{ value: `¥${yuan(metric.pendingAmountCents)}`, label: '待使用金额', money: true },
+			{ value: `¥${yuan(metric.doneAmountCents)}`, label: '核销订单金额', money: true },
+			{ value: `¥${yuan(metric.cancelAmountCents)}`, label: '取消订单金额', money: true }
+		]
+	})
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
 		data() {
 			return {
-				orders: []
+				storeName: '我的民宿',
+				finance: {
+					all: {},
+					wallet: { frozenCents: 0, availableCents: 0, withdrawnCents: 0, cancelledCents: 0 }
+				}
 			}
 		},
 		computed: {
 			orderStats() {
-				const amount = (order) => Number(order.amount || order.price || 0)
-				const count = (keys) => this.orders.filter((order) => keys.includes(order.statusKey)).length
-				const sum = (keys) => this.orders.filter((order) => keys.includes(order.statusKey)).reduce((total, order) => total + amount(order), 0)
+				const all = this.finance.all || {}
 				return {
-					pending: count(['pending', 'stay']),
-					done: count(['done']),
-					cancel: count(['cancel', 'refund']),
-					pendingAmount: sum(['pending', 'stay']),
-					doneAmount: sum(['done']),
-					cancelAmount: sum(['cancel', 'refund']),
-					totalAmount: this.orders.reduce((total, order) => total + amount(order), 0)
+					pending: Number(all.pendingCount || 0),
+					done: Number(all.doneCount || 0),
+					cancel: Number(all.cancelCount || 0),
+					pendingAmount: Number(all.pendingAmountCents || 0) / 100,
+					doneAmount: Number(all.doneAmountCents || 0) / 100,
+					cancelAmount: Number(all.cancelAmountCents || 0) / 100,
+					totalAmount: Number(all.totalAmountCents || 0) / 100
 				}
 			},
 			walletItems() {
+				const wallet = this.finance.wallet || {}
 				return [
-					{ value: `¥${this.orderStats.pendingAmount.toFixed(2)}`, label: '冻结中' },
-					{ value: `¥${this.orderStats.doneAmount.toFixed(2)}`, label: '可提现' },
-					{ value: '¥0.00', label: '已提现' },
-					{ value: `¥${this.orderStats.cancelAmount.toFixed(2)}`, label: '已取消' }
+					{ value: `¥${yuan(wallet.frozenCents)}`, label: '冻结中' },
+					{ value: `¥${yuan(wallet.availableCents)}`, label: '可提现' },
+					{ value: `¥${yuan(wallet.withdrawnCents)}`, label: '已提现' },
+					{ value: `¥${yuan(wallet.cancelledCents)}`, label: '已取消' }
 				]
 			},
 			sections() {
-				const metrics = () => [
-					{ value: String(this.orderStats.pending), label: '待使用订单' },
-					{ value: String(this.orderStats.done), label: '核销订单' },
-					{ value: String(this.orderStats.cancel), label: '取消订单' },
-					{ value: `¥${this.orderStats.pendingAmount.toFixed(2)}`, label: '待使用金额', money: true },
-					{ value: `¥${this.orderStats.doneAmount.toFixed(2)}`, label: '核销订单金额', money: true },
-					{ value: `¥${this.orderStats.cancelAmount.toFixed(2)}`, label: '取消订单金额', money: true }
-				]
 				return [
-					{ title: '今日数据', more: false, metrics: metrics() },
-					{ title: '近7天数据', more: true, metrics: metrics() },
-					{ title: '近30天数据', more: true, metrics: metrics() },
-					{ title: '全部数据', more: true, metrics: metrics() }
+					metricSection('今日数据', this.finance.today || {}, false),
+					metricSection('近7天数据', this.finance.days7 || {}, true),
+					metricSection('近30天数据', this.finance.days30 || {}, true),
+					metricSection('全部数据', this.finance.all || {}, true)
 				]
 			}
 		},
-		onShow() {
-			this.orders = getMerchantOrders()
+		async onShow() {
+			await this.loadFinance()
 		},
 		methods: {
-			withdraw() {
-				showToast('提现功能将在结算账户接入后开放')
+			async loadFinance() {
+				try {
+					const [profile, finance] = await Promise.all([fetchMerchantProfile(), fetchMerchantFinance()])
+					if (profile?.storeName) this.storeName = profile.storeName
+					this.finance = finance || this.finance
+				} catch (error) {
+					showToast(error?.message || '财务数据加载失败')
+				}
+			},
+			async withdraw() {
+				const available = Number((this.finance.wallet || {}).availableCents || 0)
+				if (available <= 0) {
+					showToast('暂无可提现余额')
+					return
+				}
+				try {
+					await createMerchantWithdrawal(available, this.storeName)
+					showToast(`已提交提现 ¥${yuan(available)}，等待审核`)
+					await this.loadFinance()
+				} catch (error) {
+					showToast(error?.message || '提现申请失败')
+				}
 			},
 			openDetail(section) {
-				showToast(`${section.title}明细将在数据接入后开放`)
+				showToast(`${section.title}由服务端按订单创建时间统计`)
 			}
 		}
 	}
@@ -105,9 +133,9 @@
 		margin: 22rpx 24rpx 28rpx;
 		padding: 28rpx 28rpx 24rpx;
 		color: #ffffff;
-		background: var(--proto-primary-deep);
+		background: #2aa9a9;
 		border-radius: 26rpx;
-		box-shadow: 0 14rpx 28rpx rgba(24, 133, 143, 0.18);
+		box-shadow: 0 14rpx 28rpx rgba(42, 169, 169, 0.26);
 	}
 
 	.finance-wallet-heading,
@@ -132,14 +160,19 @@
 	}
 
 	.finance-wallet-heading button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		flex: 0 0 auto;
 		width: 136rpx;
 		height: 58rpx;
-		color: var(--proto-primary-dark);
+		padding: 0;
+		color: #006a6a;
 		background: #ffffff;
 		border-radius: 30rpx;
 		font-size: 22rpx;
-		font-weight: 750;
+		font-weight: 700;
+		line-height: 1;
 		white-space: nowrap;
 	}
 
@@ -191,13 +224,13 @@
 	}
 
 	.finance-section-title > text:first-child {
-		color: var(--proto-text);
+		color: var(--proto-text, #20252b);
 		font-size: 29rpx;
 		font-weight: 800;
 	}
 
 	.finance-section-title > text:last-child {
-		color: var(--proto-muted);
+		color: var(--proto-muted, #6f8085);
 		font-size: 18rpx;
 	}
 
@@ -210,7 +243,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		color: var(--proto-text);
+		color: var(--proto-text, #20252b);
 		font-size: 27rpx;
 		font-weight: 750;
 	}
@@ -218,7 +251,7 @@
 	.finance-more {
 		display: flex;
 		align-items: center;
-		color: var(--proto-primary-dark);
+		color: var(--proto-primary-dark, #006a6a);
 		font-size: 19rpx;
 		font-weight: 500;
 		white-space: nowrap;
@@ -240,35 +273,21 @@
 	}
 
 	.finance-metric-value {
-		color: var(--proto-text);
+		color: var(--proto-text, #20252b);
 		font-size: 34rpx;
 		font-weight: 800;
 	}
 
 	.finance-metric-value.money {
-		color: var(--proto-primary-dark);
+		color: #d9363e;
 		font-size: 28rpx;
 	}
 
 	.finance-metric-label {
 		margin-top: 7rpx;
-		color: var(--proto-muted);
+		color: var(--proto-muted, #6f8085);
 		font-size: 18rpx;
 		white-space: nowrap;
 		text-align: center;
-	}
-
-	.finance-footnote {
-		display: flex;
-		align-items: flex-start;
-		gap: 8rpx;
-		margin: 22rpx 30rpx;
-		color: var(--proto-muted);
-		font-size: 18rpx;
-		line-height: 1.5;
-	}
-
-	.finance-footnote .proto-icon {
-		flex: 0 0 auto;
 	}
 </style>

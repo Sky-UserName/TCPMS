@@ -93,8 +93,9 @@
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
-	import { demoStores, goPage, showToast } from '@/common/prototype.js'
+	import { demoStores, showToast } from '@/common/prototype.js'
 	import { fetchStores, fetchNearbyStores } from '@/common/api.js'
+	import { openStoreRoom } from '@/common/navigation.js'
 	import { isAmapReady, reverseGeocode, searchPlaces } from '@/common/amap.js'
 	import { ALLOW_DEMO_DATA } from '@/common/env.js'
 
@@ -287,7 +288,7 @@
 			},
 			goDetail() {
 				if (!this.selectedStore) return
-				goPage(`/pages/store/detail?id=${this.selectedStore.id}`)
+				openStoreRoom(this.selectedStore)
 			},
 			callStore() {
 				const phoneNumber = (this.selectedStore && this.selectedStore.phone) || '037188886622'
@@ -438,40 +439,6 @@
 		margin-left: 8rpx;
 	}
 
-	.map-state {
-		display: flex;
-		align-items: center;
-		flex-direction: column;
-		justify-content: center;
-		height: 820rpx;
-		padding: 40rpx;
-		background: #e9eff0;
-		text-align: center;
-	}
-
-	.map-state-icon {
-		color: var(--proto-primary);
-		font-size: 86rpx;
-	}
-
-	.map-state-title {
-		margin-top: 22rpx;
-		color: var(--proto-text);
-		font-size: 28rpx;
-		font-weight: 750;
-	}
-
-	.map-state-desc {
-		max-width: 560rpx;
-		margin-top: 12rpx;
-		color: var(--proto-muted);
-		font-size: 21rpx;
-		line-height: 1.5;
-	}
-
-	.map-state button {
-		margin-top: 24rpx;
-	}
 
 	.map-canvas {
 		position: relative;

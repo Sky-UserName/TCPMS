@@ -39,13 +39,133 @@ public static class AdminEndpoints
         MapStoreStaff(admin);
         MapPermissionMenus(admin);
         MapSubscriptionMessages(admin);
+        MapUploads(admin);
         MapManagedItems(admin);
         MapWithdrawals(admin);
         MapRegions(admin);
         MapStatistics(admin);
         MapNotifications(admin);
         MapIntegrations(admin);
+        MapGeo(admin);
         MapAuditLogs(admin);
+    }
+
+    private static void MapGeo(RouteGroupBuilder admin)
+    {
+        // 地图选点只需要解析结果，等管理员保存门店时再写库，避免取消编辑也改了门店资料。
+        admin.MapPost("/geo/geocode", async (
+            GeocodeRequest request,
+            AmapService amapService,
+            ClaimsPrincipal principal,
+            CancellationToken cancellationToken) =>
+        {
+            if (!CanManageStoreProfile(principal))
+            {
+                return Results.Forbid();
+            }
+            if (string.IsNullOrWhiteSpace(request.Address))
+            {
+                return Results.BadRequest(new ApiError("address_required", "地址不能为空"));
+            }
+
+            try
+            {
+                var result = await amapService.GeocodeAsync(request.Address.Trim(), request.City, cancellationToken);
+                if (result is null)
+                {
+                    return Results.BadRequest(new ApiError("geocode_empty", "高德未找到匹配地址"));
+                }
+
+                return Results.Ok(ToGeoLookupResponse(result));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Json(new ApiError("amap_unavailable", ex.Message), statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        });
+
+        admin.MapPost("/geo/reverse", async (
+            ReverseGeocodeRequest request,
+            AmapService amapService,
+            ClaimsPrincipal principal,
+            CancellationToken cancellationToken) =>
+        {
+            if (!CanManageStoreProfile(principal))
+            {
+                return Results.Forbid();
+            }
+
+            try
+            {
+                var result = await amapService.ReverseGeocodeAsync(request.Longitude, request.Latitude, cancellationToken);
+                if (result is null)
+                {
+                    return Results.BadRequest(new ApiError("reverse_geocode_empty", "高德未解析出该坐标的地址"));
+                }
+
+                return Results.Ok(ToGeoLookupResponse(result));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Json(new ApiError("amap_unavailable", ex.Message), statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        });
+    }
+
+    private static GeoLookupResponse ToGeoLookupResponse(GeoResult result) =>
+        new(result.Longitude, result.Latitude, result.FormattedAddress, result.Province, result.City, result.District);
+
+    private static void MapUploads(RouteGroupBuilder admin)
+    {
+        admin.MapPost("/uploads/carousel", async (
+            ClaimsPrincipal principal,
+            IWebHostEnvironment environment,
+            HttpRequest request,
+            CancellationToken cancellationToken) =>
+        {
+            if (!CanManageConfiguration(principal))
+            {
+                return Results.Forbid();
+            }
+
+            IFormFile? file;
+            try
+            {
+                var form = await request.ReadFormAsync(cancellationToken);
+                file = form.Files.GetFile("file");
+            }
+            catch (InvalidDataException)
+            {
+                return Results.BadRequest(new ApiError("carousel_image_invalid", "图片上传内容无效"));
+            }
+
+            if (file is null || file.Length <= 0)
+            {
+                return Results.BadRequest(new ApiError("carousel_image_required", "请选择轮播图文件"));
+            }
+            if (file.Length > 10 * 1024 * 1024)
+            {
+                return Results.BadRequest(new ApiError("carousel_image_too_large", "轮播图不能超过 10MB"));
+            }
+
+            var extension = await DetectImageExtensionAsync(file, cancellationToken);
+            if (extension is null)
+            {
+                return Results.BadRequest(new ApiError("carousel_image_type_invalid", "轮播图必须是 JPG、PNG 或 WEBP 图片"));
+            }
+
+            var directoryPath = StoragePaths.Uploads(environment, "carousel");
+            Directory.CreateDirectory(directoryPath);
+            var fileName = $"{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}{extension}";
+            var targetPath = Path.Combine(directoryPath, fileName);
+            await using (var stream = new FileStream(targetPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                await file.CopyToAsync(stream, cancellationToken);
+            }
+
+            var url = $"{request.Scheme}://{request.Host}/uploads/carousel/{fileName}";
+            return Results.Ok(new { url, fileName, size = file.Length });
+        });
     }
 
     private static void MapIntegrations(RouteGroupBuilder admin)
@@ -4298,6 +4418,34 @@ public static class AdminEndpoints
             ResourceId = resourceId,
             Summary = summary
         };
+    }
+
+    private static async Task<string?> DetectImageExtensionAsync(
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        var header = new byte[12];
+        await using var stream = file.OpenReadStream();
+        var read = await stream.ReadAsync(header.AsMemory(0, header.Length), cancellationToken);
+
+        if (read >= 3 && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF)
+        {
+            return ".jpg";
+        }
+        if (read >= 8 &&
+            header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 &&
+            header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A)
+        {
+            return ".png";
+        }
+        if (read >= 12 &&
+            header[0] == (byte)'R' && header[1] == (byte)'I' && header[2] == (byte)'F' && header[3] == (byte)'F' &&
+            header[8] == (byte)'W' && header[9] == (byte)'E' && header[10] == (byte)'B' && header[11] == (byte)'P')
+        {
+            return ".webp";
+        }
+
+        return null;
     }
 
     private static Guid? GetUserId(ClaimsPrincipal principal)

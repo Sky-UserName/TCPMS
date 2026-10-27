@@ -1,6 +1,6 @@
 <template>
-	<view class="proto-page guests-page">
-		<ProtoHeader title="入住人管理" theme="green" />
+	<view class="proto-page guests-page" :class="{ 'select-mode': selectMode }">
+		<ProtoHeader :title="selectMode ? '选择入住人' : '入住人管理'" theme="green" />
 
 		<view class="security-banner">
 			<view class="security-icon"><ProtoIcon name="check" tone="white" :size="25" /></view>
@@ -11,13 +11,20 @@
 		</view>
 
 		<view class="guests-heading">
-			<text>已登记入住人（{{ guests.length }}/10）</text>
+			<text v-if="selectMode">选择本次入住人（已选 {{ selectedIds.length }} 位）</text>
+			<text v-else>已登记入住人（{{ guests.length }}/10）</text>
 			<view><ProtoIcon name="shield" :size="18" /><text>隐私已脱敏保护</text></view>
 		</view>
 
 		<ProtoEmptyState v-if="!guests.length" action-text="立即添加常用入住人" @action="openEditor" />
 		<view v-else class="guest-list">
-			<view v-for="guest in guests" :key="guest.id" class="guest-card proto-card">
+			<view
+				v-for="guest in guests"
+				:key="guest.id"
+				class="guest-card proto-card"
+				:class="{ selected: selectMode && isSelected(guest) }"
+				@tap="selectMode && toggleSelect(guest)"
+			>
 				<view class="guest-card-title">
 					<text class="guest-card-name">{{ guest.name }}</text>
 					<view class="proto-pill" :class="guest.isDefault ? 'primary' : 'info'">
@@ -25,13 +32,18 @@
 						<text>{{ guest.isDefault ? '默认入住人' : '同行人' }}</text>
 					</view>
 					<text v-if="guest.isDefault" class="proto-pill muted">本人</text>
-					<button class="edit-button" hover-class="none" @tap="openEditor(guest)"><ProtoIcon name="edit" :size="24" /></button>
+					<view class="guest-title-actions">
+						<button class="edit-button" hover-class="none" @tap.stop="openEditor(guest)"><ProtoIcon name="edit" :size="24" /></button>
+						<view v-if="selectMode" class="select-check" :class="{ checked: isSelected(guest) }">
+							<ProtoIcon v-if="isSelected(guest)" name="check" tone="white" :size="20" />
+						</view>
+					</view>
 				</view>
 				<view class="guest-sensitive">
 					<view class="guest-sensitive-row"><ProtoIcon name="document" :size="20" /><text>居民身份证　<text class="strong">{{ guest.identity }}</text></text></view>
 					<view class="guest-sensitive-row"><ProtoIcon name="phone" :size="20" /><text>手机号码　{{ guest.phone }}</text></view>
 				</view>
-				<view class="guest-card-footer">
+				<view v-if="!selectMode" class="guest-card-footer">
 					<view v-if="guest.isDefault" class="verified"><ProtoIcon name="verified" :size="18" /><text>已实名核验</text></view>
 					<view v-else class="set-default" @tap="setDefault(guest)"><ProtoIcon name="status" :size="18" /><text>设为默认入住人</text></view>
 					<view class="delete-text" @tap="deleteGuest(guest)"><ProtoIcon name="close" :size="17" /><text>删除</text></view>
@@ -40,6 +52,14 @@
 		</view>
 
 		<button class="proto-primary-button add-guest-button" hover-class="none" @tap="openEditor()"><ProtoIcon name="plus" tone="white" :size="22" /><text>添加入住人</text></button>
+
+		<view v-if="selectMode" class="select-bar">
+			<view class="select-bar-copy">
+				<text class="select-bar-count">已选 {{ selectedIds.length }} 位</text>
+				<text class="select-bar-hint">{{ selectHint }}</text>
+			</view>
+			<button class="proto-primary-button" hover-class="none" :disabled="!selectedIds.length" @tap="confirmSelection">确定</button>
+		</view>
 
 		<view v-if="editorVisible" class="proto-mask" @tap="closeEditor">
 			<view class="proto-sheet editor-sheet" @tap.stop>
@@ -75,6 +95,7 @@
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { showToast } from '@/common/prototype.js'
 	import { getGuests, saveGuests } from '@/common/app-store.js'
+	import { fetchMyGuests, saveMyGuests } from '@/common/api.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon, ProtoEmptyState },
@@ -83,6 +104,11 @@
 				guests: [],
 				editorVisible: false,
 				editingGuest: null,
+				// 选择模式：从「订单填写」页带 mode=select 进来，勾选后回传入住人。
+				// 不限制勾选人数：订单只要求至少登记 1 位实名入住人，同行人可自由多选。
+				selectMode: false,
+				selectedIds: [],
+				pendingEditId: '',
 				form: {
 					name: '',
 					identity: '',
@@ -91,10 +117,80 @@
 				}
 			}
 		},
-		onShow() {
-			this.guests = getGuests()
+		computed: {
+			selectHint() {
+				if (!this.selectedIds.length) return '请至少选择 1 位入住人'
+				return '至少登记 1 位，同行入住人可继续勾选'
+			}
+		},
+		onLoad(options = {}) {
+			this.selectMode = String(options.mode || '') === 'select'
+			this.selectedIds = String(options.selected || '')
+				.split(',')
+				.map((id) => id.trim())
+				.filter(Boolean)
+			// 订单页点某个入住人的「编辑」图标进来时，加载完直接打开这个人。
+			this.pendingEditId = String(options.edit || '')
+		},
+		async onShow() {
+			try {
+				this.guests = await fetchMyGuests()
+				saveGuests(this.guests)
+			} catch (error) {
+				this.guests = getGuests()
+				showToast(error?.message || '入住人同步失败，已显示本地缓存')
+			}
+			this.normalizeSelection()
+			this.openPendingEdit()
 		},
 		methods: {
+			// 已选 id 里可能有被删掉的人，进页面时对齐一次；勾选人数不做上限限制。
+			normalizeSelection() {
+				if (!this.selectMode) return
+				const ids = this.guests.map((guest) => String(guest.id))
+				this.selectedIds = this.selectedIds.filter((id) => ids.includes(String(id)))
+			},
+			openPendingEdit() {
+				if (!this.pendingEditId) return
+				const guest = this.guests.find((item) => String(item.id) === this.pendingEditId)
+				this.pendingEditId = ''
+				if (guest) this.openEditor(guest)
+			},
+			isSelected(guest) {
+				return this.selectedIds.some((id) => String(id) === String(guest.id))
+			},
+			toggleSelect(guest) {
+				if (!this.selectMode || !guest) return
+				const id = String(guest.id)
+				const index = this.selectedIds.findIndex((item) => String(item) === id)
+				if (index >= 0) {
+					this.selectedIds.splice(index, 1)
+					return
+				}
+				// 多选不设上限：订单只要 ≥1 位实名入住人即可，同行人由用户自行决定。
+				this.selectedIds.push(id)
+			},
+			// 确认后把选中的人回传给订单页：优先走 eventChannel，再发一次全局事件兜底。
+			confirmSelection() {
+				const picked = this.selectedIds
+					.map((id) => this.guests.find((guest) => String(guest.id) === String(id)))
+					.filter(Boolean)
+					.map((guest) => ({ ...guest }))
+				const channel = typeof this.getOpenerEventChannel === 'function' ? this.getOpenerEventChannel() : null
+				if (channel && typeof channel.emit === 'function') {
+					channel.emit('guestsSelected', picked)
+				}
+				uni.$emit('booking:guests-selected', picked)
+				uni.navigateBack({
+					delta: 1,
+					fail: () => uni.reLaunch({ url: '/pages/booking/confirm' })
+				})
+			},
+			async persist() {
+				const payload = this.guests.map((guest) => ({ ...guest, id: String(guest.id) }))
+				saveGuests(payload)
+				await saveMyGuests(payload)
+			},
 			openEditor(guest) {
 				this.editingGuest = guest || null
 				this.form = guest ? { name: guest.name, identity: guest.identity, phone: guest.phone, isDefault: guest.isDefault } : { name: '', identity: '', phone: '', isDefault: false }
@@ -104,7 +200,7 @@
 				this.editorVisible = false
 				this.editingGuest = null
 			},
-			saveGuest() {
+			async saveGuest() {
 				if (!this.form.name || !this.form.identity) {
 					showToast('请填写姓名和证件号码')
 					return
@@ -117,33 +213,51 @@
 					showToast('最多保存10位入住人')
 					return
 				}
+				const editing = this.editingGuest
+				const created = editing ? null : { ...this.form, id: String(Date.now()), tag: this.form.isDefault ? '默认入住人' : '同行人' }
 				if (this.form.isDefault) {
 					this.guests.forEach((guest) => { guest.isDefault = false })
 				}
-				if (this.editingGuest) {
-					Object.assign(this.editingGuest, this.form)
+				if (editing) {
+					Object.assign(editing, this.form)
 				} else {
-					this.guests.push({ ...this.form, id: Date.now(), tag: this.form.isDefault ? '默认入住人' : '同行人' })
+					this.guests.push(created)
 				}
-				saveGuests(this.guests)
-				this.closeEditor()
-				showToast('操作成功')
+				try {
+					await this.persist()
+					this.closeEditor()
+					// 选择模式下新增的人直接勾上，省得再点一次。
+					if (created && this.selectMode) {
+						this.selectedIds.push(String(created.id))
+					}
+					showToast('操作成功')
+				} catch (error) {
+					showToast(error?.message || '保存失败')
+				}
 			},
-			setDefault(guest) {
+			async setDefault(guest) {
 				this.guests.forEach((item) => { item.isDefault = item.id === guest.id })
-				saveGuests(this.guests)
-				showToast('已设置默认入住人')
+				try {
+					await this.persist()
+					showToast('已设置默认入住人')
+				} catch (error) {
+					showToast(error?.message || '设置失败')
+				}
 			},
 			deleteGuest(guest) {
 				uni.showModal({
 					title: '确认删除该入住人？',
 					content: '删除后预订房间需重新输入证件信息。',
-					success: (res) => {
-						if (res.confirm) {
-							this.guests = this.guests.filter((item) => item.id !== guest.id)
-							if (!this.guests.some((item) => item.isDefault) && this.guests[0]) this.guests[0].isDefault = true
-							saveGuests(this.guests)
+					success: async (res) => {
+						if (!res.confirm) return
+						this.guests = this.guests.filter((item) => item.id !== guest.id)
+						this.selectedIds = this.selectedIds.filter((id) => String(id) !== String(guest.id))
+						if (!this.guests.some((item) => item.isDefault) && this.guests[0]) this.guests[0].isDefault = true
+						try {
+							await this.persist()
 							showToast('已删除')
+						} catch (error) {
+							showToast(error?.message || '删除失败')
 						}
 					}
 				})
@@ -157,6 +271,13 @@
 		padding-bottom: 132rpx;
 		padding-bottom: calc(132rpx + constant(safe-area-inset-bottom));
 		padding-bottom: calc(132rpx + env(safe-area-inset-bottom));
+	}
+
+	/* 选择模式下底部有固定确认栏，页面末端的「添加入住人」不能被挡住。 */
+	.guests-page.select-mode {
+		padding-bottom: 250rpx;
+		padding-bottom: calc(250rpx + constant(safe-area-inset-bottom));
+		padding-bottom: calc(250rpx + env(safe-area-inset-bottom));
 	}
 
 	.security-banner {
@@ -261,6 +382,88 @@
 		background: var(--proto-surface-low);
 		border-radius: 50%;
 		font-size: 34rpx;
+	}
+
+	/* 选择模式：右上角是「编辑 + 勾选圈」，勾选圈放最右侧方便点。 */
+	.guest-title-actions {
+		display: flex;
+		align-items: center;
+		gap: 10rpx;
+		margin-left: auto;
+	}
+
+	.guest-title-actions .edit-button {
+		margin-left: 0;
+		width: 56rpx;
+		height: 56rpx;
+	}
+
+	.select-check {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 46rpx;
+		height: 46rpx;
+		flex: 0 0 46rpx;
+		color: #ffffff;
+		background: #ffffff;
+		border: 3rpx solid #a9c6c6;
+		border-radius: 50%;
+	}
+
+	.select-check.checked {
+		background: #2aa9a9;
+		border-color: #2aa9a9;
+	}
+
+	.guest-card.selected {
+		border-color: #2aa9a9;
+		box-shadow: 0 0 0 2rpx rgba(42, 169, 169, 0.22);
+	}
+
+	/* 选择模式底部固定确认栏 */
+	.select-bar {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 80;
+		display: flex;
+		align-items: center;
+		gap: 20rpx;
+		padding: 18rpx 28rpx;
+		padding-bottom: 18rpx;
+		padding-bottom: calc(18rpx + constant(safe-area-inset-bottom));
+		padding-bottom: calc(18rpx + env(safe-area-inset-bottom));
+		background: #ffffff;
+		box-shadow: 0 -10rpx 26rpx rgba(0, 106, 106, 0.12);
+	}
+
+	.select-bar-copy {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		min-width: 0;
+	}
+
+	.select-bar-count {
+		color: #20252b;
+		font-size: 26rpx;
+		font-weight: 800;
+	}
+
+	.select-bar-hint {
+		margin-top: 4rpx;
+		color: #6f8085;
+		font-size: 18rpx;
+	}
+
+	.select-bar .proto-primary-button {
+		width: 240rpx;
+		height: 78rpx;
+		flex: 0 0 auto;
+		margin: 0;
+		font-size: 24rpx;
 	}
 
 	.guest-sensitive {

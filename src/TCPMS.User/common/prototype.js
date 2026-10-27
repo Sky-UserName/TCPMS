@@ -1,3 +1,5 @@
+import { isLoginRedirecting } from './auth-gate.js'
+
 export const prototypeImages = {
 	avatar: '/static/logo.png',
 	homeHero: '/static/prototype/home-hero.jpg',
@@ -232,13 +234,19 @@ export const showToast = (title) => {
 	})
 }
 
-export const showPrototypeToast = showToast
+let lastNavigation = { path: '', at: 0 }
 
 export const goPage = (path) => {
+	const now = Date.now()
+	// 连点同一个入口会连发两次 navigateTo，第二次固定报 `navigateTo:fail timeout`，这里直接忽略。
+	if (path === lastNavigation.path && now - lastNavigation.at < 600) return
+	lastNavigation = { path, at: now }
 	uni.navigateTo({
 		url: path,
 		// 跳转失败原本没有任何反馈，页面“点了没反应”时无法定位；这里至少把原因吐出来。
 		fail: (error) => {
+			// 登录跳转会打断正在进行的 navigateTo（表现为 fail timeout），属于预期，不再弹错误提示。
+			if (isLoginRedirecting()) return
 			const reason = (error && error.errMsg) || '未知原因'
 			showToast(`页面打开失败：${reason}`)
 			console.error('[goPage]', path, reason)

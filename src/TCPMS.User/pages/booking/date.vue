@@ -31,6 +31,8 @@
 							<text class="calendar-day-number">{{ day.date }}</text>
 							<text v-if="day.iso === checkInKey" class="calendar-day-label">入住</text>
 							<text v-else-if="day.iso === checkOutKey" class="calendar-day-label">离店</text>
+							<text v-else-if="day.soldOut" class="calendar-day-label">满房</text>
+							<text v-else-if="day.priceLabel" class="calendar-day-price">{{ day.priceLabel }}</text>
 						</view>
 					</view>
 				</view>
@@ -48,6 +50,8 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { getBooking, saveBooking } from '@/common/app-store.js'
 	import { goPage, showToast } from '@/common/prototype.js'
+	import { openBookingConfirm } from '@/common/navigation.js'
+	import { fetchRoomAvailability } from '@/common/api.js'
 
 	const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
@@ -100,7 +104,9 @@
 				checkInKey: booking.isoCheckIn,
 				checkOutKey: booking.isoCheckOut,
 				weekDays: ['日', '一', '二', '三', '四', '五', '六'],
-				months: buildMonths()
+				months: buildMonths(),
+				availabilityMap: {},
+				availabilityState: 'idle'
 			}
 		},
 		computed: {
@@ -142,11 +148,70 @@
 				this.checkInKey = this.booking.isoCheckIn
 				this.checkOutKey = this.booking.isoCheckOut
 			}
+			this.loadAvailability()
 		},
 		methods: {
+			async loadAvailability() {
+				const roomId = this.booking && this.booking.roomId
+				const isRemoteRoom = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(roomId || ''))
+				if (!isRemoteRoom) return
+				const today = normalizeDate(new Date())
+				const lastMonth = this.months[this.months.length - 1]
+				const endDate = lastMonth
+					? new Date(Number(lastMonth.key.split('-')[0]), Number(lastMonth.key.split('-')[1]), 0)
+					: new Date(today.getFullYear(), today.getMonth() + 6, 0)
+				this.availabilityState = 'loading'
+				const map = {}
+				// 后端单次最多查询 90 晚，日历覆盖多个月时按窗口分片拉取。
+				const windowDays = 89
+				let cursor = new Date(today)
+				try {
+					while (cursor <= endDate) {
+						const windowEnd = new Date(cursor)
+						windowEnd.setDate(windowEnd.getDate() + windowDays)
+						const sliceEnd = windowEnd > endDate ? endDate : windowEnd
+						const daily = await fetchRoomAvailability(
+							roomId,
+							`${isoDate(cursor)}`,
+							`${isoDate(sliceEnd)}`
+						)
+						daily.forEach((item) => {
+							const key = String(item.date || '').slice(0, 10)
+							if (!key) return
+							map[key] = {
+								available: Number(item.availableQuantity || 0),
+								priceLabel: item.priceCents ? `¥${Math.round(Number(item.priceCents) / 100)}` : ''
+							}
+						})
+						if (sliceEnd <= cursor) break
+						cursor = new Date(sliceEnd)
+					}
+					this.availabilityMap = map
+					this.decorateMonths()
+					this.availabilityState = 'ready'
+				} catch (error) {
+					// 房态接口异常时保留日历可选状态，下单页仍会重新校验库存。
+					this.availabilityState = 'error'
+				}
+			},
+			decorateMonths() {
+				this.months = this.months.map((month) => ({
+					...month,
+					days: month.days.map((day) => {
+						if (!day) return day
+						const info = this.availabilityMap[String(day.iso).slice(0, 10)]
+						return {
+							...day,
+							soldOut: Boolean(info && info.available <= 0),
+							priceLabel: info ? info.priceLabel : ''
+						}
+					})
+				}))
+			},
 			dayClass(day) {
 				const classes = []
 				if (day.past) classes.push('is-past')
+				if (day.soldOut) classes.push('is-soldout')
 				if (day.iso === this.checkInKey) classes.push('is-start')
 				if (day.iso === this.checkOutKey) classes.push('is-end')
 				if (this.checkInKey && this.checkOutKey && day.iso > this.checkInKey && day.iso < this.checkOutKey) classes.push('is-range')
@@ -155,6 +220,10 @@
 			selectDay(day) {
 				if (day.past) {
 					showToast('过去日期不可选择')
+					return
+				}
+				if (day.soldOut) {
+					showToast('该日期已满房，请选择其他日期')
 					return
 				}
 				if (!this.checkInKey || this.checkOutKey || day.iso <= this.checkInKey) {
@@ -186,10 +255,20 @@
 					return
 				}
 				if (this.from === 'store-detail') {
-					uni.navigateBack({ delta: 1, fail: () => goPage(`/pages/store/detail?id=${encodeURIComponent(this.booking.storeId || '')}`) })
+					// 门店详情页已下线，历史入口统一回到当前房型详情。
+					uni.navigateBack({
+						delta: 1,
+						fail: () => {
+							if (this.booking.roomId) {
+								goPage(`/pages/room/detail?id=${encodeURIComponent(this.booking.roomId)}&storeId=${encodeURIComponent(this.booking.storeId || '')}`)
+								return
+							}
+							uni.reLaunch({ url: '/pages/index/index' })
+						}
+					})
 					return
 				}
-				goPage('/pages/booking/confirm')
+				openBookingConfirm()
 			}
 		}
 	}
@@ -205,37 +284,6 @@
 		color: #20252b;
 	}
 
-	.date-page-header {
-		display: flex;
-		align-items: center;
-		height: 112rpx;
-		padding: 20rpx 24rpx 12rpx;
-		background: #ffffff;
-		border-bottom: 1rpx solid rgba(197, 199, 202, 0.28);
-	}
-
-	.date-back-button,
-	.date-header-spacer {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 68rpx;
-		height: 64rpx;
-		padding: 0;
-		background: transparent;
-	}
-
-	.date-back-button {
-		color: #006a6a;
-	}
-
-	.date-page-title {
-		flex: 1;
-		color: #20252b;
-		font-size: 34rpx;
-		font-weight: 750;
-		text-align: center;
-	}
 
 	.date-summary {
 		display: flex;
@@ -348,6 +396,15 @@
 		color: #c5c7ca;
 	}
 
+	.calendar-day.is-soldout {
+		color: #b6bcc2;
+		background: #f2f4f5;
+	}
+
+	.calendar-day.is-soldout .calendar-day-number {
+		text-decoration: line-through;
+	}
+
 	.calendar-day.is-range {
 		width: 100%;
 		color: #006a6a;
@@ -366,6 +423,13 @@
 		margin-top: 2rpx;
 		font-size: 17rpx;
 		font-weight: 500;
+	}
+
+	.calendar-day-price {
+		margin-top: 2rpx;
+		color: #18858f;
+		font-size: 16rpx;
+		font-weight: 600;
 	}
 
 	.date-bottom-action {
@@ -419,12 +483,10 @@
 		color: #ffffff !important;
 	}
 
-	.booking-date-page .date-page-header,
 	.booking-date-page .date-summary {
 		background: #ffffff;
 	}
 
-	.booking-date-page .date-back-button,
 	.booking-date-page .date-summary-weekday,
 	.booking-date-page .date-summary-night {
 		color: var(--booking-green-deep);

@@ -105,8 +105,6 @@
 		</view>
 
 		<view class="room-help-bar">
-			<view @tap="goService"><ProtoIcon name="support" :size="22" /><text>微信客服</text></view>
-			<view @tap="callStore"><ProtoIcon name="phone" :size="22" /><text>联系前台</text></view>
 			<text>房源支持　入住前24h免费退</text>
 		</view>
 
@@ -139,17 +137,19 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { demoRooms, demoStores, goPage, prototypeImages, showToast } from '@/common/prototype.js'
 	import { fetchStoreDetail } from '@/common/api.js'
+	import { openBookingConfirm } from '@/common/navigation.js'
+	import { ALLOW_DEMO_DATA } from '@/common/env.js'
 	import { getBooking, saveBooking } from '@/common/app-store.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
-				rooms: demoRooms,
-				catalogState: 'demo',
+				rooms: ALLOW_DEMO_DATA ? demoRooms : [],
+				catalogState: ALLOW_DEMO_DATA ? 'demo' : 'loading',
 				loadError: '',
 				storeId: getBooking().storeId || '',
-				store: demoStores[0],
+				store: ALLOW_DEMO_DATA ? demoStores[0] : null,
 				booking: getBooking(),
 				roomKeyword: '',
 				activeTab: 'all',
@@ -165,7 +165,9 @@
 		},
 		async onLoad(options) {
 			this.storeId = options && options.storeId ? options.storeId : this.booking.storeId
-			const localStore = demoStores.find((item) => String(item.id) === String(this.storeId))
+			const localStore = ALLOW_DEMO_DATA
+				? demoStores.find((item) => String(item.id) === String(this.storeId))
+				: null
 			if (localStore) {
 				this.store = localStore
 			}
@@ -183,12 +185,18 @@
 					this.catalogState = 'synced'
 					this.loadError = '门店房型同步失败，请检查网络或稍后重试。'
 				}
+			} else if (!ALLOW_DEMO_DATA) {
+				// 生产包不展示演示房型：缺少门店参数时给出明确空态。
+				this.rooms = []
+				this.catalogState = 'synced'
+				this.store = null
+				this.loadError = '未获取到门店信息，请返回门店列表重新选择。'
 			}
 			this.booking = saveBooking({
 				...this.booking,
 				storeId: this.storeId || this.booking.storeId,
-				store: this.store.name || this.booking.store,
-				address: this.store.address || this.booking.address
+				store: (this.store && this.store.name) || this.booking.store,
+				address: (this.store && this.store.address) || this.booking.address
 			})
 		},
 		onShow() {
@@ -257,19 +265,26 @@
 					this.goDate()
 					return
 				}
+				const maxGuests = Number(room.maxGuests || 0) || null
+				const roomCount = Math.max(1, Number(this.booking.roomCount || 1))
+				const wantedGuests = Math.max(1, Number(this.booking.guestCount || 1))
+				// 与房型详情页一致：床位房按「可住人数 × 间数」收敛，避免后端报价 400。
+				const guestCount = maxGuests ? Math.min(wantedGuests, maxGuests * roomCount) : wantedGuests
 				this.booking = saveBooking({
 					...this.booking,
 					storeId: this.storeId || room.storeId || this.booking.storeId,
-					store: this.store.name || this.booking.store,
+					store: (this.store && this.store.name) || this.booking.store,
 					address: this.store.address || this.booking.address,
 					roomId: room.id,
 					room: room.name,
 					roomImage: room.image,
 					roomPrice: Number(room.price || 0),
 					roomArea: room.area || '',
-					roomTags: room.tags || []
+					roomTags: room.tags || [],
+					maxGuests,
+					guestCount
 				})
-				goPage('/pages/booking/confirm')
+				openBookingConfirm()
 			},
 			openRoomDetail(room) {
 				if (!room || !room.id) return
@@ -288,15 +303,6 @@
 			},
 			showCityNotice() {
 				showToast('城市切换请返回门店搜索页操作')
-			},
-			goService() {
-				goPage('/pages/service/contact')
-			},
-			callStore() {
-				uni.makePhoneCall({
-					phoneNumber: this.store.phone || '037188886622',
-					fail: () => showToast('暂无法拨打前台电话')
-				})
 			}
 		}
 	}
@@ -723,9 +729,7 @@
 	.room-help-bar {
 		display: flex;
 		align-items: center;
-		flex-wrap: wrap;
-		justify-content: space-around;
-		gap: 12rpx 18rpx;
+		justify-content: center;
 		margin: 4rpx 24rpx 12rpx;
 		padding: 18rpx 12rpx 24rpx;
 		color: var(--proto-muted);
@@ -733,18 +737,7 @@
 		border-top: 1rpx solid rgba(185, 211, 217, 0.54);
 	}
 
-	.room-help-bar > view {
-		display: flex;
-		align-items: center;
-		flex: 0 0 auto;
-	}
-
-	.room-help-bar .proto-icon {
-		margin-right: 5rpx;
-	}
-
 	.room-help-bar > text {
-		flex: 0 0 100%;
 		color: var(--proto-primary-dark);
 		font-size: 17rpx;
 		text-align: center;

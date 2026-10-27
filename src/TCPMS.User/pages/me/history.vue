@@ -31,6 +31,8 @@
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { goPage, prototypeImages, showToast } from '@/common/prototype.js'
 	import { clearRecent, getRecent } from '@/common/app-store.js'
+	import { clearMyRecent, fetchMyRecent } from '@/common/api.js'
+	import { openLegacyStorePath } from '@/common/navigation.js'
 
 	export default {
 		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
@@ -40,12 +42,19 @@
 				fallbackImage: prototypeImages.homeHero
 			}
 		},
-		onShow() {
-			this.items = getRecent()
+		async onShow() {
+			try {
+				this.items = await fetchMyRecent()
+			} catch (error) {
+				this.items = getRecent()
+				showToast(error?.message || '浏览记录同步失败，已显示本地缓存')
+			}
 		},
 		methods: {
 			openItem(item) {
 				if (item.path) {
+					// 旧记录里的门店详情路径统一转到房型详情。
+					if (openLegacyStorePath(item.path)) return
 					goPage(item.path)
 					return
 				}
@@ -55,11 +64,16 @@
 				uni.showModal({
 					title: '清空浏览记录',
 					content: '清空后将无法在这里找回最近浏览内容。',
-					success: ({ confirm }) => {
+					success: async ({ confirm }) => {
 						if (!confirm) return
-						clearRecent()
-						this.items = []
-						showToast('浏览记录已清空')
+						try {
+							await clearMyRecent()
+							clearRecent()
+							this.items = []
+							showToast('浏览记录已清空')
+						} catch (error) {
+							showToast(error?.message || '清空失败')
+						}
 					}
 				})
 			},

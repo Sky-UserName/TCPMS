@@ -7,7 +7,9 @@ export const DEMO_STORES = [
   { id: 'store-003', name: '杭州西湖店' }
 ]
 
-// This list mirrors merchantEntries in src/TCPMS.User/pages/me/index.vue.
+// 与用户端「我的 → 民宿管理」展示的入口保持一致（服务端 permission-menus）。
+// iconKey 必须落在 src/admin/src/data/miniappIcons.js 的图标库里，
+// 这样管理端预览和用户端 ProtoIcon 渲染出来的图标完全相同。
 export const MINIAPP_MERCHANT_MENU = [
   { key: 'finance', title: '财务统计', iconKey: 'wallet', route: '/pages/merchant/finance' },
   { key: 'rooms', title: '房间管理', iconKey: 'house', route: '/pages/merchant/rooms' },

@@ -175,6 +175,25 @@ export const searchNearby = async (latitude, longitude, options = {}) => {
 	return diversify(places, limit)
 }
 
+// 高德 POI 统一成前端使用的结构：省市区拆开，地址只保留街道门牌，方便拼装。
+const mapPoi = (poi) => {
+	const point = parseLocation(poi.location)
+	if (!point) return null
+	const name = readText(poi.name)
+	if (!name) return null
+	return {
+		id: readText(poi.id) || `${name}-${readText(poi.location)}`,
+		name,
+		address: readText(poi.address),
+		province: readText(poi.pname),
+		city: readText(poi.cityname),
+		district: readText(poi.adname),
+		distance: Number(poi.distance) || 0,
+		latitude: point.latitude,
+		longitude: point.longitude
+	}
+}
+
 // 关键字检索地点，用于地图页顶部的区域搜索。
 export const searchPlaces = async (keyword, city = '') => {
 	const config = await loadAmapConfig()
@@ -193,19 +212,88 @@ export const searchPlaces = async (keyword, city = '') => {
 
 	const body = await amapGet('/v3/place/text', params, config.miniProgramKey)
 	const pois = Array.isArray(body.pois) ? body.pois : []
-	return pois
-		.map((poi) => {
-			const point = parseLocation(poi.location)
-			if (!point) return null
-			return {
-				id: readText(poi.id) || readText(poi.name),
-				name: readText(poi.name),
-				address: readText(poi.address),
-				city: readText(poi.cityname),
-				district: readText(poi.adname),
-				latitude: point.latitude,
-				longitude: point.longitude
-			}
-		})
-		.filter((poi) => poi && poi.name)
+	return pois.map(mapPoi).filter(Boolean)
+}
+
+// 地图选点页的周边地点：不按类型过滤，小区、写字楼、学校都要出现在列表里，
+// 所以和详情页的 searchNearby 分开，按距离排序取前 N 条。
+export const searchAroundPois = async (latitude, longitude, options = {}) => {
+	const config = await loadAmapConfig()
+	if (!config.miniProgramKey) throw createAmapError('高德小程序 Key 未配置')
+	const radius = Number(options.radius) > 0 ? Number(options.radius) : 1000
+	const limit = Number(options.limit) > 0 ? Math.min(25, Number(options.limit)) : 20
+
+	const body = await amapGet('/v3/place/around', {
+		location: `${Number(longitude).toFixed(6)},${Number(latitude).toFixed(6)}`,
+		radius,
+		offset: limit,
+		page: 1,
+		sortrule: 'distance',
+		extensions: 'base'
+	}, config.miniProgramKey)
+
+	const pois = Array.isArray(body.pois) ? body.pois : []
+	return pois.map(mapPoi).filter(Boolean).slice(0, limit)
+}
+
+// 城市 → 区县。搜索结果页的「区域选择」用这份数据，
+// 不依赖后端门店是否覆盖该城市，所以定位到郑州也能列出郑州的区县。
+// 带版本号，取数逻辑变化时直接换 key，避免读到旧缓存（如直辖市只缓存了「上海城区」）。
+const DISTRICT_CACHE_PREFIX = 'tcpms:districts:v2:'
+const DISTRICT_CACHE_TTL = 24 * 60 * 60 * 1000
+
+const readDistrictCache = (city) => {
+	try {
+		const raw = uni.getStorageSync(`${DISTRICT_CACHE_PREFIX}${city}`)
+		if (!raw || typeof raw !== 'object') return null
+		if (!Array.isArray(raw.items) || !raw.items.length) return null
+		if (Date.now() - Number(raw.savedAt || 0) > DISTRICT_CACHE_TTL) return null
+		return raw.items
+	} catch (error) {
+		return null
+	}
+}
+
+const writeDistrictCache = (city, items) => {
+	try {
+		uni.setStorageSync(`${DISTRICT_CACHE_PREFIX}${city}`, { items, savedAt: Date.now() })
+	} catch (error) {
+		// 存储写失败不影响展示，忽略即可。
+	}
+}
+
+export const fetchDistricts = async (city) => {
+	const keyword = String(city || '').trim()
+	if (!keyword) return []
+
+	const cached = readDistrictCache(keyword)
+	if (cached) return cached
+
+	const config = await loadAmapConfig()
+	if (!config.miniProgramKey) throw createAmapError('高德小程序 Key 未配置')
+
+	const body = await amapGet('/v3/config/district', {
+		keywords: keyword,
+		// 取两级：普通地级市第一层就是区县；直辖市第一层只有「上海城区」这类聚合节点，
+		// 需要靠第二层才能拿到真正的区（浦东新区、黄浦区等）。
+		subdistrict: 2,
+		extensions: 'base'
+	}, config.miniProgramKey)
+
+	const root = Array.isArray(body.districts) ? body.districts[0] : null
+	let children = root && Array.isArray(root.districts) ? root.districts : []
+	if (children.length === 1 && children[0] && children[0].level !== 'district') {
+		children = Array.isArray(children[0].districts) ? children[0].districts : []
+	}
+
+	const items = children
+		// 高德的「街道」级别不放进区域选择，避免出现几百个街道。
+		.filter((item) => item && readText(item.level) !== 'street')
+		// 高德返回顺序不固定，按行政区划代码升序排，主城区会排在县市前面。
+		.sort((left, right) => readText(left.adcode).localeCompare(readText(right.adcode)))
+		.map((item) => readText(item.name))
+		.filter((name) => name)
+
+	if (items.length) writeDistrictCache(keyword, items)
+	return items
 }

@@ -17,6 +17,14 @@
 			}
 		},
 		{
+			"path": "pages/city/select",
+			"style": {
+				"navigationBarTitleText": "选择城市",
+				"navigationStyle": "custom",
+				"enablePullDownRefresh": false
+			}
+		},
+		{
 			"path": "pages/auth/privacy",
 			"style": {
 				"navigationBarTitleText": "隐私保护指引",
@@ -52,14 +60,6 @@
 			"path": "pages/store/map",
 			"style": {
 				"navigationBarTitleText": "门店地图",
-				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
-			}
-		},
-		{
-			"path": "pages/store/detail",
-			"style": {
-				"navigationBarTitleText": "门店详情",
 				"navigationStyle": "custom",
 				"enablePullDownRefresh": false
 			}
@@ -297,6 +297,22 @@
 					"path": "settings",
 					"style": {
 						"navigationBarTitleText": "民宿设置",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "apply",
+					"style": {
+						"navigationBarTitleText": "民宿申请",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "location",
+					"style": {
+						"navigationBarTitleText": "选择位置",
 						"navigationStyle": "custom",
 						"enablePullDownRefresh": false
 					}

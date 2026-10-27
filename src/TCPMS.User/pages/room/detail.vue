@@ -13,12 +13,24 @@
 		</view>
 
 		<view class="room-hero-summary">
+			<view class="room-store-bar" @tap="openLocation">
+				<view class="room-store-title-row">
+					<ProtoIcon name="store" :size="22" />
+					<text class="room-store-name">{{ store.name || '门店信息加载中' }}</text>
+					<text v-if="store.status" class="room-store-status">{{ store.status }}</text>
+				</view>
+				<view class="room-store-meta-row">
+					<text v-if="store.rating">{{ store.rating }} 分</text>
+					<text v-if="store.reviews">{{ store.reviews }} 条门店评价</text>
+					<text v-if="store.distance && !store.unknownDistance">距您 {{ store.distance }}</text>
+					<view class="room-store-link"><text>门店位置</text><ProtoIcon name="chevron-right" :size="16" /></view>
+				</view>
+			</view>
 			<view class="detail-title-row">
 				<view class="detail-title-copy">
 					<text class="room-detail-title">{{ room.name }}</text>
 					<text class="room-detail-subtitle">静谧采光 · 独立卫浴 · 入住更安心</text>
 				</view>
-				<text class="room-status-badge">{{ room.availability || '今日可预订' }}</text>
 			</view>
 			<view class="room-detail-tags">
 				<text v-for="tag in detailTags" :key="tag">{{ tag }}</text>
@@ -29,7 +41,7 @@
 					<text>{{ reviewSummary.reviewCount }}条真实评价</text>
 				</view>
 				<view class="detail-highlight location-highlight" @tap="openLocation">
-					<view class="highlight-value"><ProtoIcon name="location" :size="25" /><text>{{ store.shortName || store.name || '民宿位置' }}</text></view>
+					<view class="highlight-value"><ProtoIcon name="location" :size="25" /><text>{{ store.distance && !store.unknownDistance ? `距您 ${store.distance}` : '民宿位置' }}</text></view>
 					<text>{{ store.address || '郑州市中心 · 交通便利' }}</text>
 				</view>
 			</view>
@@ -69,7 +81,7 @@
 					<button class="room-book-button" hover-class="none" @tap.stop="goBooking"><text>订</text></button>
 				</view>
 			</view>
-			<view class="room-choice-footer"><text><ProtoIcon name="check-circle" :size="20" /> {{ room.availability || '今日可预订' }}</text></view>
+			<view class="room-choice-footer"><ProtoIcon name="check-circle" :size="20" /><text>{{ room.availability || '今日可预订' }}</text></view>
 		</view>
 
 		<view class="proto-card other-room-card">
@@ -83,23 +95,21 @@
 
 		<view class="proto-card feature-card">
 			<view class="section-heading"><text>房屋特色</text><text class="proto-caption">让每次入住都更舒服</text></view>
-			<text class="feature-copy">静谧采光，干净整洁，适合短住与周末放松。</text>
+			<text class="feature-copy">{{ store.description || '静谧采光，干净整洁，适合短住与周末放松。' }}</text>
 		</view>
 
 		<view class="proto-card facilities-card">
 			<view class="section-heading"><text>服务与设施</text><text class="proto-caption">已为你准备</text></view>
-			<view v-for="group in facilityGroups" :key="group.title" class="facility-group"><text class="facility-group-title">{{ group.title }}</text><view class="facility-items"><view v-for="item in group.items" :key="item"><ProtoIcon name="check-circle" :size="21" /><text>{{ item }}</text></view></view></view>
+			<view v-for="group in facilityGroups" :key="group.title" class="facility-group"><text class="facility-group-title">{{ group.title }}</text><view class="facility-items"><view v-for="item in group.items" :key="item"><ProtoIcon name="check-circle" :size="26" /><text>{{ item }}</text></view></view></view>
 		</view>
 
 		<view class="proto-card policy-card">
 			<view class="section-heading"><text>预订须知</text><text class="proto-caption">请提前了解入住规则</text></view>
 			<view v-for="item in policies" :key="item.title" class="policy-item">
-				<view class="policy-title-row" @tap="togglePolicy(item.key)"><view class="inline-icon-text"><ProtoIcon :name="item.icon" :size="22" /><text>{{ item.title }}</text></view><ProtoIcon :name="openPolicies.indexOf(item.key) >= 0 ? 'chevron-up' : 'chevron-down'" :size="22" /></view>
+				<view class="policy-title-row" @tap="togglePolicy(item.key)"><view class="inline-icon-text"><ProtoIcon :name="item.icon" :size="26" /><text>{{ item.title }}</text></view><ProtoIcon :name="openPolicies.indexOf(item.key) >= 0 ? 'chevron-up' : 'chevron-down'" :size="24" /></view>
 				<view v-if="openPolicies.indexOf(item.key) >= 0" class="policy-body"><text v-for="line in item.lines" :key="line">{{ line }}</text></view>
 			</view>
 		</view>
-
-		<view class="proto-card guest-card"><view class="section-heading"><text>入住人</text><text class="proto-link">添加入住人 <ProtoIcon name="chevron-right" :size="20" /></text></view><view class="guest-placeholder"><ProtoIcon name="user" :size="32" /><text>入住时填写姓名，方便快速办理入住</text></view></view>
 
 		<view class="proto-card location-card">
 			<view class="section-heading">
@@ -153,9 +163,9 @@
 		</view>
 
 		<view class="proto-bottom-actions room-bottom-actions">
-			<button class="detail-bottom-link" hover-class="none" @tap="goService"><ProtoIcon name="support" :size="22" /><text>客服</text></button>
-			<button class="detail-bottom-link" hover-class="none" @tap="callStore"><ProtoIcon name="phone" :size="22" /><text>前台</text></button>
-			<button class="detail-bottom-link" hover-class="none" @tap="toggleFavorite"><ProtoIcon :name="favorite ? 'heart-filled' : 'heart'" :size="22" /><text>{{ favorite ? '已收藏' : '收藏' }}</text></button>
+			<button class="detail-bottom-link" hover-class="none" @tap="goHome"><ProtoIcon name="home" :size="38" /><text>首页</text></button>
+			<button class="detail-bottom-link" hover-class="none" @tap="toggleFavorite"><ProtoIcon :name="favorite ? 'heart-filled' : 'heart'" :size="38" /><text>{{ favorite ? '已收藏' : '收藏' }}</text></button>
+			<button class="detail-bottom-link" hover-class="none" open-type="share"><ProtoIcon name="share" :size="38" /><text>分享</text></button>
 			<button class="proto-primary-button" hover-class="none" @tap="goBooking"><text>立即预订</text></button>
 		</view>
 	</view>
@@ -165,8 +175,10 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { demoRooms, demoStores, goPage, showToast } from '@/common/prototype.js'
-	import { getBooking, getFavorites, getRoomReviewSummary, recordRecent, saveBooking, toggleFavorite } from '@/common/app-store.js'
-	import { fetchRoomReviews, fetchStoreDetail } from '@/common/api.js'
+	import { getBooking, getFavorites, getRoomReviewSummary, saveBooking, toggleFavorite } from '@/common/app-store.js'
+	import { addMyFavorite, fetchMyFavorites, fetchRoomReviews, fetchStoreDetail, recordMyRecent, removeMyFavorite } from '@/common/api.js'
+	import { openBookingConfirm } from '@/common/navigation.js'
+	import { ALLOW_DEMO_DATA } from '@/common/env.js'
 	import { geocodeAddress, searchNearby } from '@/common/amap.js'
 
 	// 门店坐标来自后端 decimal，可能是字符串或 null，统一转成数字再交给 map 组件。
@@ -202,6 +214,7 @@
 			return {
 				room: demoRooms[0],
 				store: demoStores[0],
+				relatedRooms: [],
 				storeId: getBooking().storeId || '',
 				favorite: false,
 				booking: getBooking(),
@@ -227,20 +240,6 @@
 					{ title: '基础', items: ['零食、饮品', '网络电视', '空调', '窗户', '无线网络'] },
 					{ title: '卫浴', items: ['电吹风', '独立卫浴', '热水'] },
 					{ title: '周边', items: ['医院', '商场', '超市'] }
-				],
-				amenities: [
-					{ icon: 'house', label: '卫浴洗漱' },
-					{ icon: 'status', label: '24小时恒温热水' },
-					{ icon: 'support', label: '独立干湿分离淋浴' },
-					{ icon: 'tune', label: '负离子大功率电吹风' },
-					{ icon: 'star', label: '植物精油洗沐套装' },
-					{ icon: 'settings', label: '智能电器' },
-					{ icon: 'wifi', label: '千兆专属高速 Wi-Fi' },
-					{ icon: 'status', label: '全静音冷暖变频空调' },
-					{ icon: 'lock', label: '智能免卡密码门锁' },
-					{ icon: 'key', label: '304不锈钢静音电水壶' },
-					{ icon: 'image', label: '双层高密度遮光窗帘' },
-					{ icon: 'book', label: '休闲实木工作书桌椅' }
 				],
 				policies: [
 					{
@@ -271,7 +270,9 @@
 				return [...new Set([room.type, room.gender, room.capacity, room.beds, room.area ? `建筑面积 ${room.area}` : '', '有外窗'].filter(Boolean))].slice(0, 6)
 			},
 			otherRooms() {
-				return demoRooms.filter((item) => String(item.id) !== String(this.room && this.room.id)).slice(0, 2)
+				if (this.relatedRooms.length) return this.relatedRooms
+				if (!ALLOW_DEMO_DATA) return []
+				return demoRooms.filter((item) => String(item.id) !== String(this.room && this.room.id))
 			},
 			checkInContext() {
 				return getDateContext(this.booking.isoCheckIn, '入住')
@@ -303,6 +304,11 @@
 					if (result.store) this.store = result.store
 					const remoteRoom = result.rooms.find((item) => String(item.id) === String(requestedRoomId))
 					if (remoteRoom) this.room = remoteRoom
+					else if (result.rooms.length) {
+						// 房型已下线或链接过期时退回该门店第一间房，避免继续展示内置演示房型。
+						this.room = result.rooms[0]
+					}
+					this.relatedRooms = result.rooms.filter((item) => String(item.id) !== String(this.room.id))
 				} catch (error) {
 					// Keep the bundled room detail available when the API is offline.
 				}
@@ -326,20 +332,32 @@
 				roomPrice: Number(this.room.price || 0)
 			})
 			this.favorite = getFavorites().map(String).includes(`room-${this.room.id}`)
-			recordRecent({
-				id: this.room.id,
+			this.refreshFavoriteState()
+			recordMyRecent({
+				id: String(this.room.id),
 				type: 'room',
 				title: this.room.name,
 				subtitle: `¥${this.room.price}/晚 · ${this.room.capacity}`,
 				image: this.room.image,
 				path: `/pages/room/detail?id=${this.room.id}&storeId=${this.storeId || ''}`
-			})
+			}).catch(() => {})
 			this.prepareLocation()
 		},
 		onShow() {
 			this.booking = getBooking()
-			this.favorite = getFavorites().map(String).includes(`room-${this.room.id}`)
+			this.refreshFavoriteState()
 			this.reviewSummary = getRoomReviewSummary(this.room.id, this.storeId)
+		},
+		onShareAppMessage() {
+			// 底部「分享」按钮用 open-type="share" 触发，这里提供标题、路径与封面。
+			const room = this.room || {}
+			const storeId = this.storeId || room.storeId || ''
+			const price = Number(room.price || 0)
+			return {
+				title: price > 0 ? `${room.name || '房型详情'} · ¥${price}/晚` : (room.name || '房型详情'),
+				path: `/pages/room/detail?id=${encodeURIComponent(room.id || '')}&storeId=${encodeURIComponent(storeId)}`,
+				imageUrl: room.image || ''
+			}
 		},
 		onPageScroll(event) {
 			const scrollTop = Number(event && event.scrollTop) || 0
@@ -353,6 +371,11 @@
 				uni.navigateBack({ delta: 1 })
 			},
 			prepareBooking(room = this.room) {
+				const maxGuests = Number(room.maxGuests || 0) || null
+				const roomCount = Math.max(1, Number(this.booking.roomCount || 1))
+				const wantedGuests = Math.max(1, Number(this.booking.guestCount || 1))
+				// 床位房等房型有人数上限（maxGuests × 间数），超员会在后端报价时 400，保存前先收敛。
+				const guestCount = maxGuests ? Math.min(wantedGuests, maxGuests * roomCount) : wantedGuests
 				this.booking = saveBooking({
 					...this.booking,
 					storeId: this.storeId || room.storeId || this.booking.storeId,
@@ -363,7 +386,9 @@
 					roomImage: room.image,
 					roomPrice: Number(room.price || 0),
 					roomArea: room.area || '',
-					roomTags: room.tags || []
+					roomTags: room.tags || [],
+					maxGuests,
+					guestCount
 				})
 				return this.booking
 			},
@@ -372,7 +397,7 @@
 			},
 			goBooking() {
 				this.prepareBooking()
-				goPage('/pages/booking/confirm')
+				openBookingConfirm()
 			},
 			goReviews() {
 				const query = [
@@ -392,20 +417,47 @@
 					fail: () => showToast('暂无法拨打前台电话')
 				})
 			},
-			toggleFavorite() {
-				this.favorite = toggleFavorite(`room-${this.room.id}`, {
+			async refreshFavoriteState() {
+				if (!this.room || !this.room.id) return
+				const id = `room-${this.room.id}`
+				try {
+					const favorites = await fetchMyFavorites()
+					this.favorite = favorites.map((item) => item.id).includes(id)
+				} catch (error) {
+					this.favorite = getFavorites().map(String).includes(id)
+				}
+			},
+			async toggleFavorite() {
+				if (!this.room || !this.room.id) return
+				const id = `room-${this.room.id}`
+				const record = {
+					id,
 					type: 'room',
 					title: this.room.name,
 					subtitle: `¥${this.room.price}/晚 · ${this.room.capacity}`,
 					image: this.room.image,
 					path: `/pages/room/detail?id=${this.room.id}&storeId=${this.storeId || this.room.storeId || ''}`
-				})
-				showToast(this.favorite ? '已收藏房型' : '已取消收藏')
+				}
+				const locallyFavorited = getFavorites().map(String).includes(id)
+				try {
+					if (this.favorite) {
+						await removeMyFavorite(id)
+						this.favorite = false
+						if (locallyFavorited) toggleFavorite(id)
+					} else {
+						await addMyFavorite(record)
+						this.favorite = true
+						if (!locallyFavorited) toggleFavorite(id, record)
+					}
+					showToast(this.favorite ? '已收藏房型' : '已取消收藏')
+				} catch (error) {
+					showToast(error?.message || '收藏操作失败')
+				}
 			},
-			shareRoom() {
-				uni.setClipboardData({
-					data: `${this.room.name}，¥${this.room.price}/晚`,
-					success: () => showToast('房型信息已复制')
+			goHome() {
+				uni.switchTab({
+					url: '/pages/index/index',
+					fail: () => uni.reLaunch({ url: '/pages/index/index' })
 				})
 			},
 			goOtherRoom(item) {
@@ -418,7 +470,7 @@
 					return
 				}
 				this.prepareBooking(item)
-				goPage('/pages/booking/confirm')
+				openBookingConfirm()
 			},
 			// 详情页周边地图：先用门店坐标，缺失时按地址反查，最后才退回城市中心。
 			prepareLocation() {
@@ -605,33 +657,6 @@
 		border-bottom: 0;
 	}
 
-	.hero-floating-actions {
-		position: absolute;
-		top: 132rpx;
-		right: 24rpx;
-		left: 24rpx;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-
-	.hero-floating-actions button {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 68rpx;
-		height: 68rpx;
-		margin-right: 10rpx;
-		padding: 0;
-		color: var(--proto-text);
-		background: rgba(255, 255, 255, 0.92);
-		border-radius: 50%;
-		font-size: 36rpx;
-	}
-
-	.hero-floating-actions > view {
-		display: flex;
-	}
 
 	.hero-photo-count {
 		position: absolute;
@@ -649,15 +674,6 @@
 		margin-top: -20rpx;
 	}
 
-	.room-label-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-
-	.room-label-row .proto-pill {
-		font-size: 18rpx;
-	}
 
 	.room-detail-title {
 		display: block;
@@ -689,47 +705,6 @@
 		font-size: 18rpx;
 	}
 
-	.detail-price-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-top: 20rpx;
-		padding: 18rpx;
-		background: var(--proto-surface-low);
-		border-radius: 14rpx;
-	}
-
-	.detail-price {
-		color: var(--proto-primary-dark);
-		font-size: 42rpx;
-		font-weight: 850;
-	}
-
-	.detail-price-unit {
-		color: var(--proto-muted);
-		font-size: 18rpx;
-	}
-
-	.original-price {
-		margin-left: 14rpx;
-		color: var(--proto-muted);
-		font-size: 19rpx;
-		text-decoration: line-through;
-	}
-
-	.discount-tag {
-		display: flex;
-		align-items: center;
-		padding: 8rpx 14rpx;
-		color: var(--proto-primary-dark);
-		background: #baf2f4;
-		border-radius: 18rpx;
-		font-size: 19rpx;
-	}
-
-	.discount-tag .proto-icon {
-		margin-right: 5rpx;
-	}
 
 	.section-heading {
 		display: flex;
@@ -817,70 +792,6 @@
 		font-size: 19rpx;
 	}
 
-	.price-trend {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8rpx;
-		margin-top: 16rpx;
-	}
-
-	.price-trend > view {
-		display: flex;
-		align-items: center;
-		flex-direction: column;
-		width: calc(20% - 6.4rpx);
-		padding: 12rpx 5rpx;
-		color: var(--proto-muted);
-		background: var(--proto-surface-low);
-		border-radius: 10rpx;
-	}
-
-	.price-trend > view.today {
-		color: var(--proto-primary-dark);
-		background: var(--proto-surface-tint);
-	}
-
-	.price-trend > view.hot {
-		color: var(--proto-error);
-	}
-
-	.price-trend .small {
-		font-size: 17rpx;
-	}
-
-	.price-trend .strong {
-		margin-top: 6rpx;
-		font-size: 21rpx;
-	}
-
-	.price-trend .em {
-		margin-top: 4rpx;
-		font-size: 16rpx;
-		font-style: normal;
-	}
-
-	.amenity-grid {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 12rpx;
-		margin-top: 18rpx;
-	}
-
-	.amenity-grid > view {
-		display: flex;
-		align-items: center;
-		width: calc(50% - 6rpx);
-		padding: 13rpx 12rpx;
-		color: var(--proto-muted);
-		background: var(--proto-surface-low);
-		border-radius: 10rpx;
-		font-size: 18rpx;
-	}
-
-	.amenity-grid > view .proto-icon {
-		flex: 0 0 auto;
-		margin-right: 7rpx;
-	}
 
 	.policy-item {
 		margin-top: 16rpx;
@@ -894,7 +805,7 @@
 		align-items: center;
 		justify-content: space-between;
 		color: var(--proto-text);
-		font-size: 21rpx;
+		font-size: 24rpx;
 		font-weight: 700;
 	}
 
@@ -908,53 +819,10 @@
 		gap: 8rpx;
 		margin-top: 14rpx;
 		color: var(--proto-muted);
-		font-size: 19rpx;
-		line-height: 1.5;
-	}
-
-	.review-heading {
-		display: flex;
-		align-items: baseline;
-		gap: 8rpx;
-	}
-
-	.review-score {
-		font-size: 30rpx;
-		font-weight: 800;
-	}
-
-	.review-stars {
-		display: flex;
-		align-items: center;
-		color: var(--proto-primary-dark);
-	}
-
-	.review-label {
-		flex: 1;
-		color: var(--proto-muted);
-		font-size: 18rpx;
-	}
-
-	.review-heading .proto-link {
-		display: flex;
-		align-items: center;
-		font-size: 17rpx;
-	}
-
-	.review-heading .proto-link .proto-icon {
-		margin-left: 3rpx;
-	}
-
-	.review-quote {
-		display: block;
-		margin-top: 16rpx;
-		padding: 18rpx;
-		color: var(--proto-muted);
-		background: var(--proto-surface-low);
-		border-radius: 14rpx;
-		font-size: 19rpx;
+		font-size: 22rpx;
 		line-height: 1.55;
 	}
+
 
 	.room-bottom-actions {
 		align-items: center;
@@ -972,29 +840,7 @@
 	.room-bottom-actions .detail-bottom-link .proto-icon {
 		margin-right: 3rpx;
 	}
-	.total-block {
-		display: flex;
-		align-items: baseline;
-		flex: 1;
-		flex-wrap: wrap;
-	}
 
-	.total-block > text {
-		color: var(--proto-muted);
-		font-size: 17rpx;
-	}
-
-	.total-block .strong {
-		margin-left: 4rpx;
-		color: var(--proto-primary-dark);
-		font-size: 29rpx;
-	}
-
-	.total-block .small {
-		width: 100%;
-		color: var(--proto-muted);
-		font-size: 15rpx;
-	}
 
 	.room-bottom-actions .proto-primary-button {
 		flex: 1.5;
@@ -1040,26 +886,6 @@
 		background: rgba(0, 106, 106, 0.8);
 	}
 
-	.hero-floating-actions {
-		top: 136rpx;
-		right: 26rpx;
-		left: auto;
-		gap: 12rpx;
-	}
-
-	.hero-floating-actions button {
-		width: 70rpx;
-		height: 70rpx;
-		margin-right: 0;
-		color: var(--proto-primary-dark);
-		background: rgba(255, 255, 255, 0.92);
-		border: 1rpx solid rgba(255, 255, 255, 0.65);
-		box-shadow: 0 8rpx 18rpx rgba(0, 65, 77, 0.14);
-	}
-
-	.hero-floating-actions > view {
-		gap: 12rpx;
-	}
 
 	.hero-photo-count {
 		right: 26rpx;
@@ -1080,6 +906,62 @@
 		border: 1rpx solid rgba(24, 133, 143, 0.14);
 		border-radius: 28rpx;
 		box-shadow: 0 14rpx 32rpx rgba(0, 106, 106, 0.12);
+	}
+
+	// 门店详情页已并入房型详情，这里展示门店名称与门店级信息。
+	.room-store-bar {
+		display: flex;
+		flex-direction: column;
+		gap: 8rpx;
+		margin-bottom: 18rpx;
+		padding: 14rpx 16rpx;
+		background: rgba(24, 133, 143, 0.06);
+		border: 1rpx solid rgba(24, 133, 143, 0.12);
+		border-radius: 16rpx;
+	}
+
+	.room-store-title-row {
+		display: flex;
+		align-items: center;
+		gap: 8rpx;
+		min-width: 0;
+	}
+
+	.room-store-name {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		color: var(--proto-primary-dark);
+		font-size: 25rpx;
+		font-weight: 700;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+
+	.room-store-status {
+		flex-shrink: 0;
+		padding: 2rpx 10rpx;
+		border-radius: 999rpx;
+		background: rgba(42, 169, 169, 0.14);
+		color: var(--proto-primary-dark);
+		font-size: 19rpx;
+		line-height: 1.6;
+	}
+
+	.room-store-meta-row {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 12rpx;
+		color: var(--proto-muted);
+		font-size: 20rpx;
+	}
+
+	.room-store-link {
+		display: inline-flex;
+		align-items: center;
+		margin-left: auto;
+		color: var(--proto-primary-dark);
 	}
 
 	.detail-title-row {
@@ -1105,18 +987,6 @@
 		margin-top: 9rpx;
 		font-size: 20rpx;
 		line-height: 1.4;
-	}
-
-	.room-status-badge {
-		max-width: 180rpx;
-		padding: 8rpx 12rpx;
-		color: var(--proto-primary-dark);
-		background: var(--proto-surface-tint);
-		border-radius: 18rpx;
-		font-size: 17rpx;
-		line-height: 1.3;
-		text-align: center;
-		white-space: normal;
 	}
 
 	.room-detail-tags {
@@ -1182,31 +1052,13 @@
 		white-space: nowrap;
 	}
 
-	.detail-price-row {
-		margin-top: 18rpx;
-		padding: 14rpx 16rpx;
-		background: #eaf7f7;
-		border: 1rpx solid rgba(42, 169, 169, 0.12);
-		border-radius: 16rpx;
-	}
-
-	.detail-price {
-		font-size: 40rpx;
-	}
-
-	.discount-tag {
-		padding: 8rpx 12rpx;
-		font-size: 17rpx;
-	}
 
 	.itinerary-card,
 	.room-choice-card,
 	.other-room-card,
-	.review-card,
 	.feature-card,
 	.facilities-card,
 	.policy-card,
-	.guest-card,
 	.location-card {
 		margin-top: 14rpx;
 		margin-bottom: 14rpx;
@@ -1268,46 +1120,6 @@
 		white-space: nowrap;
 	}
 
-	.stay-summary-price {
-		color: var(--proto-primary-dark);
-		font-weight: 750;
-		white-space: nowrap;
-	}
-
-	.price-trend-toggle {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		margin-top: 14rpx;
-		color: var(--proto-primary-dark);
-		font-size: 18rpx;
-	}
-
-	.price-trend-toggle .proto-icon {
-		margin-left: 4rpx;
-	}
-
-	.price-trend {
-		gap: 8rpx;
-		margin-top: 12rpx;
-	}
-
-	.price-trend > view {
-		padding: 11rpx 4rpx;
-		background: #f2f8f9;
-		border-radius: 12rpx;
-	}
-
-	.price-trend > view.today {
-		color: #ffffff;
-		background: var(--proto-primary);
-	}
-
-	.price-trend > view.today .small,
-	.price-trend > view.today .strong,
-	.price-trend > view.today .em {
-		color: #ffffff;
-	}
 
 	.room-choice-body {
 		display: flex;
@@ -1382,23 +1194,16 @@
 	.room-choice-footer {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		gap: 12rpx;
+		gap: 6rpx;
 		margin-top: 16rpx;
 		padding-top: 14rpx;
 		border-top: 1rpx solid rgba(197, 199, 202, 0.36);
 	}
 
 	.room-choice-footer > text {
-		display: flex;
-		align-items: center;
 		min-width: 0;
 		color: var(--proto-primary-dark);
 		font-size: 17rpx;
-	}
-
-	.room-choice-footer > text .proto-icon {
-		margin-right: 4rpx;
 	}
 
 	.room-choice-footer .proto-button-small {
@@ -1460,78 +1265,6 @@
 		font-size: 17rpx;
 	}
 
-	.review-item {
-		margin-top: 18rpx;
-		padding-top: 18rpx;
-		border-top: 1rpx solid rgba(197, 199, 202, 0.38);
-	}
-
-	.review-item:first-of-type {
-		padding-top: 0;
-		border-top: 0;
-	}
-
-	.review-user-row {
-		display: flex;
-		align-items: center;
-		gap: 10rpx;
-	}
-
-	.review-avatar {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 58rpx;
-		height: 58rpx;
-		color: var(--proto-primary-dark);
-		background: #dff6f5;
-		border-radius: 50%;
-		font-size: 24rpx;
-		font-weight: 800;
-	}
-
-	.review-user-copy {
-		display: flex;
-		flex: 1;
-		flex-direction: column;
-		gap: 3rpx;
-		min-width: 0;
-	}
-
-	.review-user-copy text:first-child {
-		font-size: 21rpx;
-		font-weight: 700;
-	}
-
-	.review-user-copy text:last-child {
-		color: var(--proto-muted);
-		font-size: 17rpx;
-	}
-
-	.review-stars {
-		gap: 2rpx;
-		color: var(--proto-primary);
-	}
-
-	.review-quote {
-		margin-top: 12rpx;
-		padding: 0;
-		background: transparent;
-		font-size: 20rpx;
-		line-height: 1.5;
-	}
-
-	.review-images {
-		display: flex;
-		gap: 10rpx;
-		margin-top: 12rpx;
-	}
-
-	.review-images image {
-		width: 148rpx;
-		height: 112rpx;
-		border-radius: 12rpx;
-	}
 
 	.feature-copy {
 		display: block;
@@ -1556,10 +1289,10 @@
 	}
 
 	.facility-group-title {
-		width: 74rpx;
-		flex: 0 0 74rpx;
+		width: 80rpx;
+		flex: 0 0 80rpx;
 		color: var(--proto-text);
-		font-size: 21rpx;
+		font-size: 24rpx;
 		font-weight: 750;
 	}
 
@@ -1574,11 +1307,11 @@
 		display: flex;
 		align-items: center;
 		color: var(--proto-muted);
-		font-size: 19rpx;
+		font-size: 22rpx;
 	}
 
 	.facility-items .proto-icon {
-		margin-right: 5rpx;
+		margin-right: 7rpx;
 	}
 
 	.policy-card .policy-item {
@@ -1589,31 +1322,15 @@
 	}
 
 	.policy-title-row {
-		font-size: 21rpx;
+		font-size: 24rpx;
 	}
 
 	.policy-body {
-		gap: 8rpx;
+		gap: 10rpx;
 		margin-top: 12rpx;
 		padding-top: 12rpx;
 		border-top: 1rpx solid rgba(197, 199, 202, 0.32);
-		font-size: 18rpx;
-	}
-
-	.guest-placeholder {
-		display: flex;
-		align-items: center;
-		gap: 10rpx;
-		margin-top: 16rpx;
-		padding: 18rpx;
-		color: var(--proto-muted);
-		background: #f3f8f9;
-		border-radius: 14rpx;
-		font-size: 19rpx;
-	}
-
-	.guest-placeholder .proto-icon {
-		color: var(--proto-primary-dark);
+		font-size: 22rpx;
 	}
 
 	.location-heading-action {
@@ -1802,30 +1519,18 @@
 	}
 
 	.room-bottom-actions .detail-bottom-link {
-		width: 58rpx;
-		flex: 0 0 58rpx;
+		width: 88rpx;
+		flex: 0 0 88rpx;
 		flex-direction: column;
-		gap: 3rpx;
+		gap: 6rpx;
 		color: var(--proto-muted);
-		font-size: 15rpx;
+		font-size: 21rpx;
 	}
 
 	.room-bottom-actions .detail-bottom-link .proto-icon {
 		margin-right: 0;
 	}
 
-	.total-block {
-		width: 112rpx;
-		flex: 0 0 112rpx;
-	}
-
-	.total-block > text {
-		font-size: 15rpx;
-	}
-
-	.total-block .strong {
-		font-size: 26rpx;
-	}
 
 	.room-bottom-actions .proto-primary-button {
 		min-width: 168rpx;
@@ -1842,11 +1547,6 @@
 		opacity: 1;
 	}
 
-	.room-detail-page .hero-floating-actions button {
-		color: var(--proto-primary-dark);
-		background: rgba(255, 255, 255, 0.94);
-		line-height: 1;
-	}
 
 	.room-detail-page .room-choice-footer .proto-button-small {
 		display: inline-flex;
@@ -1898,15 +1598,15 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 62rpx;
-		min-width: 62rpx;
-		height: 68rpx;
+		width: 88rpx;
+		min-width: 88rpx;
+		height: 84rpx;
 		margin: 0;
 		padding: 0;
 		color: var(--proto-primary-dark);
 		background: transparent;
 		border: 0;
-		font-size: 16rpx;
+		font-size: 21rpx;
 		font-weight: 650;
 		line-height: 1.15;
 		text-align: center;
@@ -1914,30 +1614,9 @@
 	}
 
 	.room-detail-page .room-bottom-actions .detail-bottom-link .proto-icon {
-		margin: 0 0 4rpx;
+		margin: 0;
 	}
 
-	.room-detail-page .room-bottom-actions .total-block {
-		width: 126rpx;
-		min-width: 126rpx;
-		flex: 0 0 126rpx;
-		padding-left: 4rpx;
-	}
-
-	.room-detail-page .room-bottom-actions .total-block > text {
-		color: var(--proto-muted);
-		line-height: 1.25;
-	}
-
-	.room-detail-page .room-bottom-actions .total-block .strong {
-		color: var(--proto-primary-dark);
-		font-size: 28rpx;
-		font-weight: 850;
-	}
-
-	.room-detail-page .room-bottom-actions .total-block .small {
-		font-size: 14rpx;
-	}
 
 	.room-detail-page .room-bottom-actions .proto-primary-button {
 		display: flex;
@@ -1959,19 +1638,12 @@
 		text-align: center;
 	}
 
-	.room-detail-page .stay-night,
-	.room-detail-page .discount-tag,
-	.room-detail-page .room-status-badge {
+	.room-detail-page .stay-night {
 		line-height: 1.25;
 		white-space: nowrap;
 	}
 
-	.room-detail-page .room-status-badge {
-		flex: 0 0 auto;
-	}
-
-	.room-detail-page .proto-link,
-	.room-detail-page .price-trend-toggle {
+	.room-detail-page .proto-link {
 		color: var(--proto-primary-dark);
 		line-height: 1.3;
 	}
@@ -2011,8 +1683,7 @@
 
 	.room-detail-page .detail-highlight,
 	.room-detail-page .stay-strip,
-	.room-detail-page .room-choice-footer,
-	.room-detail-page .guest-placeholder {
+	.room-detail-page .room-choice-footer {
 		background: #f1f8f9;
 		border-color: rgba(42, 169, 169, 0.12);
 	}
@@ -2022,9 +1693,7 @@
 	}
 
 	.room-detail-page .facility-items > view,
-	.room-detail-page .review-user-copy text:last-child,
 	.room-detail-page .policy-body,
-	.room-detail-page .guest-placeholder,
 	.room-detail-page .location-note {
 		line-height: 1.45;
 	}
@@ -2057,6 +1726,19 @@
 
 	.room-detail-page .itinerary-heading {
 		margin-bottom: 14rpx;
+	}
+
+	.room-detail-page .itinerary-heading .proto-link {
+		display: flex;
+		align-items: center;
+		flex: 0 0 auto;
+		gap: 4rpx;
+		margin-left: 12rpx;
+		white-space: nowrap;
+	}
+
+	.room-detail-page .itinerary-heading .proto-link text {
+		white-space: nowrap;
 	}
 
 	.room-detail-page .stay-strip {

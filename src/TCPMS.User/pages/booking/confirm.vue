@@ -42,7 +42,19 @@
 					<text class="guest-section-title">入住信息</text>
 					<text class="guest-section-subtitle">实名登记，保障入住顺利办理</text>
 				</view>
-				<view class="proto-link confirm-guest-link" @tap="goGuests"><text>需填{{ booking.guestCount }}人</text><ProtoIcon name="plus" :size="17" /><text>添加入住人</text></view>
+				<view class="proto-link confirm-guest-link" @tap="goGuests()">
+					<ProtoIcon name="plus" :size="17" />
+					<text>{{ guestLinkText }}</text>
+				</view>
+			</view>
+			<view v-if="!guests.length" class="guest-empty">
+				<view class="guest-empty-icon"><ProtoIcon name="group" :size="40" /></view>
+				<text class="guest-empty-title">还没有添加入住人</text>
+				<text class="guest-empty-desc">至少选择 1 位实名入住人，同行人可一起勾选</text>
+				<button class="proto-ghost-button guest-empty-action" hover-class="none" @tap="goGuests()">
+					<ProtoIcon name="plus" :size="22" />
+					<text>添加入住人</text>
+				</button>
 			</view>
 			<view v-for="(guest, index) in guests" :key="guest.id || guest.name" class="guest-row">
 				<view class="guest-avatar"><text>{{ guest.name ? guest.name.slice(0, 1) : '客' }}</text></view>
@@ -51,11 +63,11 @@
 						<text class="guest-name">{{ guest.name }}</text>
 						<text class="proto-pill" :class="index === 0 ? 'primary' : 'info'">{{ index === 0 ? '主入住人' : '同行住客' }}</text>
 					</view>
-					<view class="guest-meta-line"><ProtoIcon name="document" :size="19" /><text>身份证 {{ guest.identity }}</text></view>
-					<view class="guest-meta-line"><ProtoIcon name="phone" :size="19" /><text>手机号 {{ guest.phone }}</text></view>
+					<view class="guest-meta-line" v-if="guest.identity"><ProtoIcon name="document" :size="19" /><text>身份证 {{ guest.identity }}</text></view>
+					<view class="guest-meta-line" v-if="guest.phone"><ProtoIcon name="phone" :size="19" /><text>手机号 {{ guest.phone }}</text></view>
 				</view>
 				<view class="guest-actions">
-					<view class="guest-edit-button" aria-label="编辑入住人" @tap="goGuests">
+					<view class="guest-edit-button" aria-label="修改入住人" @tap="goGuests(guest.id)">
 						<ProtoIcon class="guest-edit" name="edit" :size="22" />
 					</view>
 					<view class="guest-delete-button" aria-label="删除入住人" @tap="deleteGuest(guest)">
@@ -63,11 +75,10 @@
 					</view>
 				</view>
 			</view>
-			<view v-if="guests.length < booking.guestCount" class="confirm-error">当前仅登记 {{ guests.length }} 位入住人，请补齐实名信息后继续。</view>
-			<button v-if="guests.length < booking.guestCount" class="proto-ghost-button" hover-class="none" @tap="goGuests">
-				<ProtoIcon name="plus" :size="22" />
-				<text>添加入住人</text>
-			</button>
+			<view v-if="guests.length" class="guest-add-more" @tap="goGuests()">
+				<ProtoIcon name="plus" :size="20" />
+				<text>继续添加入住人</text>
+			</view>
 		</view>
 
 		<view class="confirm-fee proto-card">
@@ -114,6 +125,13 @@
 			</view>
 			<button class="proto-primary-button" hover-class="none" :disabled="submitStatus === 'locking' || !isApiBooking || quoteLoading || quoteCents === null" @tap="submitOrder"><ProtoIcon name="shield" tone="white" :size="21" /><text>{{ submitStatus === 'locking' ? '正在锁定库存...' : quoteLoading ? '正在核对价格...' : '提交订单' }}</text></button>
 		</view>
+
+		<view v-if="authRedirecting" class="auth-redirect-mask">
+			<view class="auth-redirect-card">
+				<text class="auth-redirect-title">需要登录</text>
+				<text class="auth-redirect-desc">正在前往登录页，请稍候…</text>
+			</view>
+		</view>
 	</view>
 </template>
 
@@ -121,8 +139,8 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { goPage, showToast } from '@/common/prototype.js'
-	import { getBooking, getGuests, saveBooking } from '@/common/app-store.js'
-	import { createRemoteOrder, previewRemoteOrder } from '@/common/api.js'
+	import { getApiToken, getBooking, saveBooking } from '@/common/app-store.js'
+	import { createRemoteOrder, previewRemoteOrder, redirectToLogin } from '@/common/api.js'
 
 	const weekdayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 	const isGuid = (value) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(value || ''))
@@ -138,13 +156,16 @@
 			const booking = getBooking()
 			return {
 				booking,
-				guests: Array.isArray(booking.guests) ? booking.guests : getGuests(),
+				// 入住人默认留空：必须由用户自己从「常用入住人」里选择或新增，不做任何预填。
+				guests: [],
 				ruleAgreed: false,
 				submitStatus: 'idle',
 				quoteCents: null,
 				quoteLoading: false,
 				quoteError: '',
-				quoteRequestId: 0
+				quoteRequestId: 0,
+				quoteFixAttempted: false,
+				authRedirecting: false
 			}
 		},
 		computed: {
@@ -171,6 +192,10 @@
 				const tags = Array.isArray(this.booking.roomTags) ? this.booking.roomTags.filter(Boolean) : []
 				return (tags.length ? tags : ['私家花园', '近商圈', '近地铁']).slice(0, 4)
 			},
+			// 入住信息只在「至少 1 位」这个前提上校验，选择数量不限，所以入口只显示已选人数。
+			guestLinkText() {
+				return this.guests.length ? `已选 ${this.guests.length} 位 · 修改` : '添加入住人'
+			},
 			feeItems() {
 				if (this.isApiBooking) {
 					return [{
@@ -188,18 +213,78 @@
 			}
 		},
 		onLoad() {
+			// 选人页拿不到 eventChannel 时会走全局事件，这里两路都接上，回填逻辑本身是幂等的。
+			uni.$on('booking:guests-selected', this.applyGuestSelection)
+			// 远程房源报价必须登录：没有 token 就别先发请求了，直接进入跳转态，避免 401 后白屏等待。
+			if (this.isApiBooking && !getApiToken()) {
+				this.authRedirecting = true
+				return
+			}
 			this.refreshData()
 		},
+		onUnload() {
+			uni.$off('booking:guests-selected', this.applyGuestSelection)
+		},
+		onReady() {
+			// 等首帧渲染完再 reLaunch：页面切换动画期间的跳转会被小程序排队，先给出跳转提示更稳；
+			// 留 150ms 也是为了让当前的 navigateTo 先结束，避免它被登录跳转打断成 fail timeout。
+			if (this.authRedirecting) redirectToLogin(150)
+		},
 		onShow() {
+			if (this.authRedirecting) return
 			this.refreshData()
 		},
 		methods: {
 			refreshData() {
 				this.booking = getBooking()
-				this.guests = Array.isArray(this.booking.guests) ? this.booking.guests : getGuests()
+				// 入住人只来自「选择入住人」页面的回传，这里不做任何预填/兜底；
+				// 实名入住人数与出行人数（guestCount）已解耦：至少 1 位、可多选，因此不做截断。
 				this.quoteCents = null
 				this.quoteError = ''
+				this.quoteFixAttempted = false
 				this.loadQuote()
+			},
+			// 床位房等房型限制「maxGuests × 间数」，超员会让报价接口 400；发请求前先收敛到上限内。
+			sanitizeGuestCount() {
+				const maxGuests = Number(this.booking.maxGuests || 0)
+				if (!maxGuests) return
+				const limit = maxGuests * Math.max(1, Number(this.booking.roomCount || 1))
+				if (Number(this.booking.guestCount || 1) > limit) {
+					this.booking = saveBooking({ ...this.booking, guestCount: limit })
+				}
+			},
+			// 报价 400 里有两类可自动修复的问题（人数超限、日期过期），修正后重试一次；其余如实展示。
+			applyQuoteFix(message) {
+				if (typeof message !== 'string' || this.quoteFixAttempted) return false
+				if (message.includes('承载人数')) {
+					const maxGuests = Number(this.booking.maxGuests || 0)
+					if (!maxGuests) return false
+					this.booking = saveBooking({
+						...this.booking,
+						guestCount: Math.max(1, maxGuests * Math.max(1, Number(this.booking.roomCount || 1)))
+					})
+					this.quoteFixAttempted = true
+					return true
+				}
+				if (message.includes('不能早于今天') || message.includes('必须早于离店日期')) {
+					const pad = (value) => String(value).padStart(2, '0')
+					const toIso = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T00:00:00`
+					const toLabel = (date) => `${pad(date.getMonth() + 1)}月${pad(date.getDate())}日`
+					const checkIn = new Date(Date.now() + 86400000)
+					const checkOut = new Date(Date.now() + 2 * 86400000)
+					this.booking = saveBooking({
+						...this.booking,
+						checkIn: toLabel(checkIn),
+						checkOut: toLabel(checkOut),
+						isoCheckIn: toIso(checkIn),
+						isoCheckOut: toIso(checkOut),
+						date: `${toLabel(checkIn)} - ${toLabel(checkOut)}`,
+						nights: 1
+					})
+					this.quoteFixAttempted = true
+					return true
+				}
+				return false
 			},
 			async loadQuote() {
 				const requestId = ++this.quoteRequestId
@@ -207,6 +292,7 @@
 					this.quoteLoading = false
 					return
 				}
+				this.sanitizeGuestCount()
 				this.quoteLoading = true
 				try {
 					const quote = await previewRemoteOrder(this.booking)
@@ -216,10 +302,33 @@
 				} catch (error) {
 					if (requestId !== this.quoteRequestId) return
 					this.quoteCents = null
+					if (error && error.code === 'unauthorized') {
+						// 登录态已失效：接口层已经在跳登录，这里补一层遮罩，避免跳过订单页时出现白屏。
+						this.authRedirecting = true
+						return
+					}
+					if (this.applyQuoteFix(error?.message)) {
+						await this.loadQuote()
+						return
+					}
 					this.quoteError = error?.message || '请检查登录状态、库存或网络后重试'
 				} finally {
 					if (requestId === this.quoteRequestId) this.quoteLoading = false
 				}
+			},
+			// 选人页确认后回填：勾选几位就保留几位（至少 1 位），按 id/证件号去重避免重复叠加。
+			applyGuestSelection(picked) {
+				if (!Array.isArray(picked)) return
+				const seen = {}
+				const guests = []
+				picked.forEach((guest) => {
+					if (!guest || !guest.name) return
+					const key = String(guest.id || guest.identity || guest.name)
+					if (seen[key]) return
+					seen[key] = true
+					guests.push({ ...guest })
+				})
+				this.guests = guests
 			},
 			toggleRuleAgreement() {
 				this.ruleAgreed = !this.ruleAgreed
@@ -245,8 +354,8 @@
 						return
 					}
 				}
-				if (this.guests.length < Number(this.booking.guestCount || 1)) {
-					showToast('请补齐入住人实名信息')
+				if (!this.guests.length) {
+					showToast('请至少选择 1 位入住人')
 					return
 				}
 				if (!this.ruleAgreed) {
@@ -256,7 +365,7 @@
 				this.submitStatus = 'locking'
 				const booking = {
 					...this.booking,
-					guests: this.guests.slice(0, Number(this.booking.guestCount || this.guests.length)),
+					guests: this.guests.slice(),
 					total: this.total
 				}
 				let order
@@ -279,20 +388,25 @@
 					content: '仅从本次订单的入住人列表移除，不会删除常用入住人资料。',
 					success: (res) => {
 						if (!res.confirm) return
-						this.guests = this.guests.filter((item) => item.id !== guest.id)
-						if (!this.guests.some((item) => item.isDefault) && this.guests[0]) {
-							this.guests[0].isDefault = true
-						}
-						this.booking = saveBooking({
-							...this.booking,
-							guests: this.guests
-						})
+						this.guests = this.guests.filter((item) => String(item.id) !== String(guest.id))
 						showToast('已从本次订单移除')
 					}
 				})
 			},
-			goGuests() {
-				goPage('/pages/me/guests')
+			// 去「入住人管理」选人：带 mode=select 进入选择模式，确认后通过 eventChannel 回传选中的人。
+			// 不传人数上限，选人页支持任意多选（订单只要求 ≥1 位）。
+			// editId 有值时（点某个入住人的编辑图标）进页面就直接打开那个人的编辑弹层。
+			goGuests(editId) {
+				const selected = this.guests.map((guest) => String(guest.id || '')).filter(Boolean).join(',')
+				const query = ['mode=select']
+				if (selected) query.push(`selected=${encodeURIComponent(selected)}`)
+				if (editId) query.push(`edit=${encodeURIComponent(String(editId))}`)
+				uni.navigateTo({
+					url: `/pages/me/guests?${query.join('&')}`,
+					events: {
+						guestsSelected: (picked) => this.applyGuestSelection(picked)
+					}
+				})
 			}
 		}
 	}
@@ -305,43 +419,6 @@
 		padding-bottom: calc(154rpx + env(safe-area-inset-bottom));
 	}
 
-	.confirm-store-row {
-		display: flex;
-		align-items: center;
-		gap: 12rpx;
-	}
-
-	.confirm-store-icon {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 42rpx;
-		height: 42rpx;
-		color: var(--proto-primary-dark);
-		background: var(--proto-surface-tint);
-		border-radius: 14rpx;
-	}
-
-	.confirm-store-row > view {
-		flex: 1;
-	}
-
-	.confirm-store,
-	.confirm-room {
-		display: block;
-	}
-
-	.confirm-store {
-		color: var(--proto-muted);
-		font-size: 20rpx;
-	}
-
-	.confirm-room {
-		margin-top: 8rpx;
-		color: var(--proto-text);
-		font-size: 27rpx;
-		font-weight: 800;
-	}
 
 	.confirm-dates {
 		display: flex;
@@ -589,13 +666,6 @@
 		margin: 0;
 	}
 
-	.failed-copy {
-		display: block;
-		margin-top: 20rpx;
-		color: var(--proto-muted);
-		font-size: 22rpx;
-		line-height: 1.6;
-	}
 
 	/* Booking form visual pass: green accents and a room-first confirmation card. */
 	.booking-confirm-page {
@@ -762,6 +832,50 @@
 		border-radius: 18rpx;
 	}
 
+	/* 默认没有任何入住人，这里给出一个可点击的空状态，避免出现红色报错。 */
+	.booking-confirm-page .guest-empty {
+		display: flex;
+		align-items: center;
+		flex-direction: column;
+		margin-top: 16rpx;
+		padding: 34rpx 20rpx 26rpx;
+		background: #f5fbfb;
+		border: 2rpx dashed rgba(42, 169, 169, 0.32);
+		border-radius: 18rpx;
+	}
+
+	.booking-confirm-page .guest-empty-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 92rpx;
+		height: 92rpx;
+		color: var(--booking-green-deep);
+		background: var(--booking-green-tint);
+		border-radius: 50%;
+	}
+
+	.booking-confirm-page .guest-empty-title {
+		margin-top: 14rpx;
+		color: var(--proto-text);
+		font-size: 24rpx;
+		font-weight: 800;
+	}
+
+	.booking-confirm-page .guest-empty-desc {
+		margin-top: 6rpx;
+		color: var(--proto-muted);
+		font-size: 19rpx;
+		text-align: center;
+	}
+
+	.booking-confirm-page .guest-empty-action {
+		width: 100%;
+		height: 70rpx;
+		margin: 18rpx 0 0;
+		font-size: 21rpx;
+	}
+
 	.booking-confirm-page .guest-row > .guest-avatar {
 		flex: 0 0 58rpx;
 		width: 58rpx;
@@ -839,6 +953,22 @@
 	.booking-confirm-page .guest-delete-button {
 		border-color: rgba(180, 35, 24, 0.12);
 		background: #fff0ee;
+	}
+
+	/* 已选入住人后仍可继续多选：给一个轻量入口，不再用「人数不足」的红色报错。 */
+	.booking-confirm-page .guest-add-more {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6rpx;
+		margin-top: 14rpx;
+		padding: 16rpx;
+		color: var(--booking-green-deep);
+		background: #f5fbfb;
+		border: 2rpx dashed rgba(42, 169, 169, 0.34);
+		border-radius: 16rpx;
+		font-size: 21rpx;
+		font-weight: 700;
 	}
 
 	.booking-confirm-page .confirm-policy {
@@ -926,5 +1056,38 @@
 
 	.booking-confirm-page .agreement-check-hover {
 		opacity: 0.78;
+	}
+
+	/* 未登录/登录过期时盖住订单页，避免跳转前出现整页白屏 */
+	.auth-redirect-mask {
+		position: fixed;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		left: 0;
+		z-index: 999;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #ffffff;
+	}
+
+	.auth-redirect-card {
+		display: flex;
+		align-items: center;
+		flex-direction: column;
+		padding: 0 48rpx;
+	}
+
+	.auth-redirect-title {
+		color: #1a1a1a;
+		font-size: 32rpx;
+		font-weight: 700;
+	}
+
+	.auth-redirect-desc {
+		margin-top: 14rpx;
+		color: #8a969c;
+		font-size: 23rpx;
 	}
 </style>

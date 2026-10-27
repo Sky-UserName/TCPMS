@@ -55,6 +55,17 @@ npm run dev
 
 使用 HBuilderX 打开 src/TCPMS.User，运行到微信开发者工具。开发工具中需要允许本地请求或配置合法域名；生产环境必须使用 HTTPS 合法域名。
 
+编译产物位于 `src/TCPMS.User/unpackage/dist/dev/mp-weixin`，微信开发者工具要导入的是这个目录，而不是 `src/TCPMS.User` 源码目录。源码根目录没有 `app.json`，直接打开会提示 `app.json is not found in the project root directory`。
+
+如果产物缺失或想在没有图形界面时重新编译，可以运行：
+
+~~~
+powershell -ExecutionPolicy Bypass -File scripts/build-miniapp.ps1           # 开发包，接口指向 localhost:5180
+powershell -ExecutionPolicy Bypass -File scripts/build-miniapp.ps1 -Mode prod # 生产包，接口读 .env.production
+~~~
+
+脚本会临时借用 HBuilderX 自带的编译器（`D:\SoftWare\HBuilderX\plugins\uniapp-cli-vite`），编译完成后自动清理临时的 `package.json`、`vite.config.js` 和 `node_modules`，不会改变项目结构。HBuilderX 安装在其他位置时用 `-HBuilderXHome` 指定。
+
 ## 生产前必须完成
 
 1. 微信 code2Session、手机号授权和隐私协议。
