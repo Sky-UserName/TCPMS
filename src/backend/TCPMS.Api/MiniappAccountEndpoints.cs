@@ -427,8 +427,8 @@ public static class MiniappAccountEndpoints
             var (title, summary, icon) = order.Status switch
             {
                 OrderStatuses.PendingPayment => ("待支付提醒", "订单待支付，超时将自动释放库存", "clock"),
-                OrderStatuses.PaidPendingConfirmation => ("订单消息", "订单已支付，等待门店确认", "receipt"),
-                OrderStatuses.ConfirmedPendingCheckIn => ("订单消息", "门店已确认，请按预订日期办理入住", "receipt"),
+                OrderStatuses.PaidPendingVerification => ("订单消息", "订单已支付，请到店出示核销码", "receipt"),
+                OrderStatuses.PaidPendingConfirmation or OrderStatuses.ConfirmedPendingCheckIn => ("订单消息", "订单已支付，请到店出示核销码", "receipt"),
                 OrderStatuses.CheckedIn => ("入住提醒", "已办理入住，祝您入住愉快", "clock"),
                 OrderStatuses.Completed => ("订单消息", "订单已完成，欢迎评价本次入住", "receipt"),
                 OrderStatuses.Refunding => ("退款消息", "退款申请审核中，请留意进度", "wallet"),
@@ -441,7 +441,7 @@ public static class MiniappAccountEndpoints
             messages.Add(new MessageItem
             {
                 Id = id,
-                Type = order.Status == OrderStatuses.ConfirmedPendingCheckIn ? "reminder" : "order",
+                Type = order.Status == OrderStatuses.PaidPendingVerification ? "reminder" : "order",
                 Icon = icon,
                 Title = title,
                 Summary = $"{order.RoomType?.Name ?? "房型"} · {order.Store?.Name ?? "门店"}：{summary}",

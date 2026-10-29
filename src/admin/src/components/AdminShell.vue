@@ -285,6 +285,8 @@ const groups = [
       { key: 'config', label: '基础配置', items: [
         { key: 'facilities', label: '服务设施', icon: CollectionTag },
         { key: 'tags', label: '民宿标签', icon: CollectionTag },
+        { key: 'services', label: '民宿服务', icon: CollectionTag },
+        { key: 'nearbyFacilities', label: '周边设施', icon: Location },
         { key: 'regions', label: '地区管理', icon: Location },
         { key: 'roomTypes', label: '房间类型', icon: House },
         { key: 'levels', label: '民宿等级', icon: CollectionTag }
@@ -324,6 +326,7 @@ const titleMap = {
   roomManagement: '房间管理', financialOrders: '民宿订单', refunds: '退款审核',
   users: '权限管理', audit: '操作审计',
   reviews: '评价管理', facilities: '服务设施', tags: '民宿标签',
+  services: '民宿服务', nearbyFacilities: '周边设施',
   regions: '地区管理', roomTypes: '房间类型', levels: '民宿等级',
   storeStaff: '门店员工', permissionMenus: '权限菜单', withdrawals: '门店提现',
   income: '门店收入', appCenter: '应用中心', carousel: '轮播图配置', messages: '消息提醒', messageLogs: '消息日志',

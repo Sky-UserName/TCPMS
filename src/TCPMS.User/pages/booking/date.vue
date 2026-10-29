@@ -99,6 +99,7 @@
 			const booking = getBooking()
 			return {
 				booking,
+				availabilityRoomId: booking.roomId,
 				fromHome: false,
 				from: '',
 				checkInKey: booking.isoCheckIn,
@@ -139,7 +140,14 @@
 		onLoad(options) {
 			this.from = options && options.from ? String(options.from) : ''
 			this.fromHome = this.from === 'home'
-			if (options && (options.id || options.storeId)) {
+			if (this.fromHome || this.from === 'room-list') {
+				// 未选择具体房型前，日期日历只选日期，不展示某个房型的价格。
+				this.availabilityRoomId = ''
+				if (options && options.storeId) {
+					this.booking = saveBooking({ ...this.booking, storeId: options.storeId })
+				}
+			} else if (options && (options.id || options.storeId)) {
+				this.availabilityRoomId = options.id || this.booking.roomId
 				this.booking = saveBooking({
 					...this.booking,
 					roomId: options.id || this.booking.roomId,
@@ -152,7 +160,7 @@
 		},
 		methods: {
 			async loadAvailability() {
-				const roomId = this.booking && this.booking.roomId
+				const roomId = this.availabilityRoomId
 				const isRemoteRoom = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(roomId || ''))
 				if (!isRemoteRoom) return
 				const today = normalizeDate(new Date())
@@ -165,11 +173,16 @@
 				// 后端单次最多查询 90 晚，日历覆盖多个月时按窗口分片拉取。
 				const windowDays = 89
 				let cursor = new Date(today)
-				try {
-					while (cursor <= endDate) {
-						const windowEnd = new Date(cursor)
-						windowEnd.setDate(windowEnd.getDate() + windowDays)
-						const sliceEnd = windowEnd > endDate ? endDate : windowEnd
+				let failed = false
+				// 用 cursor < endDate 而不是 <=：最后一窗若正好落在 endDate，
+				// checkIn 会等于 checkOut，后端会按「入住必须早于离店」返回 400。
+				while (cursor < endDate) {
+					const windowEnd = new Date(cursor)
+					windowEnd.setDate(windowEnd.getDate() + windowDays)
+					const sliceEnd = windowEnd > endDate ? endDate : windowEnd
+					// 空区间与倒序区间都不发请求，避免无意义的 400。
+					if (isoDate(sliceEnd) === isoDate(cursor) || sliceEnd <= cursor) break
+					try {
 						const daily = await fetchRoomAvailability(
 							roomId,
 							`${isoDate(cursor)}`,
@@ -183,16 +196,15 @@
 								priceLabel: item.priceCents ? `¥${Math.round(Number(item.priceCents) / 100)}` : ''
 							}
 						})
-						if (sliceEnd <= cursor) break
-						cursor = new Date(sliceEnd)
+					} catch (error) {
+						// 单个窗口失败不丢弃其他月份的数据，日历仍可正常选日期。
+						failed = true
 					}
-					this.availabilityMap = map
-					this.decorateMonths()
-					this.availabilityState = 'ready'
-				} catch (error) {
-					// 房态接口异常时保留日历可选状态，下单页仍会重新校验库存。
-					this.availabilityState = 'error'
+					cursor = new Date(sliceEnd)
 				}
+				this.availabilityMap = map
+				this.decorateMonths()
+				this.availabilityState = failed && !Object.keys(map).length ? 'error' : 'ready'
 			},
 			decorateMonths() {
 				this.months = this.months.map((month) => ({
@@ -250,7 +262,8 @@
 					date: `${this.checkInLabel} - ${this.checkOutLabel}`,
 					nights: this.nights
 				})
-				if (this.fromHome || this.from === 'room-detail' || this.from === 'room-list') {
+				// from=confirm：订单页报价失败后点「修改入住日期」进来，选完直接回订单页（onShow 会重新报价）。
+				if (this.fromHome || this.from === 'confirm' || this.from === 'room-detail' || this.from === 'room-list') {
 					uni.navigateBack({ delta: 1, fail: () => uni.reLaunch({ url: '/pages/index/index' }) })
 					return
 				}
@@ -445,14 +458,25 @@
 	}
 
 	.date-confirm-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		width: 100%;
 		height: 84rpx;
+		margin: 0;
+		padding: 0;
 		color: #ffffff;
 		background: #2aa9a9;
 		border-radius: 42rpx;
 		box-shadow: 0 10rpx 24rpx rgba(42, 169, 169, 0.24);
+		// 微信 button 默认 line-height 2.55，会把「确认」顶到偏上位置。
 		font-size: 28rpx;
 		font-weight: 750;
+		line-height: 1;
+	}
+
+	.date-confirm-button > text {
+		line-height: 1;
 	}
 
 	.date-confirm-button.disabled {
@@ -507,11 +531,17 @@
 		background: var(--booking-green);
 	}
 
-	.booking-date-page .date-confirm-button,
-	.booking-date-page .date-confirm-button > text {
+	.booking-date-page .date-confirm-button {
 		color: #ffffff;
 		background: var(--booking-green);
 		box-shadow: 0 10rpx 24rpx rgba(42, 169, 169, 0.22);
+	}
+
+	// 按钮是 flex 容器，<text> 会被块级化；这里只保留文字颜色，避免文字自带底色/阴影。
+	.booking-date-page .date-confirm-button > text {
+		color: #ffffff;
+		background: transparent;
+		box-shadow: none;
 	}
 
 	.booking-date-page .date-confirm-button.disabled {

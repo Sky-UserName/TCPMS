@@ -37,6 +37,7 @@ public static class RegionLevels
 public static class OrderStatuses
 {
     public const string PendingPayment = "PendingPayment";
+    public const string PaidPendingVerification = "PaidPendingVerification";
     public const string PaidPendingConfirmation = "PaidPendingConfirmation";
     public const string ConfirmedPendingCheckIn = "ConfirmedPendingCheckIn";
     public const string CheckedIn = "CheckedIn";
@@ -45,6 +46,12 @@ public static class OrderStatuses
     public const string Refunding = "Refunding";
     public const string Refunded = "Refunded";
     public const string RefundFailed = "RefundFailed";
+}
+
+public static class OrderVerificationStatuses
+{
+    public const string Unverified = "Unverified";
+    public const string Verified = "Verified";
 }
 
 public static class ReviewStatuses
@@ -99,6 +106,8 @@ public class AdminUser
     public bool MustChangePassword { get; set; }
     public DateTime? PasswordChangedAt { get; set; }
     public Guid? StoreId { get; set; }
+    // 员工账号关联的微信会员；管理员在「会员管理」里选人时写入，便于后续按会员身份识别员工。
+    public Guid? WxUserId { get; set; }
     public string? PhoneNumber { get; set; }
     public DateTime? LastLoginAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -268,6 +277,8 @@ public class BookingOrder
     public Guid Id { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
     public Guid WxUserId { get; set; }
+    public string? WxUserNickname { get; set; }
+    public string? VerificationCode { get; set; }
     public Guid StoreId { get; set; }
     public Guid RoomTypeId { get; set; }
     public DateTime CheckIn { get; set; }
@@ -278,7 +289,10 @@ public class BookingOrder
     public string Currency { get; set; } = "CNY";
     public string Status { get; set; } = OrderStatuses.PendingPayment;
     public string PaymentStatus { get; set; } = "Unpaid";
+    public string VerificationStatus { get; set; } = OrderVerificationStatuses.Unverified;
+    public DateTime? VerifiedAt { get; set; }
     public string? CancellationReason { get; set; }
+    public string? Note { get; set; }
     public string? GuestSnapshotJson { get; set; }
     public string? PriceSnapshotJson { get; set; }
     public string? AssignedResourcesJson { get; set; }

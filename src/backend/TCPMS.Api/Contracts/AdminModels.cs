@@ -144,7 +144,8 @@ public sealed record AdminReviewRequest(
     string? Content,
     int? Score,
     string? Status,
-    string? ReviewComment);
+    string? ReviewComment,
+    IReadOnlyList<string>? Images = null);
 
 public sealed record ManagedItemRequest(JsonElement Data);
 
@@ -226,11 +227,13 @@ public sealed record MessageLogPage(
 
 public sealed record StoreStaffRequest(
     string Username,
+    string? DisplayName,
     string? Gender,
     string? Phone,
     string Status,
     Guid? StoreId,
-    IReadOnlyList<string>? Permissions);
+    IReadOnlyList<string>? Permissions,
+    Guid? WxUserId = null);
 
 public sealed record StoreStaffItem(
     Guid Id,
@@ -243,7 +246,8 @@ public sealed record StoreStaffItem(
     string? StoreName,
     IReadOnlyList<string> Permissions,
     DateTime CreatedAt,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    Guid? WxUserId = null);
 
 public sealed record WithdrawalRequest(
     Guid? StoreId,
@@ -392,6 +396,8 @@ public sealed record AdminOrderDetail(
     Guid Id,
     string OrderNumber,
     Guid WxUserId,
+    string UserNickname,
+    string? VerificationCode,
     Guid StoreId,
     string StoreName,
     Guid RoomTypeId,
@@ -411,7 +417,38 @@ public sealed record AdminOrderDetail(
     DateTime CreatedAt,
     DateTime? PaymentExpiresAt,
     IReadOnlyList<PaymentItem> Payments,
-    IReadOnlyList<RefundItem> Refunds);
+    IReadOnlyList<RefundItem> Refunds,
+    int ActualPaidAmountCents,
+    DateTime? PaidAt,
+    string VerificationStatus,
+    DateTime? VerifiedAt,
+    DateTime? RefundedAt,
+    string? Note);
+
+public sealed record AdminOrderListItem(
+    Guid Id,
+    Guid WxUserId,
+    string UserNickname,
+    string OrderNumber,
+    int TotalAmountCents,
+    int ActualPaidAmountCents,
+    string Status,
+    string PaymentStatus,
+    DateTime? PaidAt,
+    string VerificationStatus,
+    DateTime? VerifiedAt,
+    DateTime? RefundedAt,
+    DateTime CheckIn,
+    DateTime CheckOut,
+    Guid StoreId,
+    string StoreName,
+    Guid RoomTypeId,
+    string RoomTypeName,
+    string? Note,
+    int GuestCount,
+    int Quantity,
+    DateTime CreatedAt,
+    string? VerificationCode);
 
 public sealed record PaymentItem(
     Guid Id,

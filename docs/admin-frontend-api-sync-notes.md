@@ -58,16 +58,20 @@ DELETE /api/v1/admin/store-staff/{id}
 ```json
 {
   "id": "staff-001",
-  "username": "frontdesk",
+  "username": "会员昵称（来自会员管理下拉选择，选择后自动带出手机号）",
+  "displayName": "员工名称",
   "gender": "male",
   "phone": "13800000000",
   "status": "normal",
   "storeId": "store-001",
   "permissions": ["rooms", "orders", "verify"],
+  "wxUserId": "member-001",
   "createdAt": "2026-10-08T10:00:00+08:00",
   "updatedAt": "2026-10-08T10:00:00+08:00"
 }
 ```
+
+`username` 由管理端从 `/api/v1/admin/members?keyword=`（会员管理数据）中选择昵称写入，选择会员时同步回填 `phone`、`gender`，并写入 `wxUserId` 便于后续按会员身份识别员工；`displayName` 是列表和门店侧展示的「员工名称」，留空时后端回落为 `username`。
 
 权限建议保存菜单 `key`，不要保存标题，避免标题调整后产生脏数据。
 
@@ -277,6 +281,13 @@ POST   /api/v1/admin/inventory/adjust
 ```
 
 房间审核拒绝时必须提交 `rejectionReason`；价格接口使用分为单位的 `PriceCents`，前端显示元并在请求时乘以 100。现有价格查询和库存查询的最大范围为 31 天，批量价格最多 180 天，前端月历切换应按月请求。
+
+### 价格日历的「总数/剩余」展示口径（2026-10-28）
+
+- 在价格设置里手动改过单价的日期（`PriceCalendars.Source` 为 `Manual`，或手动调库存自动补的标记），总数/剩余按这一天自己的 `InventoryDailies` 展示，保存房型数量时也保留这一天的数字。
+- 没有手动设置过的日期，总数回落到房型当前数量（`roomCount` / `bedCount`），剩余 = 该数量 - 锁定 - 已售；历史遗留的脏库存不会影响显示。
+- 种子数据自动铺的 `Seed` / `Weekend` 价格不算手动设置，仍然跟随房型数量。
+- 列表里的日期格子右上角会带一个小圆点，表示这一天有单独设置，悬停可看到说明。
 
 建议后续补充门店房间专用查询参数或确认前端继续使用：
 

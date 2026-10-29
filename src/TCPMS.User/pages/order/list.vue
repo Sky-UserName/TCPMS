@@ -1,6 +1,7 @@
 <template>
 	<view class="proto-page order-list-page">
 		<ProtoHeader title="我的订单" title-align="center" theme="green" :back="false"/>
+		<CacheRefreshIndicator :refreshing="pullRefreshing" />
 		<template v-if="loggedIn">
 		<view class="order-search-box">
 			<ProtoIcon name="search" :size="34" />
@@ -8,6 +9,14 @@
 		</view>
 		<view class="order-tabs">
 			<text v-for="tab in tabs" :key="tab.key" :class="{ active: activeTab === tab.key }" @tap="activeTab = tab.key">{{ tab.label }}</text>
+		</view>
+		<view v-if="pendingOrders.length && activeTab !== 'pay'" class="order-pending-tip" @tap="goPendingOrder">
+			<ProtoIcon name="clock" :size="26" />
+			<view class="order-pending-copy">
+				<text class="order-pending-title">你有 {{ pendingOrders.length }} 笔待支付订单</text>
+				<text class="order-pending-desc">15 分钟内未支付将自动取消并释放房间</text>
+			</view>
+			<text class="order-pending-action">去支付</text>
 		</view>
 		<view class="order-summary-strip">
 			<view class="order-summary-item"><text class="summary-value">{{ orderSummary.total }}</text><text class="summary-label">全部订单</text></view>
@@ -79,20 +88,25 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
+	import CacheRefreshIndicator from '@/components/CacheRefreshIndicator.vue'
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { goPage, goRoot, showToast } from '@/common/prototype.js'
 	import { getApiToken, getOrders, isLoggedIn, resolveReviewTarget, updateOrder } from '@/common/app-store.js'
 	import { cancelRemoteOrder, fetchRemoteOrders, redirectToLogin } from '@/common/api.js'
+	import { runPullRefresh } from '@/common/pull-refresh.js'
 
 	const isRemoteId = (value) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(value || ''))
+	// 个人中心点「待支付/可使用…」时写入的一次性分类，进页面读完就清掉。
+	const ORDER_TAB_STORAGE_KEY = 'tcpms.orderListTab'
 
 	export default {
-		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
+		components: { ProtoHeader, CacheRefreshIndicator, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
 				orders: [],
+				pullRefreshing: false,
 				loggedIn: false,
 				syncError: '',
 				syncing: true,
@@ -100,7 +114,7 @@
 				activeTab: 'all',
 				tabs: [
 					{ key: 'all', label: '全部' },
-					{ key: 'pay', label: '待付款' },
+					{ key: 'pay', label: '待支付' },
 					{ key: 'stay', label: '可使用' },
 					{ key: 'done', label: '已使用' },
 					{ key: 'cancel', label: '取消/退款' }
@@ -113,6 +127,10 @@
 					total: this.orders.length,
 					pending: this.orders.filter((order) => ['pay', 'stay', 'refund'].includes(order.statusKey)).length
 				}
+			},
+			// 待支付订单单独拎出来：进页面就提示，避免用户以为没下单成功。
+			pendingOrders() {
+				return this.orders.filter((order) => order.statusKey === 'pay')
 			},
 			visibleOrders() {
 				const keyword = this.searchText.trim().toLowerCase()
@@ -127,9 +145,33 @@
 		},
 		async onShow() {
 			uni.hideTabBar({ animation: false, fail: () => {} })
+			this.applyRequestedTab()
 			await this.loadOrders()
 		},
+		onPullDownRefresh() {
+			return runPullRefresh(this, () => this.loadOrders())
+		},
 		methods: {
+			// 从个人中心带过来的分类（待支付/可使用/已使用…），只生效一次。
+			applyRequestedTab() {
+				let requested = ''
+				try {
+					requested = uni.getStorageSync(ORDER_TAB_STORAGE_KEY) || ''
+					if (requested) uni.removeStorageSync(ORDER_TAB_STORAGE_KEY)
+				} catch (error) {
+					requested = ''
+				}
+				if (!requested) return
+				if (this.tabs.some((tab) => tab.key === requested)) this.activeTab = requested
+			},
+			goPendingOrder() {
+				const order = this.pendingOrders[0]
+				if (!order) {
+					this.activeTab = 'pay'
+					return
+				}
+				goPage(`/pages/pay/result?orderId=${order.id}`)
+			},
 			async loadOrders() {
 				this.loggedIn = isLoggedIn() && Boolean(getApiToken())
 				this.syncError = ''
@@ -261,6 +303,45 @@
 	.order-tabs text.active {
 		color: var(--proto-primary-dark);
 		border-bottom-color: var(--proto-primary);
+		font-weight: 750;
+	}
+
+	// 待支付提醒：进页面第一眼就能看到还没付的订单。
+	.order-pending-tip {
+		display: flex;
+		align-items: center;
+		margin: 12rpx 24rpx 0;
+		padding: 16rpx 18rpx;
+		background: #fff4e5;
+		border: 1rpx solid rgba(245, 158, 11, 0.38);
+		border-radius: 16rpx;
+	}
+
+	.order-pending-copy {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		min-width: 0;
+		margin-left: 10rpx;
+	}
+
+	.order-pending-title {
+		color: #b45309;
+		font-size: 21rpx;
+		font-weight: 700;
+	}
+
+	.order-pending-desc {
+		margin-top: 4rpx;
+		color: #a16207;
+		font-size: 18rpx;
+	}
+
+	.order-pending-action {
+		flex: 0 0 auto;
+		margin-left: 12rpx;
+		color: #b45309;
+		font-size: 20rpx;
 		font-weight: 750;
 	}
 

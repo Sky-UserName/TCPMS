@@ -1,6 +1,7 @@
 <template>
 	<view class="proto-page merchant-rooms-page">
 		<ProtoHeader title="房间管理" theme="green" />
+		<CacheRefreshIndicator :refreshing="pullRefreshing" />
 		<view class="merchant-search-box"><ProtoIcon name="search" :size="34" /><input v-model="keyword" placeholder="输入房间名称" placeholder-class="merchant-search-placeholder" /></view>
 		<scroll-view class="merchant-status-tabs" scroll-x :show-scrollbar="false">
 			<text v-for="tab in tabs" :key="tab.key" :class="{ active: activeTab === tab.key }" @tap="activeTab = tab.key">{{ tab.label }}</text>
@@ -27,16 +28,19 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
+	import CacheRefreshIndicator from '@/components/CacheRefreshIndicator.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { goPage, prototypeImages, showToast } from '@/common/prototype.js'
 	import { fetchMerchantRooms, publishMerchantRoom } from '@/common/api.js'
+	import { runPullRefresh } from '@/common/pull-refresh.js'
 
 	export default {
-		components: { ProtoHeader, ProtoIcon, ProtoEmptyState },
+		components: { ProtoHeader, CacheRefreshIndicator, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
 				keyword: '',
+				pullRefreshing: false,
 				activeTab: 'all',
 				tabs: [
 					{ key: 'all', label: '全部' },
@@ -50,6 +54,9 @@
 		},
 		async onShow() {
 			await this.loadRooms()
+		},
+		onPullDownRefresh() {
+			return runPullRefresh(this, () => this.loadRooms())
 		},
 		computed: {
 			filteredRooms() {
@@ -66,7 +73,6 @@
 					const rooms = await fetchMerchantRooms()
 					this.rooms = rooms.map((room) => ({ ...room, image: room.image || prototypeImages.roomOne }))
 				} catch (error) {
-					this.rooms = []
 					showToast(error?.message || '房源加载失败')
 				}
 			},

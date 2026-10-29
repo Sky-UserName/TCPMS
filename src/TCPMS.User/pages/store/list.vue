@@ -1,6 +1,7 @@
 <template>
 	<view class="proto-page store-list-page">
 		<ProtoHeader title="民宿搜索" title-align="center" theme="green" :back="false"/>
+		<CacheRefreshIndicator :refreshing="pullRefreshing" />
 		<view class="store-search-panel">
 			<button class="city-button" hover-class="none" @tap="showCity = true">
 				<text>{{ city }}</text>
@@ -85,6 +86,7 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
+	import CacheRefreshIndicator from '@/components/CacheRefreshIndicator.vue'
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
@@ -94,12 +96,14 @@
 	import { openStoreRoom } from '@/common/navigation.js'
 	import { getBooking } from '@/common/app-store.js'
 	import { takeTabParams } from '@/common/tab-params.js'
+	import { runPullRefresh } from '@/common/pull-refresh.js'
 
 	export default {
-		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
+		components: { ProtoHeader, CacheRefreshIndicator, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
 				stores: ALLOW_DEMO_DATA ? demoStores : [],
+				pullRefreshing: false,
 				typeFilter: '',
 				catalogState: 'loading',
 				booking: getBooking(),
@@ -131,6 +135,9 @@
 			if (tabParams) {
 				this.typeFilter = tabParams.type || ''
 			}
+		},
+		onPullDownRefresh() {
+			return runPullRefresh(this, () => this.loadStores())
 		},
 		computed: {
 			radiusLabel() {
@@ -190,9 +197,8 @@
 						this.locationText = `已加载 ${stores.length} 家在线门店，当前展示全部城市`
 					}
 				} catch (error) {
-					// 生产环境不再用演示门店兜底，接口失败就展示空列表并提示重试。
+					// 接口失败时保留当前已展示的数据，并提示用户重试。
 					if (!ALLOW_DEMO_DATA) {
-						this.stores = []
 						this.catalogState = 'error'
 						return
 					}

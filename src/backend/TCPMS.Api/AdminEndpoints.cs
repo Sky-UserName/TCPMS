@@ -166,6 +166,55 @@ public static class AdminEndpoints
             var url = $"{request.Scheme}://{request.Host}/uploads/carousel/{fileName}";
             return Results.Ok(new { url, fileName, size = file.Length });
         });
+
+        admin.MapPost("/uploads/review-image", async (
+            ClaimsPrincipal principal,
+            IWebHostEnvironment environment,
+            HttpRequest request,
+            CancellationToken cancellationToken) =>
+        {
+            if (!CanManageReviews(principal))
+            {
+                return Results.Forbid();
+            }
+
+            IFormFile? file;
+            try
+            {
+                var form = await request.ReadFormAsync(cancellationToken);
+                file = form.Files.GetFile("file");
+            }
+            catch (InvalidDataException)
+            {
+                return Results.BadRequest(new ApiError("review_image_invalid", "图片上传内容无效"));
+            }
+
+            if (file is null || file.Length <= 0)
+            {
+                return Results.BadRequest(new ApiError("review_image_required", "请选择评价图片文件"));
+            }
+            if (file.Length > 10 * 1024 * 1024)
+            {
+                return Results.BadRequest(new ApiError("review_image_too_large", "评价图片不能超过 10MB"));
+            }
+
+            var extension = await DetectImageExtensionAsync(file, cancellationToken);
+            if (extension is null)
+            {
+                return Results.BadRequest(new ApiError("review_image_type_invalid", "评价图片必须是 JPG、PNG 或 WEBP 图片"));
+            }
+
+            var directoryPath = StoragePaths.Uploads(environment, "reviews");
+            Directory.CreateDirectory(directoryPath);
+            var fileName = $"{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}{extension}";
+            var targetPath = Path.Combine(directoryPath, fileName);
+            await using (var stream = new FileStream(targetPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                await file.CopyToAsync(stream, cancellationToken);
+            }
+
+            return Results.Ok(new { url = $"/uploads/reviews/{fileName}", fileName, size = file.Length });
+        });
     }
 
     private static void MapIntegrations(RouteGroupBuilder admin)
@@ -622,16 +671,23 @@ public static class AdminEndpoints
                 return Results.Conflict(new ApiError("room_type_exists", "该门店已存在同名房型"));
             }
 
+            var kind = NormalizeRoomKind(request.Kind);
+            // 数量只有一个口径：独立房间 = 房间数量，多人间 = 床铺数量。
+            // 默认库存与它保持一致，避免「房间管理」和「价格设置」出现两个不同的数字。
+            var bedCount = kind == RoomTypeKinds.Bed ? Math.Max(request.BedCount, 1) : 1;
+            var roomCount = kind == RoomTypeKinds.Bed ? 1 : Math.Max(request.RoomCount, 1);
+            var defaultInventory = kind == RoomTypeKinds.Bed ? bedCount : roomCount;
+
             var roomType = new RoomType
             {
                 Id = Guid.NewGuid(),
                 StoreId = request.StoreId,
                 Name = request.Name.Trim(),
                 LongName = request.LongName,
-                Kind = request.Kind,
+                Kind = kind,
                 RoomCategory = request.RoomCategory,
-                BedCount = request.BedCount,
-                Gender = request.Gender,
+                BedCount = bedCount,
+                Gender = kind == RoomTypeKinds.Bed ? request.Gender : null,
                 MaxGuests = request.MaxGuests,
                 ChildCapacity = Math.Max(request.ChildCapacity, 0),
                 BasePriceCents = request.BasePriceCents,
@@ -648,9 +704,9 @@ public static class AdminEndpoints
                 JoinRule = request.JoinRule,
                 Area = request.Area,
                 Orientation = request.Orientation,
-                RoomCount = Math.Max(request.RoomCount, 1),
+                RoomCount = roomCount,
                 Layout = request.Layout,
-                DefaultInventory = Math.Max(request.DefaultInventory, 0),
+                DefaultInventory = defaultInventory,
                 SortOrder = request.SortOrder,
                 IsDraft = request.IsDraft,
                 RejectionReason = request.RejectionReason,
@@ -658,6 +714,9 @@ public static class AdminEndpoints
                 ApprovalStatus = request.ApprovalStatus ?? "Draft"
             };
             db.RoomTypes.Add(roomType);
+            // 新建房型就把未来半年的每日库存铺好，价格设置里不会一片「—」，用户端也能正常报价。
+            await InventoryPlanner.EnsureDailyInventoryAsync(
+                db, roomType, DateTime.Today, InventoryPlanner.DefaultDays, cancellationToken);
             db.AuditLogs.Add(CreateAudit(principal, "room_type.create", "RoomType", roomType.Id.ToString(), roomType.Name));
             await db.SaveChangesAsync(cancellationToken);
 
@@ -700,13 +759,19 @@ public static class AdminEndpoints
                 return Results.Forbid();
             }
 
+            var kind = NormalizeRoomKind(request.Kind);
+            // 同创建：数量 = 房间数（独立房型）/ 床铺数（多人间），默认库存跟随这个数字。
+            var bedCount = kind == RoomTypeKinds.Bed ? Math.Max(request.BedCount, 1) : 1;
+            var roomCount = kind == RoomTypeKinds.Bed ? 1 : Math.Max(request.RoomCount, 1);
+            var defaultInventory = kind == RoomTypeKinds.Bed ? bedCount : roomCount;
+
             roomType.StoreId = request.StoreId;
             roomType.Name = request.Name.Trim();
             roomType.LongName = request.LongName;
-            roomType.Kind = request.Kind;
+            roomType.Kind = kind;
             roomType.RoomCategory = request.RoomCategory;
-            roomType.BedCount = request.BedCount;
-            roomType.Gender = request.Gender;
+            roomType.BedCount = bedCount;
+            roomType.Gender = kind == RoomTypeKinds.Bed ? request.Gender : null;
             roomType.MaxGuests = request.MaxGuests;
             roomType.ChildCapacity = Math.Max(request.ChildCapacity, 0);
             roomType.BasePriceCents = request.BasePriceCents;
@@ -717,21 +782,25 @@ public static class AdminEndpoints
             roomType.BathroomFacilitiesJson = request.BathroomFacilitiesJson;
             roomType.NearbyFacilitiesJson = request.NearbyFacilitiesJson;
             roomType.ImageUrlsJson = request.ImageUrlsJson;
-            roomType.CheckInTime = request.CheckInTime;
-            roomType.CheckOutTime = request.CheckOutTime;
-            roomType.CancellationRule = request.CancellationRule;
-            roomType.JoinRule = request.JoinRule;
+            roomType.CheckInTime = request.CheckInTime ?? roomType.CheckInTime;
+            roomType.CheckOutTime = request.CheckOutTime ?? roomType.CheckOutTime;
+            roomType.CancellationRule = request.CancellationRule ?? roomType.CancellationRule;
+            roomType.JoinRule = request.JoinRule ?? roomType.JoinRule;
             roomType.Area = request.Area;
             roomType.Orientation = request.Orientation;
-            roomType.RoomCount = Math.Max(request.RoomCount, 1);
+            roomType.RoomCount = roomCount;
             roomType.Layout = request.Layout;
-            roomType.DefaultInventory = Math.Max(request.DefaultInventory, 0);
+            roomType.DefaultInventory = defaultInventory;
             roomType.SortOrder = request.SortOrder;
             roomType.IsDraft = request.IsDraft;
             roomType.RejectionReason = request.RejectionReason;
             roomType.IsPublished = request.IsPublished;
             roomType.ApprovalStatus = request.ApprovalStatus ?? roomType.ApprovalStatus;
             roomType.UpdatedAt = DateTime.UtcNow;
+            // 改了数量就同步到价格设置的每日总数，避免两边对不上；已锁定/已售的日期按占用量兜底，
+            // 价格设置里手动改过的日期（含手动调库存）保留原值。
+            await InventoryPlanner.EnsureDailyInventoryAsync(
+                db, roomType, DateTime.Today, InventoryPlanner.DefaultDays, cancellationToken);
             db.AuditLogs.Add(CreateAudit(principal, "room_type.update", "RoomType", id.ToString(), roomType.Name));
             await db.SaveChangesAsync(cancellationToken);
             return Results.Ok(ToAdminRoomTypeItem(roomType));
@@ -1074,29 +1143,35 @@ public static class AdminEndpoints
                 }
             }
 
-            if (request.TotalQuantity is int totalQuantity)
+            // 价格日历和库存必须同一天都有记录：只改单价时也要补上库存行，
+            // 这样这一天在日历里的「总数/剩余」才有值可展示，不会退回默认数量。
+            var inventoryItems = await db.InventoryDailies
+                .Where(x => x.RoomTypeId == request.RoomTypeId &&
+                            x.Date >= range.From &&
+                            x.Date < range.To)
+                .ToDictionaryAsync(x => x.Date.Date, cancellationToken);
+            var fallbackTotal = roomType.Kind == RoomTypeKinds.Bed
+                ? Math.Max(roomType.BedCount, 1)
+                : Math.Max(roomType.RoomCount, 1);
+            for (var date = range.From; date < range.To; date = date.AddDays(1))
             {
-                var inventoryItems = await db.InventoryDailies
-                    .Where(x => x.RoomTypeId == request.RoomTypeId &&
-                                x.Date >= range.From &&
-                                x.Date < range.To)
-                    .ToDictionaryAsync(x => x.Date.Date, cancellationToken);
-
-                for (var date = range.From; date < range.To; date = date.AddDays(1))
+                var requestedTotal = request.TotalQuantity;
+                if (!inventoryItems.TryGetValue(date.Date, out var inventory))
                 {
-                    if (!inventoryItems.TryGetValue(date.Date, out var inventory))
+                    inventory = new InventoryDaily
                     {
-                        inventory = new InventoryDaily
-                        {
-                            Id = Guid.NewGuid(),
-                            StoreId = roomType.StoreId,
-                            RoomTypeId = roomType.Id,
-                            Date = date.Date,
-                            TotalQuantity = totalQuantity
-                        };
-                        db.InventoryDailies.Add(inventory);
-                    }
+                        Id = Guid.NewGuid(),
+                        StoreId = roomType.StoreId,
+                        RoomTypeId = roomType.Id,
+                        Date = date.Date,
+                        TotalQuantity = requestedTotal ?? fallbackTotal,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+                    db.InventoryDailies.Add(inventory);
+                }
 
+                if (requestedTotal is int totalQuantity)
+                {
                     if (totalQuantity < inventory.LockedQuantity + inventory.SoldQuantity)
                     {
                         return Results.Conflict(new ApiError(
@@ -1195,6 +1270,11 @@ public static class AdminEndpoints
                             x.Date >= range.From &&
                             x.Date < range.To)
                 .ToDictionaryAsync(x => x.Date.Date, cancellationToken);
+            var prices = await db.PriceCalendars
+                .Where(x => x.RoomTypeId == roomType.Id &&
+                            x.Date >= range.From &&
+                            x.Date < range.To)
+                .ToDictionaryAsync(x => x.Date.Date, cancellationToken);
             var updated = 0;
             for (var date = range.From; date < range.To; date = date.AddDays(1))
             {
@@ -1224,6 +1304,27 @@ public static class AdminEndpoints
                 }
                 inventory.TotalQuantity = nextTotal;
                 inventory.UpdatedAt = DateTime.UtcNow;
+                // 手动调过库存的日期同样算「价格设置里单独设置过」：
+                // 补一条 Manual 价格记录作为标记，下次保存房型数量时不会被刷回统一数量，
+                // 日历里的总数/剩余也会按这一天的记录展示。
+                if (!prices.TryGetValue(date.Date, out var price))
+                {
+                    price = new PriceCalendar
+                    {
+                        Id = Guid.NewGuid(),
+                        StoreId = roomType.StoreId,
+                        RoomTypeId = roomType.Id,
+                        Date = date.Date,
+                        PriceCents = roomType.BasePriceCents,
+                        Source = "Manual"
+                    };
+                    db.PriceCalendars.Add(price);
+                    prices[date.Date] = price;
+                }
+                else if (price.Source is "Seed" or "Weekend")
+                {
+                    price.Source = "Manual";
+                }
                 updated++;
             }
 
@@ -1259,6 +1360,46 @@ public static class AdminEndpoints
                 return Results.Forbid();
             }
             return Results.Ok(await ToAdminOrderDetailAsync(db, order, cancellationToken));
+        });
+
+        admin.MapPost("/orders/{id:guid}/verify", async (
+            Guid id,
+            AppDbContext db,
+            ClaimsPrincipal principal,
+            CancellationToken cancellationToken) =>
+        {
+            if (!CanManageOrders(principal))
+            {
+                return Results.Forbid();
+            }
+
+            var order = await db.BookingOrders.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+            if (order is null)
+            {
+                return Results.NotFound(new ApiError("order_not_found", "订单不存在"));
+            }
+            if (!CanAccessStore(principal, order.StoreId))
+            {
+                return Results.Forbid();
+            }
+            if (order.VerificationStatus == OrderVerificationStatuses.Verified || order.VerifiedAt.HasValue)
+            {
+                return Results.Conflict(new ApiError("order_already_verified", "该订单已核销"));
+            }
+            if (order.PaymentStatus != "Paid" || order.Status != OrderStatuses.PaidPendingVerification)
+            {
+                return Results.BadRequest(new ApiError("order_not_verifiable", "订单未支付或当前状态不能核销"));
+            }
+
+            var verifiedAt = DateTime.UtcNow;
+            order.Status = OrderStatuses.Completed;
+            order.VerificationStatus = OrderVerificationStatuses.Verified;
+            order.VerifiedAt = verifiedAt;
+            order.CheckedInAt = verifiedAt;
+            order.UpdatedAt = verifiedAt;
+            db.AuditLogs.Add(CreateAudit(principal, "order.verify", "BookingOrder", id.ToString(), order.OrderNumber));
+            await db.SaveChangesAsync(cancellationToken);
+            return Results.Ok();
         });
 
         admin.MapPost("/orders/{id:guid}/cancel", async (
@@ -1368,7 +1509,7 @@ public static class AdminEndpoints
             if (!request.Approved)
             {
                 refund.Status = "Rejected";
-                refund.Order.Status = refund.OriginalOrderStatus ?? OrderStatuses.PaidPendingConfirmation;
+                refund.Order.Status = refund.OriginalOrderStatus ?? OrderStatuses.PaidPendingVerification;
             }
             else
             {
@@ -1857,6 +1998,20 @@ public static class AdminEndpoints
                 return Results.BadRequest(new ApiError("invalid_review_status", "评价状态不正确"));
             }
 
+            string[]? nextImages = null;
+            if (request.Images is not null)
+            {
+                nextImages = request.Images
+                    .Where(image => !string.IsNullOrWhiteSpace(image))
+                    .Select(image => image.Trim())
+                    .Take(9)
+                    .ToArray();
+                if (nextImages.Any(image => image.Length > 500))
+                {
+                    return Results.BadRequest(new ApiError("review_image_url_too_long", "评价图片地址过长"));
+                }
+            }
+
             if (request.Content is not null)
             {
                 review.Content = request.Content.Trim();
@@ -1865,6 +2020,10 @@ public static class AdminEndpoints
             {
                 review.RoomRating = score;
                 review.StoreRating = score;
+            }
+            if (nextImages is not null)
+            {
+                review.ImageUrlsJson = nextImages.Length == 0 ? null : JsonSerializer.Serialize(nextImages);
             }
 
             var moderation = review.Moderation;
@@ -2009,13 +2168,30 @@ public static class AdminEndpoints
             {
                 return Results.NotFound(new ApiError("store_not_found", "门店不存在"));
             }
+            if (request.WxUserId is Guid memberId)
+            {
+                if (!await db.WxUsers.AnyAsync(x => x.Id == memberId, cancellationToken))
+                {
+                    return Results.NotFound(new ApiError("member_not_found", "所选会员不存在，请重新选择"));
+                }
+                if (await db.AdminUsers.AnyAsync(
+                        x => x.WxUserId == memberId && x.StoreId == request.StoreId,
+                        cancellationToken))
+                {
+                    return Results.Conflict(new ApiError("staff_member_exists", "该会员已是这家门店的员工"));
+                }
+            }
 
+            var displayName = string.IsNullOrWhiteSpace(request.DisplayName)
+                ? request.Username.Trim()
+                : request.DisplayName.Trim();
             var user = new AdminUser
             {
                 Id = Guid.NewGuid(),
                 Username = request.Username.Trim(),
-                DisplayName = request.Username.Trim(),
+                DisplayName = displayName,
                 PhoneNumber = request.Phone?.Trim(),
+                WxUserId = request.WxUserId,
                 StoreId = request.StoreId,
                 IsEnabled = NormalizeStaffStatus(request.Status) == "normal"
             };
@@ -2092,9 +2268,25 @@ public static class AdminEndpoints
             {
                 return Results.Conflict(new ApiError("admin_user_exists", "员工账号已存在"));
             }
+            if (request.WxUserId is Guid memberId)
+            {
+                if (!await db.WxUsers.AnyAsync(x => x.Id == memberId, cancellationToken))
+                {
+                    return Results.NotFound(new ApiError("member_not_found", "所选会员不存在，请重新选择"));
+                }
+                if (await db.AdminUsers.AnyAsync(
+                        x => x.Id != id && x.WxUserId == memberId && x.StoreId == request.StoreId,
+                        cancellationToken))
+                {
+                    return Results.Conflict(new ApiError("staff_member_exists", "该会员已是这家门店的员工"));
+                }
+            }
 
             user.Username = username;
-            user.DisplayName = username;
+            user.DisplayName = string.IsNullOrWhiteSpace(request.DisplayName)
+                ? username
+                : request.DisplayName.Trim();
+            user.WxUserId = request.WxUserId;
             user.PhoneNumber = request.Phone?.Trim();
             user.StoreId = request.StoreId;
             user.IsEnabled = NormalizeStaffStatus(request.Status) == "normal";
@@ -2768,6 +2960,14 @@ public static class AdminEndpoints
 
     private static void MapManagedItems(RouteGroupBuilder admin)
     {
+        admin.MapGet("/room-options", async (
+            AppDbContext db,
+            CancellationToken cancellationToken) =>
+        {
+            var options = await RoomOptionCatalog.LoadAsync(db, null, cancellationToken);
+            return Results.Ok(options);
+        });
+
         admin.MapGet("/managed-items/{resourceType}", async (
             string resourceType,
             AppDbContext db,
@@ -3313,9 +3513,7 @@ public static class AdminEndpoints
                     .AsNoTracking()
                     .Include(x => x.Store)
                     .Include(x => x.RoomType)
-                    .Where(x =>
-                        x.Status == OrderStatuses.PaidPendingConfirmation ||
-                        x.Status == OrderStatuses.ConfirmedPendingCheckIn);
+                    .Where(x => x.Status == OrderStatuses.PaidPendingVerification);
                 if (storeScope is Guid orderStoreScope)
                 {
                     ordersQuery = ordersQuery.Where(x => x.StoreId == orderStoreScope);
@@ -3328,14 +3526,13 @@ public static class AdminEndpoints
                     .ToListAsync(cancellationToken);
                 items.AddRange(orders.Select(order =>
                 {
-                    var waitingForConfirmation = order.Status == OrderStatuses.PaidPendingConfirmation;
                     return new AdminNotificationItem(
                         $"order:{order.Id}",
                         "order",
-                        waitingForConfirmation ? "订单待确认" : "订单待入住",
+                        "订单待核销",
                         $"{order.Store?.Name ?? "未知门店"} · {order.RoomType?.Name ?? "未知房型"} · {order.OrderNumber}",
                         "financialOrders",
-                        waitingForConfirmation ? "teal" : "blue",
+                        "teal",
                         order.UpdatedAt,
                         order.Id,
                         order.OrderNumber,
@@ -3630,7 +3827,7 @@ public static class AdminEndpoints
         return new StoreStaffItem(
             user.Id,
             user.Username,
-            user.DisplayName,
+            string.IsNullOrWhiteSpace(user.DisplayName) ? user.Username : user.DisplayName,
             user.StoreStaffProfile?.Gender ?? "未知",
             user.PhoneNumber,
             user.IsEnabled ? "normal" : "hidden",
@@ -3638,7 +3835,8 @@ public static class AdminEndpoints
             user.Store?.Name,
             ParsePermissionKeys(user.StoreStaffProfile?.PermissionKeysJson),
             user.CreatedAt,
-            user.UpdatedAt);
+            user.UpdatedAt,
+            user.WxUserId);
     }
 
     private static PermissionMenuItem ToPermissionMenuItem(PermissionMenu menu)
@@ -3823,7 +4021,16 @@ public static class AdminEndpoints
         }
         try
         {
-            return JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>();
+            var images = JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>();
+            // 历史评价里可能残留 chooseImage 的临时路径，后台预览必然失败，直接过滤。
+            return images
+                .Where(image => !string.IsNullOrWhiteSpace(image))
+                .Select(image => image.Trim())
+                .Where(image =>
+                    !image.StartsWith("http://tmp/", StringComparison.OrdinalIgnoreCase) &&
+                    !image.StartsWith("wxfile://", StringComparison.OrdinalIgnoreCase) &&
+                    !image.StartsWith("blob:", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
         }
         catch (JsonException)
         {
@@ -3969,6 +4176,11 @@ public static class AdminEndpoints
         resourceType.Length <= 80 &&
         resourceType.All(character => char.IsLetterOrDigit(character) || character is '-' or '_');
 
+    private static string NormalizeRoomKind(string? kind) =>
+        string.Equals(kind, RoomTypeKinds.Bed, StringComparison.OrdinalIgnoreCase)
+            ? RoomTypeKinds.Bed
+            : RoomTypeKinds.PrivateRoom;
+
     private static string? ValidateRoomType(RoomTypeRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 50)
@@ -4009,37 +4221,49 @@ public static class AdminEndpoints
         BookingOrder order,
         CancellationToken cancellationToken)
     {
-        var payments = await db.PaymentRecords.AsNoTracking()
+        var paymentRecords = await db.PaymentRecords.AsNoTracking()
             .Where(x => x.OrderId == order.Id)
             .OrderByDescending(x => x.CreatedAt)
-            .Select(x => new PaymentItem(
-                x.Id,
-                x.TransactionNumber,
-                x.Provider,
-                x.AmountCents,
-                x.Status,
-                x.CreatedAt,
-                x.PaidAt))
             .ToListAsync(cancellationToken);
-        var refunds = await db.RefundRecords.AsNoTracking()
+        var refundRecords = await db.RefundRecords.AsNoTracking()
             .Where(x => x.OrderId == order.Id)
             .OrderByDescending(x => x.CreatedAt)
-            .Select(x => new RefundItem(
-                x.Id,
-                x.RefundNumber,
-                x.AmountCents,
-                x.Reason,
-                x.Status,
-                x.ReviewComment,
-                x.ProviderRefundNumber,
-                x.CreatedAt,
-                x.ReviewedAt,
-                x.CompletedAt))
             .ToListAsync(cancellationToken);
+        var payments = paymentRecords.Select(x => new PaymentItem(
+            x.Id,
+            x.TransactionNumber,
+            x.Provider,
+            x.AmountCents,
+            x.Status,
+            x.CreatedAt,
+            x.PaidAt)).ToList();
+        var refunds = refundRecords.Select(x => new RefundItem(
+            x.Id,
+            x.RefundNumber,
+            x.AmountCents,
+            x.Reason,
+            x.Status,
+            x.ReviewComment,
+            x.ProviderRefundNumber,
+            x.CreatedAt,
+            x.ReviewedAt,
+            x.CompletedAt)).ToList();
+        var userNickname = order.WxUserNickname;
+        if (string.IsNullOrWhiteSpace(userNickname))
+        {
+            userNickname = await db.WxUsers.AsNoTracking()
+                .Where(x => x.Id == order.WxUserId)
+                .Select(x => x.Nickname)
+                .SingleOrDefaultAsync(cancellationToken);
+        }
+        userNickname = string.IsNullOrWhiteSpace(userNickname) ? "微信用户" : userNickname;
+        var summary = ToAdminOrderListItem(order, paymentRecords, refundRecords, userNickname);
         return new AdminOrderDetail(
             order.Id,
             order.OrderNumber,
             order.WxUserId,
+            userNickname,
+            order.VerificationCode,
             order.StoreId,
             order.Store?.Name ?? string.Empty,
             order.RoomTypeId,
@@ -4059,10 +4283,70 @@ public static class AdminEndpoints
             order.CreatedAt,
             order.PaymentExpiresAt,
             payments,
-            refunds);
+            refunds,
+            summary.ActualPaidAmountCents,
+            summary.PaidAt,
+            summary.VerificationStatus,
+            summary.VerifiedAt,
+            summary.RefundedAt,
+            order.Note);
     }
 
-    private static async Task ReleaseInventoryAsync(
+    public static AdminOrderListItem ToAdminOrderListItem(
+        BookingOrder order,
+        IEnumerable<PaymentRecord>? paymentRecords = null,
+        IEnumerable<RefundRecord>? refundRecords = null,
+        string? userNickname = null)
+    {
+        var payments = paymentRecords?.ToList() ?? new List<PaymentRecord>();
+        var refunds = refundRecords?.ToList() ?? new List<RefundRecord>();
+        var paidPayments = payments.Where(x => x.Status == "Paid").ToList();
+        var actualPaidAmount = paidPayments.Count > 0
+            ? paidPayments.Sum(x => x.AmountCents)
+            : order.PaymentStatus is "Paid" or "Refunded" ? order.TotalAmountCents : 0;
+        var paidAt = paidPayments
+            .Where(x => x.PaidAt.HasValue)
+            .Select(x => x.PaidAt)
+            .OrderByDescending(x => x)
+            .FirstOrDefault();
+        var refundedAt = refunds
+            .Where(x => x.Status == "Refunded")
+            .Select(x => x.CompletedAt ?? x.ReviewedAt)
+            .Where(x => x.HasValue)
+            .OrderByDescending(x => x)
+            .FirstOrDefault();
+        var isVerified = order.VerificationStatus == OrderVerificationStatuses.Verified ||
+                         order.VerifiedAt.HasValue ||
+                         order.CheckedInAt.HasValue ||
+                         order.Status is OrderStatuses.CheckedIn or OrderStatuses.Completed;
+
+        return new AdminOrderListItem(
+            order.Id,
+            order.WxUserId,
+            userNickname ?? order.WxUserNickname ?? "微信用户",
+            order.OrderNumber,
+            order.TotalAmountCents,
+            actualPaidAmount,
+            order.Status,
+            order.PaymentStatus,
+            paidAt,
+            isVerified ? OrderVerificationStatuses.Verified : OrderVerificationStatuses.Unverified,
+            order.VerifiedAt ?? order.CheckedInAt,
+            refundedAt,
+            order.CheckIn,
+            order.CheckOut,
+            order.StoreId,
+            order.Store?.Name ?? string.Empty,
+            order.RoomTypeId,
+            order.RoomType?.Name ?? string.Empty,
+            order.Note,
+            order.GuestCount,
+            order.Quantity,
+            order.CreatedAt,
+            order.VerificationCode);
+    }
+
+    public static async Task ReleaseInventoryAsync(
         AppDbContext db,
         BookingOrder order,
         bool sold,

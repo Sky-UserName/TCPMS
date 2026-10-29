@@ -7,7 +7,7 @@
 				<button class="apply-nav-button" hover-class="none" aria-label="返回" @tap="goBack">
 					<ProtoIcon name="back" tone="white" :size="38" />
 				</button>
-				<text class="apply-nav-title">民宿申请</text>
+				<text class="apply-nav-title">{{ pageTitle }}</text>
 				<view class="apply-nav-tools">
 					<ProtoIcon name="more" tone="white" :size="32" />
 				</view>
@@ -102,7 +102,7 @@
 
 		<view class="apply-submit-bar">
 			<button class="apply-submit" :disabled="submitting || uploadingKey" hover-class="none" @tap="submitApplication">
-				{{ submitting ? '提交中...' : (applicationStatus === 'pending' ? '重新提交申请' : '确定申请') }}
+				{{ submitting ? '提交中...' : (isEditing ? '保存并提交审核' : '确定申请') }}
 			</button>
 		</view>
 	</view>
@@ -158,6 +158,7 @@
 				statusBarHeightRpx,
 				form: emptyForm(),
 				applicationStatus: 'unapplied',
+				isEditing: false,
 				loading: false,
 				submitting: false,
 				uploadingKey: '',
@@ -173,6 +174,9 @@
 			}
 		},
 		computed: {
+			pageTitle() {
+				return this.isEditing ? '编辑民宿资料' : '民宿申请'
+			},
 			locationLabel() {
 				// 「民宿位置」只展示省市区，详细门牌放到下面的输入框。
 				return composeRegion(this.form.province, this.form.city, this.form.district)
@@ -181,8 +185,9 @@
 					|| ''
 			},
 			statusNotice() {
-				if (this.applicationStatus === 'pending') return '申请已提交，平台审核通过后即可开始经营'
+				if (this.applicationStatus === 'pending') return '资料审核中，审核期间门店所有房间暂不展示'
 				if (this.applicationStatus === 'rejected') return '上次申请未通过，请修改资料后重新提交'
+				if (this.isEditing) return '修改资料并提交后，门店会重新进入审核，审核期间房源不展示'
 				return ''
 			}
 		},
@@ -200,6 +205,7 @@
 				try {
 					const application = await fetchMerchantApplication()
 					this.applicationStatus = application?.status || 'unapplied'
+					this.isEditing = Boolean(application?.exists)
 					if (application?.exists) {
 						this.form = {
 							...emptyForm(),
@@ -360,6 +366,22 @@
 			},
 			async submitApplication() {
 				if (this.submitting || this.uploadingKey || !this.validate()) return
+				if (!this.isEditing) {
+					await this.performSubmit()
+					return
+				}
+				uni.showModal({
+					title: '确认提交审核',
+					content: '修改资料后门店会进入审核，审核期间门店和所有房间在小程序不可见，审核通过后恢复。',
+					confirmText: '提交审核',
+					cancelText: '再想想',
+					success: async (result) => {
+						if (result.confirm) await this.performSubmit()
+					}
+				})
+			},
+			async performSubmit() {
+				if (this.submitting) return
 				this.submitting = true
 				try {
 					const result = await submitMerchantApplication({
@@ -370,7 +392,7 @@
 					this.applicationStatus = result?.status || 'pending'
 					uni.showModal({
 						title: '提交成功',
-						content: '申请资料已提交，平台审核通过后会通知你。',
+						content: '资料已提交审核，审核期间门店和所有房间暂不展示。',
 						showCancel: false,
 						confirmText: '知道了',
 						success: () => this.goBack()

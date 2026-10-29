@@ -1,6 +1,7 @@
 <template>
 	<view class="proto-page collection-page">
 		<ProtoHeader title="我的收藏" theme="green" />
+		<CacheRefreshIndicator :refreshing="pullRefreshing" />
 
 		<view v-if="items.length" class="collection-list">
 			<view v-for="item in items" :key="item.id" class="collection-card proto-card" @tap="openItem(item)">
@@ -25,6 +26,7 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
+	import CacheRefreshIndicator from '@/components/CacheRefreshIndicator.vue'
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
@@ -32,6 +34,7 @@
 	import { getFavorites, toggleFavorite } from '@/common/app-store.js'
 	import { fetchMyFavorites, removeMyFavorite } from '@/common/api.js'
 	import { openLegacyStorePath } from '@/common/navigation.js'
+	import { runPullRefresh } from '@/common/pull-refresh.js'
 
 	const resolveRecord = (record) => {
 		if (record.title) return record
@@ -64,15 +67,19 @@
 	}
 
 	export default {
-		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
+		components: { ProtoHeader, CacheRefreshIndicator, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
 				items: [],
+				pullRefreshing: false,
 				fallbackImage: prototypeImages.homeHero
 			}
 		},
 		onShow() {
 			this.loadItems()
+		},
+		onPullDownRefresh() {
+			return runPullRefresh(this, () => this.loadItems())
 		},
 		methods: {
 			async loadItems() {
@@ -80,7 +87,6 @@
 					const records = await fetchMyFavorites()
 					this.items = records.map(resolveRecord)
 				} catch (error) {
-					this.items = []
 					showToast(error?.message || '收藏加载失败')
 				}
 			},

@@ -73,7 +73,8 @@ public sealed record StoreRequest(
     string? BusinessLicenseUrl = null,
     string? DoorImageUrl = null,
     string? RoomImageUrlsJson = null,
-    decimal? Rating = null);
+    decimal? Rating = null,
+    StoreBookingNoticeDto? BookingNotice = null);
 
 public sealed record GeocodeRequest(string Address, string? City);
 
@@ -105,7 +106,8 @@ public sealed record CreateOrderRequest(
     DateTime CheckOut,
     int Quantity,
     int GuestCount,
-    string? GuestSnapshotJson);
+    string? GuestSnapshotJson,
+    string? Note = null);
 
 public sealed record CreateReviewRequest(
     int RoomRating,
@@ -228,11 +230,23 @@ public sealed record RoomTypeSummary(
     string? TagsJson = null,
     string? ServicesJson = null,
     decimal? Area = null,
-    int RoomCount = 0);
+    int RoomCount = 0,
+    string? RoomCategory = null,
+    string? Layout = null,
+    string? BathroomFacilitiesJson = null,
+    string? NearbyFacilitiesJson = null,
+    int ChildCapacity = 0,
+    string? CheckInTime = null,
+    string? CheckOutTime = null);
+
+public sealed record StoreBookingNoticeDto(
+    string CheckInNotice,
+    string CancelNotice);
 
 public sealed record StoreDetail(
     StoreListItem Store,
-    IReadOnlyList<RoomTypeSummary> RoomTypes);
+    IReadOnlyList<RoomTypeSummary> RoomTypes,
+    StoreBookingNoticeDto? BookingNotice = null);
 
 public sealed record AvailabilityItem(
     DateTime Date,
@@ -267,7 +281,9 @@ public sealed record OrderListItem(
     DateTime CreatedAt,
     Guid StoreId,
     Guid RoomTypeId,
-    bool HasReview);
+    bool HasReview,
+    string? GuestSnapshotJson,
+    string? VerificationCode);
 
 public sealed record ReviewItem(
     Guid Id,

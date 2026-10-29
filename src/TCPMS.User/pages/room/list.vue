@@ -1,6 +1,7 @@
 <template>
 	<view class="proto-page room-list-page">
 		<ProtoHeader title="房型列表" title-align="center" theme="green" />
+		<CacheRefreshIndicator :refreshing="pullRefreshing" />
 
 		<view class="room-search-row">
 			<view class="room-search-shell">
@@ -133,6 +134,7 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
+	import CacheRefreshIndicator from '@/components/CacheRefreshIndicator.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { demoRooms, demoStores, goPage, prototypeImages, showToast } from '@/common/prototype.js'
@@ -140,12 +142,14 @@
 	import { openBookingConfirm } from '@/common/navigation.js'
 	import { ALLOW_DEMO_DATA } from '@/common/env.js'
 	import { getBooking, saveBooking } from '@/common/app-store.js'
+	import { runPullRefresh } from '@/common/pull-refresh.js'
 
 	export default {
-		components: { ProtoHeader, ProtoIcon, ProtoEmptyState },
+		components: { ProtoHeader, CacheRefreshIndicator, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
 				rooms: ALLOW_DEMO_DATA ? demoRooms : [],
+				pullRefreshing: false,
 				catalogState: ALLOW_DEMO_DATA ? 'demo' : 'loading',
 				loadError: '',
 				storeId: getBooking().storeId || '',
@@ -176,15 +180,6 @@
 				this.store = { id: this.storeId, name: '门店房型', isRemote: true }
 				this.rooms = []
 				this.catalogState = 'loading'
-				try {
-					const result = await fetchStoreDetail(this.storeId)
-					this.store = result.store || this.store
-					this.rooms = result.rooms
-					this.catalogState = 'synced'
-				} catch (error) {
-					this.catalogState = 'synced'
-					this.loadError = '门店房型同步失败，请检查网络或稍后重试。'
-				}
 			} else if (!ALLOW_DEMO_DATA) {
 				// 生产包不展示演示房型：缺少门店参数时给出明确空态。
 				this.rooms = []
@@ -192,12 +187,10 @@
 				this.store = null
 				this.loadError = '未获取到门店信息，请返回门店列表重新选择。'
 			}
-			this.booking = saveBooking({
-				...this.booking,
-				storeId: this.storeId || this.booking.storeId,
-				store: (this.store && this.store.name) || this.booking.store,
-				address: (this.store && this.store.address) || this.booking.address
-			})
+			await this.loadStoreRooms()
+		},
+		onPullDownRefresh() {
+			return runPullRefresh(this, () => this.loadStoreRooms())
 		},
 		onShow() {
 			this.booking = getBooking()
@@ -228,6 +221,27 @@
 			}
 		},
 		methods: {
+			async loadStoreRooms() {
+				this.loadError = ''
+				const isRemoteStore = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(this.storeId || ''))
+				if (isRemoteStore) {
+					try {
+						const result = await fetchStoreDetail(this.storeId)
+						this.store = result.store || this.store
+						this.rooms = result.rooms
+						this.catalogState = 'synced'
+					} catch (error) {
+						this.catalogState = 'synced'
+						this.loadError = '门店房型同步失败，请检查网络或稍后重试。'
+					}
+				}
+				this.booking = saveBooking({
+					...this.booking,
+					storeId: this.storeId || this.booking.storeId,
+					store: (this.store && this.store.name) || this.booking.store,
+					address: (this.store && this.store.address) || this.booking.address
+				})
+			},
 			getRoomGallery(room) {
 				const source = room.images || room.imageUrls || room.photos || room.gallery
 				const candidates = Array.isArray(source) ? source : source ? [source] : []

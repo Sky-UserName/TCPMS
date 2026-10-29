@@ -164,6 +164,12 @@
           </div>
         </el-form-item>
         <el-form-item label="门店简介"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="入住离店须知" class="field-wide">
+          <el-input v-model="form.bookingNotice.checkInNotice" type="textarea" :rows="3" placeholder="例如：入住时间当天 14:00 后，退房时间次日 12:00 前；入住需实名登记" />
+        </el-form-item>
+        <el-form-item label="取消退改通知" class="field-wide">
+          <el-input v-model="form.bookingNotice.cancelNotice" type="textarea" :rows="3" placeholder="例如：入住前 24 小时可免费取消；逾期取消扣除首晚房费" />
+        </el-form-item>
         <div class="form-grid">
           <el-form-item label="经度"><el-input-number v-model="form.longitude" :precision="6" :step="0.0001" controls-position="right" /></el-form-item>
           <el-form-item label="纬度"><el-input-number v-model="form.latitude" :precision="6" :step="0.0001" controls-position="right" /></el-form-item>
@@ -324,7 +330,8 @@ function emptyForm() {
     id: '', name: '', code: '', description: '', province: '', city: '', district: '', regionPath: [], address: '', phone: '',
     longitude: null, latitude: null, status: 'Draft', sortOrder: 0, rating: 0,
     ownerUsername: '', ownerNickname: '', ownerAvatarUrl: '', ownerName: '', ownerPhone: '',
-    idCardFrontUrl: '', idCardBackUrl: '', propertyCertificateUrl: '', businessLicenseUrl: '', doorImageUrl: ''
+    idCardFrontUrl: '', idCardBackUrl: '', propertyCertificateUrl: '', businessLicenseUrl: '', doorImageUrl: '',
+    bookingNotice: { checkInNotice: '', cancelNotice: '' }
   }
 }
 const roomPreviewList = computed(() => roomImages.value.map((image) => resolveAssetUrl(image)).filter(Boolean))
@@ -561,8 +568,10 @@ async function openEdit(row) {
   try {
     const detail = await get(`/admin/stores/${row.id}`)
     Object.assign(form, { ...emptyForm(), ...detail })
+    if (!form.bookingNotice) form.bookingNotice = { checkInNotice: '', cancelNotice: '' }
   } catch {
     Object.assign(form, { ...emptyForm(), ...row, code: row.code || row.id.slice(0, 8).toUpperCase() })
+    if (!form.bookingNotice) form.bookingNotice = { checkInNotice: '', cancelNotice: '' }
   }
   roomImages.value = parseArray(form.roomImageUrlsJson)
   form.regionPath = findRegionPathByLabels(form.province, form.city, form.district)
@@ -786,6 +795,10 @@ onBeforeUnmount(() => {
 <style scoped>
 .form-section-title{font-size:14px;font-weight:700;color:var(--text-primary);padding:12px 0 8px;border-top:1px solid var(--line);margin-top:4px}
 .form-section-title:first-child{border-top:0;padding-top:0}
+.booking-notice-review{display:grid;gap:6px;width:100%;padding:12px 14px;background:#f4fafb;border:1px solid #dce9ea;border-radius:10px}
+.booking-notice-review>div{display:flex;gap:12px;font-size:13px;line-height:1.5}
+.booking-notice-review span{flex:0 0 64px;color:#6f8085}
+.booking-notice-review strong{color:#23393d;font-weight:600;white-space:pre-wrap}
 .store-form :deep(.el-form-item){margin-bottom:14px}
 .store-form :deep(.el-input-number),.store-form :deep(.el-select),.store-form :deep(.el-cascader){width:100%}
 .asset-editor{display:flex;flex-direction:column;gap:9px;width:100%}

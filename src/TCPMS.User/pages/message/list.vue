@@ -1,6 +1,7 @@
 <template>
 	<view class="proto-page message-page">
 		<ProtoHeader title="消息" :back="false" title-align="center" theme="green" />
+		<CacheRefreshIndicator :refreshing="pullRefreshing" />
 
 		<view v-if="messages.length" class="message-list">
 			<view v-for="item in messages" :key="item.id" class="message-card" @tap="openMessage(item)">
@@ -26,29 +27,37 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
+	import CacheRefreshIndicator from '@/components/CacheRefreshIndicator.vue'
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { fetchMyMessages, markMyMessageRead } from '@/common/api.js'
 	import { showToast } from '@/common/prototype.js'
+	import { runPullRefresh } from '@/common/pull-refresh.js'
 
 	export default {
-		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
+		components: { ProtoHeader, CacheRefreshIndicator, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
-				messages: []
+				messages: [],
+				pullRefreshing: false
 			}
 		},
 		async onShow() {
 			uni.hideTabBar({ animation: false, fail: () => {} })
-			try {
-				this.messages = await fetchMyMessages()
-			} catch (error) {
-				this.messages = []
-				showToast(error?.message || '消息加载失败')
-			}
+			await this.loadMessages()
+		},
+		onPullDownRefresh() {
+			return runPullRefresh(this, () => this.loadMessages())
 		},
 		methods: {
+			async loadMessages() {
+				try {
+					this.messages = await fetchMyMessages()
+				} catch (error) {
+					showToast(error?.message || '消息加载失败')
+				}
+			},
 			async openMessage(item) {
 				if (item.unread) {
 					item.unread = false

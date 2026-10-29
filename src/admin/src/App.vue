@@ -38,6 +38,7 @@ import UsersView from './views/UsersView.vue'
 import AuditView from './views/AuditView.vue'
 import MembersView from './views/MembersView.vue'
 import DemoManagerView from './views/DemoManagerView.vue'
+import RoomTypesView from './views/RoomTypesView.vue'
 import RegionManagerView from './views/RegionManagerView.vue'
 import StoreStaffView from './views/StoreStaffView.vue'
 import PermissionMenusView from './views/PermissionMenusView.vue'
@@ -45,6 +46,7 @@ import MessagesView from './views/MessagesView.vue'
 import MessageLogsView from './views/MessageLogsView.vue'
 import SubscriptionMessagesView from './views/SubscriptionMessagesView.vue'
 import AppCenterView from './views/AppCenterView.vue'
+import ReviewsView from './views/ReviewsView.vue'
 
 const activeView = ref('dashboard')
 // getToken 已过滤过期令牌；有令牌时先进入校验态，避免首帧就把后台外壳挂起来。
@@ -67,11 +69,13 @@ const views = {
   roomManagement: CatalogView,
   financialOrders: OrdersView,
   permissions: UsersView,
-  roomTypes: DemoManagerView,
+  roomTypes: RoomTypesView,
   facilities: DemoManagerView,
   tags: DemoManagerView,
+  services: DemoManagerView,
+  nearbyFacilities: DemoManagerView,
   regions: RegionManagerView,
-  reviews: DemoManagerView,
+  reviews: ReviewsView,
   withdrawals: DemoManagerView,
   income: DemoManagerView,
   messages: MessagesView,

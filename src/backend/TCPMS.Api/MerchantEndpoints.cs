@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using TCPMS.Api.Contracts;
 using TCPMS.Api.Domain;
 using TCPMS.Api.Infrastructure;
+using TCPMS.Api.Services;
 
 namespace TCPMS.Api;
 
@@ -18,6 +19,7 @@ public static class MerchantEndpoints
 
     private static readonly string[] PaidStatuses =
     [
+        OrderStatuses.PaidPendingVerification,
         OrderStatuses.PaidPendingConfirmation,
         OrderStatuses.ConfirmedPendingCheckIn,
         OrderStatuses.CheckedIn
@@ -70,8 +72,7 @@ public static class MerchantEndpoints
             var roomCount = await db.RoomTypes.CountAsync(x => x.StoreId == ctx.Store.Id, cancellationToken);
             var pendingOrderCount = await db.BookingOrders.CountAsync(
                 x => x.StoreId == ctx.Store.Id &&
-                     (x.Status == OrderStatuses.PaidPendingConfirmation ||
-                      x.Status == OrderStatuses.ConfirmedPendingCheckIn),
+                     x.Status == OrderStatuses.PaidPendingVerification,
                 cancellationToken);
             return Results.Ok(new
             {
@@ -140,11 +141,6 @@ public static class MerchantEndpoints
                 return Results.BadRequest(new ApiError("validation_error", validationError));
             }
 
-            if (ctx.Store is not null && ctx.Store.Status == StoreStatuses.Active)
-            {
-                return Results.Conflict(new ApiError("merchant_already_approved", "当前账号已经有审核通过的民宿"));
-            }
-
             var openId = principal.FindFirstValue("openid") ?? ctx.User.OpenId;
             var store = ctx.Store;
             if (store is null)
@@ -188,6 +184,56 @@ public static class MerchantEndpoints
             db.AuditLogs.Add(CreateAudit(principal, "merchant.application.submit", "Store", store.Id.ToString(), store.Name));
             await db.SaveChangesAsync(cancellationToken);
             return Results.Ok(ToApplicationResponse(store));
+        });
+
+        merchant.MapGet("/booking-notice", async (
+            AppDbContext db,
+            ClaimsPrincipal principal,
+            CancellationToken cancellationToken) =>
+        {
+            var ctx = await ResolveMerchantAsync(db, principal, cancellationToken);
+            if (ctx.User is null) return Results.Unauthorized();
+            if (ctx.Store is null) return MerchantNotBound();
+            var notice = await StoreBookingNoticeStore.LoadAsync(db, ctx.Store.Id, cancellationToken);
+            return Results.Ok(new
+            {
+                status = ToStoreStatus(ctx.Store.Status),
+                checkInNotice = notice.CheckInNotice,
+                cancelNotice = notice.CancelNotice
+            });
+        });
+
+        merchant.MapPut("/booking-notice", async (
+            MerchantBookingNoticeRequest request,
+            AppDbContext db,
+            ClaimsPrincipal principal,
+            CancellationToken cancellationToken) =>
+        {
+            var ctx = await ResolveMerchantAsync(db, principal, cancellationToken);
+            if (ctx.User is null) return Results.Unauthorized();
+            if (ctx.Store is null) return MerchantNotBound();
+
+            var input = StoreBookingNoticeStore.Normalize(new StoreBookingNoticeDto(
+                request.CheckInNotice ?? string.Empty,
+                request.CancelNotice ?? string.Empty));
+            var current = await StoreBookingNoticeStore.LoadAsync(db, ctx.Store.Id, cancellationToken);
+            var changed = !StoreBookingNoticeStore.Same(current, input);
+            if (changed)
+            {
+                await StoreBookingNoticeStore.SaveAsync(db, ctx.Store.Id, input, cancellationToken);
+                ctx.Store.Status = StoreStatuses.PendingReview;
+                ctx.Store.UpdatedAt = DateTime.UtcNow;
+                db.AuditLogs.Add(CreateAudit(principal, "merchant.booking_notice.update", "Store", ctx.Store.Id.ToString(), ctx.Store.Name));
+                await db.SaveChangesAsync(cancellationToken);
+            }
+
+            return Results.Ok(new
+            {
+                status = changed ? "pending" : ToStoreStatus(ctx.Store.Status),
+                changed,
+                checkInNotice = input.CheckInNotice,
+                cancelNotice = input.CancelNotice
+            });
         });
 
         merchant.MapPost("/application/upload", async (
@@ -294,6 +340,17 @@ public static class MerchantEndpoints
             });
         });
 
+        merchant.MapGet("/room-options", async (
+            AppDbContext db,
+            ClaimsPrincipal principal,
+            CancellationToken cancellationToken) =>
+        {
+            var ctx = await ResolveMerchantAsync(db, principal, cancellationToken);
+            if (ctx.User is null) return Results.Unauthorized();
+            var options = await RoomOptionCatalog.LoadAsync(db, ctx.Store?.Id, cancellationToken);
+            return Results.Ok(options);
+        });
+
         MapRooms(merchant);
         MapOrders(merchant);
         MapVerify(merchant);
@@ -361,15 +418,27 @@ public static class MerchantEndpoints
                 return Results.Conflict(new ApiError("room_type_exists", "已存在同名房型"));
             }
 
+            var kind = NormalizeRoomKind(request.Kind, request.Type);
+            var bedCount = kind == RoomTypeKinds.Bed
+                ? Math.Max(request.Beds ?? request.Stock ?? 1, 1)
+                : 1;
+            var roomCount = kind == RoomTypeKinds.Bed
+                ? 1
+                : Math.Max(request.Rooms ?? 1, 1);
+            var defaultInventory = kind == RoomTypeKinds.Bed
+                ? bedCount
+                : Math.Max(request.Stock ?? 1, 1);
+
             var room = new RoomType
             {
                 Id = Guid.NewGuid(),
                 StoreId = ctx.Store.Id,
                 Name = name,
                 LongName = request.Title?.Trim(),
-                Kind = request.Type?.Contains("床位") == true ? RoomTypeKinds.Bed : RoomTypeKinds.PrivateRoom,
+                Kind = kind,
                 RoomCategory = request.Type,
-                BedCount = Math.Max(request.Beds ?? 1, 1),
+                Gender = kind == RoomTypeKinds.Bed ? request.Gender : null,
+                BedCount = bedCount,
                 MaxGuests = Math.Max(request.MaxGuests ?? 2, 1),
                 BasePriceCents = request.PriceCents,
                 Description = request.Description,
@@ -385,8 +454,8 @@ public static class MerchantEndpoints
                 Area = request.Area,
                 Orientation = request.Orientation,
                 Layout = request.Layout,
-                RoomCount = Math.Max(request.Rooms ?? 1, 1),
-                DefaultInventory = Math.Max(request.Stock ?? 1, 1),
+                RoomCount = roomCount,
+                DefaultInventory = defaultInventory,
                 IsDraft = !request.Published,
                 IsPublished = request.Published,
                 ApprovalStatus = request.Published ? "Approved" : "Draft",
@@ -428,11 +497,23 @@ public static class MerchantEndpoints
                 return Results.Conflict(new ApiError("room_type_exists", "已存在同名房型"));
             }
 
+            var kind = NormalizeRoomKind(request.Kind, request.Type);
+            var bedCount = kind == RoomTypeKinds.Bed
+                ? Math.Max(request.Beds ?? request.Stock ?? room.BedCount, 1)
+                : 1;
+            var roomCount = kind == RoomTypeKinds.Bed
+                ? 1
+                : Math.Max(request.Rooms ?? room.RoomCount, 1);
+            var defaultInventory = kind == RoomTypeKinds.Bed
+                ? bedCount
+                : Math.Max(request.Stock ?? room.DefaultInventory, 1);
+
             room.Name = name;
             room.LongName = request.Title?.Trim();
             room.RoomCategory = request.Type;
-            room.Kind = request.Type?.Contains("床位") == true ? RoomTypeKinds.Bed : RoomTypeKinds.PrivateRoom;
-            room.BedCount = Math.Max(request.Beds ?? room.BedCount, 1);
+            room.Kind = kind;
+            room.Gender = kind == RoomTypeKinds.Bed ? request.Gender : null;
+            room.BedCount = bedCount;
             room.MaxGuests = Math.Max(request.MaxGuests ?? room.MaxGuests, 1);
             room.BasePriceCents = request.PriceCents;
             room.Description = request.Description;
@@ -450,14 +531,14 @@ public static class MerchantEndpoints
             {
                 room.ImageUrlsJson = ToJson([request.ImageUrl.Trim()]);
             }
-            room.CheckInTime = request.CheckIn;
-            room.CheckOutTime = request.CheckOut;
-            room.CancellationRule = request.CancelRule;
+            room.CheckInTime = request.CheckIn ?? room.CheckInTime;
+            room.CheckOutTime = request.CheckOut ?? room.CheckOutTime;
+            room.CancellationRule = request.CancelRule ?? room.CancellationRule;
             room.Area = request.Area;
             room.Orientation = request.Orientation;
             room.Layout = request.Layout;
-            room.RoomCount = Math.Max(request.Rooms ?? room.RoomCount, 1);
-            room.DefaultInventory = Math.Max(request.Stock ?? room.DefaultInventory, 1);
+            room.RoomCount = roomCount;
+            room.DefaultInventory = defaultInventory;
             room.IsDraft = !request.Published;
             room.IsPublished = request.Published;
             room.ApprovalStatus = request.Published ? "Approved" : "Draft";
@@ -525,8 +606,8 @@ public static class MerchantEndpoints
             {
                 var statuses = status switch
                 {
-                    "pending" => new[] { OrderStatuses.PaidPendingConfirmation },
-                    "stay" => new[] { OrderStatuses.ConfirmedPendingCheckIn, OrderStatuses.CheckedIn },
+                    "pending" => new[] { OrderStatuses.PaidPendingVerification },
+                    "stay" => new[] { OrderStatuses.CheckedIn },
                     "done" => new[] { OrderStatuses.Completed },
                     "cancel" => CancelledStatuses,
                     _ => Array.Empty<string>()
@@ -542,32 +623,6 @@ public static class MerchantEndpoints
                 .Take(200)
                 .ToListAsync(cancellationToken);
             return Results.Ok(orders.Select(ToMerchantOrder).ToList());
-        });
-
-        merchant.MapPost("/orders/{id:guid}/confirm", async (
-            Guid id,
-            AppDbContext db,
-            ClaimsPrincipal principal,
-            CancellationToken cancellationToken) =>
-        {
-            var ctx = await ResolveMerchantAsync(db, principal, cancellationToken);
-            if (ctx.User is null) return Results.Unauthorized();
-            if (ctx.Store is null) return MerchantNotBound();
-
-            var order = await db.BookingOrders
-                .Include(x => x.RoomType)
-                .SingleOrDefaultAsync(x => x.Id == id && x.StoreId == ctx.Store.Id, cancellationToken);
-            if (order is null) return Results.NotFound(new ApiError("order_not_found", "订单不存在"));
-            if (order.Status != OrderStatuses.PaidPendingConfirmation)
-            {
-                return Results.Conflict(new ApiError("order_not_confirmable", "当前订单不允许确认"));
-            }
-
-            order.Status = OrderStatuses.ConfirmedPendingCheckIn;
-            order.UpdatedAt = DateTime.UtcNow;
-            db.AuditLogs.Add(CreateAudit(principal, "merchant.order.confirm", "BookingOrder", order.Id.ToString(), order.OrderNumber));
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.Ok(ToMerchantOrder(order));
         });
 
         merchant.MapPost("/orders/{id:guid}/check-in", async (
@@ -606,6 +661,8 @@ public static class MerchantEndpoints
 
             order.Status = OrderStatuses.CheckedIn;
             order.CheckedInAt = DateTime.UtcNow;
+            order.VerificationStatus = OrderVerificationStatuses.Verified;
+            order.VerifiedAt = order.CheckedInAt;
             order.AssignedResourcesJson = JsonSerializer.Serialize(units.Select(x => x.Code).ToArray());
             order.UpdatedAt = DateTime.UtcNow;
             db.AuditLogs.Add(CreateAudit(principal, "merchant.order.check_in", "BookingOrder", order.Id.ToString(), order.OrderNumber));
@@ -665,6 +722,138 @@ public static class MerchantEndpoints
             await db.SaveChangesAsync(cancellationToken);
             return Results.Ok(ToMerchantOrder(order));
         });
+
+        // 商家在待核销阶段直接取消：已支付的订单走微信原路退款，未支付订单只释放库存。
+        merchant.MapPost("/orders/{id:guid}/cancel", async (
+            Guid id,
+            string? reason,
+            AppDbContext db,
+            ClaimsPrincipal principal,
+            WeChatPayService weChatPayService,
+            CancellationToken cancellationToken) =>
+        {
+            var ctx = await ResolveMerchantAsync(db, principal, cancellationToken);
+            if (ctx.User is null) return Results.Unauthorized();
+            if (ctx.Store is null) return MerchantNotBound();
+
+            var order = await db.BookingOrders
+                .Include(x => x.RoomType)
+                .SingleOrDefaultAsync(x => x.Id == id && x.StoreId == ctx.Store.Id, cancellationToken);
+            if (order is null) return Results.NotFound(new ApiError("order_not_found", "订单不存在"));
+
+            if (order.Status is OrderStatuses.Completed or OrderStatuses.CheckedIn)
+            {
+                return Results.Conflict(new ApiError("order_not_cancelable", "已核销的订单不能取消"));
+            }
+            if (order.Status is not (OrderStatuses.PendingPayment or
+                OrderStatuses.PaidPendingVerification or
+                OrderStatuses.PaidPendingConfirmation or
+                OrderStatuses.ConfirmedPendingCheckIn))
+            {
+                return Results.Conflict(new ApiError("order_not_cancelable", "当前订单状态不能取消"));
+            }
+
+            var now = DateTime.UtcNow;
+            var cancelReason = string.IsNullOrWhiteSpace(reason) ? "商家取消订单" : reason.Trim();
+            if (order.PaymentStatus != "Paid")
+            {
+                await AdminEndpoints.ReleaseInventoryAsync(db, order, false, cancellationToken);
+                order.Status = OrderStatuses.Cancelled;
+                order.CancellationReason = cancelReason;
+                order.UpdatedAt = now;
+                db.AuditLogs.Add(CreateAudit(
+                    principal,
+                    "merchant.order.cancel",
+                    "BookingOrder",
+                    order.Id.ToString(),
+                    cancelReason));
+                await db.SaveChangesAsync(cancellationToken);
+                return Results.Ok(ToMerchantOrder(order));
+            }
+
+            var paidPayments = await db.PaymentRecords.AsNoTracking()
+                .Where(x => x.OrderId == order.Id && x.Status == "Paid")
+                .OrderByDescending(x => x.CreatedAt)
+                .ToListAsync(cancellationToken);
+            var refundAmount = paidPayments.Sum(x => x.AmountCents);
+            if (refundAmount <= 0)
+            {
+                refundAmount = order.TotalAmountCents;
+            }
+            if (refundAmount <= 0)
+            {
+                return Results.Conflict(new ApiError("refund_amount_invalid", "订单没有可退回的支付金额"));
+            }
+            var hasRefund = await db.RefundRecords.AnyAsync(
+                x => x.OrderId == order.Id && x.Status != "Rejected",
+                cancellationToken);
+            if (hasRefund)
+            {
+                return Results.Conflict(new ApiError("refund_exists", "该订单已有退款记录，请勿重复操作"));
+            }
+
+            var refund = new RefundRecord
+            {
+                Id = Guid.NewGuid(),
+                OrderId = order.Id,
+                RefundNumber = $"RF{now:yyyyMMddHHmmss}{Random.Shared.Next(1000, 9999)}",
+                AmountCents = refundAmount,
+                Reason = cancelReason,
+                Status = "Refunded",
+                OriginalOrderStatus = order.Status,
+                RequestedByUserId = GetUserId(principal),
+                ReviewedAt = now,
+                CompletedAt = now,
+                ReviewComment = "商家取消订单，原路退回"
+            };
+
+            var latestPayment = paidPayments.FirstOrDefault();
+            var isRealWeChatPayment =
+                latestPayment?.Provider == "WeChat" &&
+                !latestPayment.TransactionNumber.StartsWith("MOCK", StringComparison.OrdinalIgnoreCase) &&
+                !latestPayment.TransactionNumber.StartsWith("SEED_", StringComparison.OrdinalIgnoreCase);
+            try
+            {
+                refund.ProviderRefundNumber = isRealWeChatPayment
+                    ? await weChatPayService.CreateRefundAsync(order, refund, cancellationToken)
+                    : $"MOCK_RF_{now:yyyyMMddHHmmssfff}";
+            }
+            catch (InvalidOperationException)
+            {
+                return Results.Json(
+                    new ApiError("refund_config_incomplete", "微信退款配置不完整，暂时无法原路退回"),
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+            catch (WeChatPayApiException ex)
+            {
+                return Results.Json(
+                    new ApiError("refund_rejected", $"微信退款未受理：{ex.Message}"),
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (HttpRequestException)
+            {
+                return Results.Json(
+                    new ApiError("refund_unavailable", "微信退款接口暂时不可用，请稍后重试"),
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            db.RefundRecords.Add(refund);
+            order.Status = OrderStatuses.Refunded;
+            order.PaymentStatus = "Refunded";
+            order.VerificationStatus = OrderVerificationStatuses.Unverified;
+            order.VerifiedAt = null;
+            order.CancellationReason = cancelReason;
+            order.UpdatedAt = now;
+            await AdminEndpoints.ReleaseInventoryAsync(db, order, true, cancellationToken);
+            db.AuditLogs.Add(CreateAudit(
+                principal,
+                "merchant.order.cancel_refund",
+                "BookingOrder",
+                order.Id.ToString(),
+                $"{cancelReason}；退款 {(refundAmount / 100m):0.00} 元"));
+            await db.SaveChangesAsync(cancellationToken);
+            return Results.Ok(ToMerchantOrder(order));
+        });
     }
 
     private static void MapVerify(RouteGroupBuilder merchant)
@@ -680,18 +869,21 @@ public static class MerchantEndpoints
 
             var orders = await db.BookingOrders.AsNoTracking()
                 .Include(x => x.RoomType)
-                .Where(x => x.StoreId == ctx.Store.Id && x.CheckedInAt != null)
-                .OrderByDescending(x => x.CheckedInAt)
+                .Where(x => x.StoreId == ctx.Store.Id && x.VerificationStatus == OrderVerificationStatuses.Verified)
+                .OrderByDescending(x => x.VerifiedAt)
                 .Take(100)
                 .ToListAsync(cancellationToken);
             return Results.Ok(orders.Select(order => new
             {
                 id = order.Id,
+                orderNumber = order.OrderNumber,
                 code = order.OrderNumber,
                 guest = BuildGuestText(order),
                 roomName = order.RoomType?.Name ?? "已预订房型",
+                storeName = ctx.Store.Name,
                 status = "已核销",
-                time = FormatCn(order.CheckedInAt ?? order.UpdatedAt)
+                verifiedAt = order.VerifiedAt,
+                time = FormatCn(order.VerifiedAt ?? order.UpdatedAt)
             }).ToList());
         });
 
@@ -713,7 +905,10 @@ public static class MerchantEndpoints
 
             var order = await db.BookingOrders
                 .Include(x => x.RoomType)
-                .SingleOrDefaultAsync(x => x.OrderNumber == code && x.StoreId == ctx.Store.Id, cancellationToken);
+                .SingleOrDefaultAsync(x =>
+                    (x.VerificationCode == code || x.OrderNumber == code) &&
+                    x.StoreId == ctx.Store.Id,
+                    cancellationToken);
             if (order is null)
             {
                 return Results.NotFound(new ApiError("order_not_found", "未找到该门店对应的订单"));
@@ -722,40 +917,33 @@ public static class MerchantEndpoints
             {
                 return Results.Conflict(new ApiError("order_already_verified", "该订单已核销"));
             }
-            if (order.Status != OrderStatuses.ConfirmedPendingCheckIn)
+            if (order.PaymentStatus != "Paid" ||
+                order.Status is not (OrderStatuses.PaidPendingVerification or
+                    OrderStatuses.PaidPendingConfirmation or
+                    OrderStatuses.ConfirmedPendingCheckIn))
             {
-                return Results.Conflict(new ApiError("order_not_verifiable", "订单尚未确认或已取消，不能核销"));
+                return Results.Conflict(new ApiError("order_not_verifiable", "订单未支付、已核销或当前状态不能核销"));
             }
 
-            var units = await db.RoomUnits
-                .Where(x => x.RoomTypeId == order.RoomTypeId && x.Status == "Available")
-                .OrderBy(x => x.Code)
-                .Take(order.Quantity)
-                .ToListAsync(cancellationToken);
-            if (units.Count < order.Quantity)
-            {
-                return Results.Conflict(new ApiError("resource_insufficient", "可用房间或床位不足，请先释放资源"));
-            }
-            foreach (var unit in units)
-            {
-                unit.Status = "Occupied";
-                unit.UpdatedAt = DateTime.UtcNow;
-            }
-
-            order.Status = OrderStatuses.CheckedIn;
-            order.CheckedInAt = DateTime.UtcNow;
-            order.AssignedResourcesJson = JsonSerializer.Serialize(units.Select(x => x.Code).ToArray());
-            order.UpdatedAt = DateTime.UtcNow;
+            var verifiedAt = DateTime.UtcNow;
+            order.Status = OrderStatuses.Completed;
+            order.CheckedInAt = verifiedAt;
+            order.VerificationStatus = OrderVerificationStatuses.Verified;
+            order.VerifiedAt = verifiedAt;
+            order.UpdatedAt = verifiedAt;
             db.AuditLogs.Add(CreateAudit(principal, "merchant.order.verify", "BookingOrder", order.Id.ToString(), order.OrderNumber));
             await db.SaveChangesAsync(cancellationToken);
             return Results.Ok(new
             {
                 id = order.Id,
+                orderNumber = order.OrderNumber,
                 code = order.OrderNumber,
                 guest = BuildGuestText(order),
                 roomName = order.RoomType?.Name ?? "已预订房型",
+                storeName = ctx.Store.Name,
                 status = "已核销",
-                time = FormatCn(order.CheckedInAt)
+                verifiedAt = order.VerifiedAt,
+                time = FormatCn(order.VerifiedAt)
             });
         });
     }
@@ -870,6 +1058,7 @@ public static class MerchantEndpoints
     private static void MapReviews(RouteGroupBuilder merchant)
     {
         merchant.MapGet("/reviews", async (
+            string? status,
             AppDbContext db,
             ClaimsPrincipal principal,
             CancellationToken cancellationToken) =>
@@ -878,32 +1067,69 @@ public static class MerchantEndpoints
             if (ctx.User is null) return Results.Unauthorized();
             if (ctx.Store is null) return MerchantNotBound();
 
-            var reviews = await db.Reviews.AsNoTracking()
-                .Include(x => x.User)
-                .Include(x => x.Moderation)
-                .Where(x => x.StoreId == ctx.Store.Id &&
-                            (x.Moderation == null || x.Moderation.Status != ReviewStatuses.Hidden))
-                .OrderByDescending(x => x.CreatedAt)
-                .Take(100)
-                .ToListAsync(cancellationToken);
-            var replies = await ReadJsonAsync<Dictionary<string, string>>(
-                db,
-                $"merchant_review_replies:{ctx.Store.Id}",
-                cancellationToken) ?? [];
-            return Results.Ok(reviews.Select(review => new
+            var normalizedStatus = NormalizeReviewStatus(status);
+            if (!string.IsNullOrWhiteSpace(status) && normalizedStatus is null)
             {
-                id = review.Id,
-                guest = string.IsNullOrWhiteSpace(review.User?.Nickname) ? "微信用户" : review.User!.Nickname,
-                rating = review.RoomRating,
-                date = FormatCn(review.CreatedAt, "yyyy-MM-dd"),
-                content = review.Content,
-                reply = replies.TryGetValue(review.Id.ToString(), out var reply) ? reply : string.Empty
+                return Results.BadRequest(new ApiError("invalid_review_status", "评价状态不正确"));
+            }
+
+            var query = db.Reviews.AsNoTracking()
+                .Include(x => x.User)
+                .Include(x => x.Store)
+                .Include(x => x.RoomType)
+                .Include(x => x.Moderation)
+                .Where(x => x.StoreId == ctx.Store.Id);
+
+            if (normalizedStatus is not null)
+            {
+                query = normalizedStatus switch
+                {
+                    ReviewStatuses.Pending => query.Where(x =>
+                        x.Moderation == null || x.Moderation.Status == ReviewStatuses.Pending),
+                    ReviewStatuses.Hidden => query.Where(x =>
+                        x.Moderation != null && x.Moderation.Status == ReviewStatuses.Hidden),
+                    _ => query.Where(x =>
+                        x.Moderation != null && x.Moderation.Status == ReviewStatuses.Published)
+                };
+            }
+
+            var reviews = await query
+                .OrderByDescending(x => x.CreatedAt)
+                .Take(200)
+                .ToListAsync(cancellationToken);
+            return Results.Ok(reviews.Select(review =>
+            {
+                var reviewStatus = ToMerchantReviewStatus(review.Moderation?.Status);
+                return new
+                {
+                    id = review.Id,
+                    orderId = review.OrderId,
+                    guest = string.IsNullOrWhiteSpace(review.User?.Nickname) ? "微信用户" : review.User!.Nickname,
+                    avatar = review.User?.AvatarUrl ?? string.Empty,
+                    store = review.Store?.Name ?? ctx.Store.Name,
+                    room = review.RoomType?.Name ?? "未知房型",
+                    roomRating = review.RoomRating,
+                    storeRating = review.StoreRating,
+                    rating = review.RoomRating,
+                    content = review.Content,
+                    images = ParseReviewImages(review.ImageUrlsJson),
+                    status = reviewStatus,
+                    statusLabel = reviewStatus switch
+                    {
+                        "pending" => "待审核",
+                        "published" => "已通过",
+                        _ => "未通过"
+                    },
+                    reviewComment = review.Moderation?.ReviewComment ?? string.Empty,
+                    date = FormatCn(review.CreatedAt, "yyyy-MM-dd"),
+                    createdAt = review.CreatedAt
+                };
             }).ToList());
         });
 
-        merchant.MapPost("/reviews/{id:guid}/reply", async (
+        merchant.MapPost("/reviews/{id:guid}/moderate", async (
             Guid id,
-            MerchantReviewReplyRequest request,
+            MerchantReviewModerateRequest request,
             AppDbContext db,
             ClaimsPrincipal principal,
             CancellationToken cancellationToken) =>
@@ -912,25 +1138,48 @@ public static class MerchantEndpoints
             if (ctx.User is null) return Results.Unauthorized();
             if (ctx.Store is null) return MerchantNotBound();
 
-            var content = (request.Content ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(content))
+            var nextStatus = NormalizeReviewStatus(request.Status);
+            if (nextStatus is not (ReviewStatuses.Published or ReviewStatuses.Hidden))
             {
-                return Results.BadRequest(new ApiError("validation_error", "回复内容不能为空"));
+                return Results.BadRequest(new ApiError("invalid_review_status", "审核结果只能是已通过或未通过"));
             }
-            var exists = await db.Reviews.AnyAsync(
-                x => x.Id == id && x.StoreId == ctx.Store.Id,
-                cancellationToken);
-            if (!exists) return Results.NotFound(new ApiError("review_not_found", "评价不存在"));
 
-            var replies = await ReadJsonAsync<Dictionary<string, string>>(
-                db,
-                $"merchant_review_replies:{ctx.Store.Id}",
-                cancellationToken) ?? [];
-            replies[id.ToString()] = content;
-            await WriteJsonAsync(db, $"merchant_review_replies:{ctx.Store.Id}", replies, cancellationToken);
-            db.AuditLogs.Add(CreateAudit(principal, "merchant.review.reply", "Review", id.ToString(), content));
+            var review = await db.Reviews
+                .Include(x => x.Moderation)
+                .SingleOrDefaultAsync(
+                    x => x.Id == id && x.StoreId == ctx.Store.Id,
+                    cancellationToken);
+            if (review is null) return Results.NotFound(new ApiError("review_not_found", "评价不存在"));
+
+            var moderation = review.Moderation;
+            if (moderation is null)
+            {
+                moderation = new ReviewModeration
+                {
+                    ReviewId = review.Id,
+                    Review = review
+                };
+                db.ReviewModerations.Add(moderation);
+                review.Moderation = moderation;
+            }
+
+            moderation.Status = nextStatus;
+            moderation.ReviewedAt = DateTime.UtcNow;
+            moderation.UpdatedAt = DateTime.UtcNow;
+            var comment = (request.Comment ?? string.Empty).Trim();
+            if (comment.Length > 0)
+            {
+                moderation.ReviewComment = comment.Length > 200 ? comment[..200] : comment;
+            }
+
+            db.AuditLogs.Add(CreateAudit(
+                principal,
+                nextStatus == ReviewStatuses.Published ? "merchant.review.approve" : "merchant.review.reject",
+                "Review",
+                review.Id.ToString(),
+                review.Content));
             await db.SaveChangesAsync(cancellationToken);
-            return Results.Ok(new { id, reply = content });
+            return Results.Ok(new { id = review.Id, status = ToMerchantReviewStatus(nextStatus) });
         });
     }
 
@@ -1022,6 +1271,7 @@ public static class MerchantEndpoints
             if (ctx.Store is null) return MerchantNotBound();
 
             var admins = await db.AdminUsers.AsNoTracking()
+                .Include(x => x.StoreStaffProfile)
                 .Include(x => x.UserRoles)
                 .ThenInclude(x => x.Role)
                 .Where(x => x.StoreId == ctx.Store.Id)
@@ -1033,20 +1283,113 @@ public static class MerchantEndpoints
                 {
                     id = "owner",
                     name = string.IsNullOrWhiteSpace(ctx.Store.OwnerName) ? "店主" : ctx.Store.OwnerName,
+                    username = ctx.Store.OwnerUsername ?? "owner",
                     phone = MaskPhone(ctx.Store.OwnerPhone ?? ctx.Store.Phone),
+                    rawPhone = ctx.Store.OwnerPhone ?? ctx.Store.Phone ?? string.Empty,
+                    gender = "未知",
                     role = "店主",
-                    status = "正常"
+                    status = "正常",
+                    storeId = ctx.Store.Id,
+                    storeName = ctx.Store.Name,
+                    permissions = Array.Empty<string>(),
+                    memberId = (Guid?)null,
+                    isOwner = true
                 }
             };
             items.AddRange(admins.Select(admin => new
             {
                 id = admin.Id,
-                name = admin.DisplayName,
+                name = string.IsNullOrWhiteSpace(admin.DisplayName) ? admin.Username : admin.DisplayName,
+                username = admin.Username,
                 phone = MaskPhone(admin.PhoneNumber),
+                rawPhone = admin.PhoneNumber ?? string.Empty,
+                gender = admin.StoreStaffProfile?.Gender ?? "未知",
                 role = admin.UserRoles.Any(x => x.Role?.Code == RoleCodes.StoreAdmin) ? "店长" : "前台",
-                status = admin.IsEnabled ? "正常" : "已停用"
+                status = admin.IsEnabled ? "正常" : "已停用",
+                storeId = admin.StoreId,
+                storeName = ctx.Store.Name,
+                permissions = ParsePermissionKeys(admin.StoreStaffProfile?.PermissionKeysJson),
+                memberId = admin.WxUserId,
+                isOwner = false
             }));
             return Results.Ok(items);
+        });
+
+        // 添加员工弹层需要的可选项：当前账号名下的门店（默认选中当前民宿）和启用中的权限菜单。
+        merchant.MapGet("/staff/options", async (
+            AppDbContext db,
+            ClaimsPrincipal principal,
+            CancellationToken cancellationToken) =>
+        {
+            var ctx = await ResolveMerchantAsync(db, principal, cancellationToken);
+            if (ctx.User is null) return Results.Unauthorized();
+            if (ctx.Store is null) return MerchantNotBound();
+
+            var openId = principal.FindFirstValue("openid") ?? ctx.User.OpenId;
+            var ownerPhone = ctx.User.PhoneNumber;
+            var stores = await db.Stores.AsNoTracking()
+                .Where(x => x.Status != StoreStatuses.Disabled &&
+                            (x.OwnerUsername == openId ||
+                             (!string.IsNullOrWhiteSpace(ownerPhone) && x.OwnerPhone == ownerPhone)))
+                .OrderBy(x => x.SortOrder)
+                .ThenBy(x => x.Name)
+                .Select(x => new { id = x.Id, name = x.Name })
+                .ToListAsync(cancellationToken);
+            if (!stores.Any(x => x.id == ctx.Store.Id))
+            {
+                stores.Insert(0, new { id = ctx.Store.Id, name = ctx.Store.Name });
+            }
+
+            var permissions = await db.PermissionMenus.AsNoTracking()
+                .Where(x => x.Status == "normal")
+                .OrderBy(x => x.Weight)
+                .ThenBy(x => x.Title)
+                .Select(x => new { key = x.Key, title = x.Title, route = x.Route, iconKey = x.IconKey })
+                .ToListAsync(cancellationToken);
+
+            return Results.Ok(new
+            {
+                currentStoreId = ctx.Store.Id,
+                currentStoreName = ctx.Store.Name,
+                stores,
+                permissions
+            });
+        });
+
+        // 输入手机号时按 4 位以上片段搜索会员：手机号优先，同时兼容昵称搜索。
+        merchant.MapGet("/members/search", async (
+            string? keyword,
+            AppDbContext db,
+            ClaimsPrincipal principal,
+            CancellationToken cancellationToken) =>
+        {
+            var ctx = await ResolveMerchantAsync(db, principal, cancellationToken);
+            if (ctx.User is null) return Results.Unauthorized();
+            if (ctx.Store is null) return MerchantNotBound();
+
+            var text = (keyword ?? string.Empty).Trim();
+            // 与管理端约定一致：手机号输入满 4 位才发起搜索。
+            if (text.Length < 4)
+            {
+                return Results.Ok(Array.Empty<object>());
+            }
+
+            var members = await db.WxUsers.AsNoTracking()
+                .Where(x => x.IsEnabled &&
+                            ((x.PhoneNumber != null && x.PhoneNumber.Contains(text)) ||
+                             (x.Nickname != null && x.Nickname.Contains(text))))
+                .OrderByDescending(x => x.LastLoginAt ?? x.CreatedAt)
+                .Take(10)
+                .Select(x => new
+                {
+                    id = x.Id,
+                    nickname = x.Nickname,
+                    phone = x.PhoneNumber,
+                    gender = x.Gender,
+                    avatar = x.AvatarUrl
+                })
+                .ToListAsync(cancellationToken);
+            return Results.Ok(members);
         });
 
         merchant.MapPost("/staff", async (
@@ -1063,8 +1406,60 @@ public static class MerchantEndpoints
             var name = (request.Name ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(name))
             {
-                return Results.BadRequest(new ApiError("validation_error", "员工姓名不能为空"));
+                return Results.BadRequest(new ApiError("validation_error", "员工名称不能为空"));
             }
+            var phoneText = (request.Phone ?? string.Empty).Trim();
+            if (!System.Text.RegularExpressions.Regex.IsMatch(phoneText, @"^1[3-9]\d{9}$"))
+            {
+                return Results.BadRequest(new ApiError("validation_error", "请填写正确的11位手机号"));
+            }
+
+            var storeId = request.StoreId ?? ctx.Store.Id;
+            var ownerOpenId = principal.FindFirstValue("openid") ?? ctx.User.OpenId;
+            var ownerPhone = ctx.User.PhoneNumber;
+            var store = await db.Stores.AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.Id == storeId && x.Status != StoreStatuses.Disabled,
+                    cancellationToken);
+            if (store is null)
+            {
+                return Results.NotFound(new ApiError("store_not_found", "民宿不存在"));
+            }
+            if (store.OwnerUsername != ownerOpenId &&
+                (string.IsNullOrWhiteSpace(ownerPhone) || store.OwnerPhone != ownerPhone))
+            {
+                return Results.Forbid();
+            }
+
+            if (await db.AdminUsers.AnyAsync(
+                    x => x.StoreId == storeId && x.PhoneNumber == phoneText,
+                    cancellationToken))
+            {
+                return Results.Conflict(new ApiError("staff_phone_exists", "该手机号已经是这家民宿的员工"));
+            }
+            if (request.MemberId is Guid memberId)
+            {
+                if (!await db.WxUsers.AnyAsync(x => x.Id == memberId, cancellationToken))
+                {
+                    return Results.NotFound(new ApiError("member_not_found", "所选会员不存在，请重新选择"));
+                }
+                if (await db.AdminUsers.AnyAsync(
+                        x => x.WxUserId == memberId && x.StoreId == storeId,
+                        cancellationToken))
+                {
+                    return Results.Conflict(new ApiError("staff_member_exists", "该会员已经是这家民宿的员工"));
+                }
+            }
+
+            var validKeys = await db.PermissionMenus.AsNoTracking()
+                .Where(x => x.Status == "normal")
+                .Select(x => x.Key)
+                .ToListAsync(cancellationToken);
+            var permissionKeys = (request.Permissions ?? Array.Empty<string>())
+                .Where(key => !string.IsNullOrWhiteSpace(key) && validKeys.Contains(key))
+                .Distinct()
+                .ToArray();
+
             var role = await db.Roles.SingleAsync(x => x.Code == RoleCodes.StoreStaff, cancellationToken);
             var username = $"staff_{Guid.NewGuid():N}"[..14];
             while (await db.AdminUsers.AnyAsync(x => x.Username == username, cancellationToken))
@@ -1077,8 +1472,9 @@ public static class MerchantEndpoints
                 Id = Guid.NewGuid(),
                 Username = username,
                 DisplayName = name,
-                PhoneNumber = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim(),
-                StoreId = ctx.Store.Id,
+                PhoneNumber = phoneText,
+                WxUserId = request.MemberId,
+                StoreId = storeId,
                 IsEnabled = true,
                 MustChangePassword = true,
                 CreatedAt = DateTime.UtcNow,
@@ -1090,8 +1486,8 @@ public static class MerchantEndpoints
             db.StoreStaffProfiles.Add(new StoreStaffProfile
             {
                 AdminUserId = admin.Id,
-                Gender = "未知",
-                PermissionKeysJson = "[]",
+                Gender = NormalizeStaffGender(request.Gender),
+                PermissionKeysJson = JsonSerializer.Serialize(permissionKeys),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             });
@@ -1101,11 +1497,45 @@ public static class MerchantEndpoints
             {
                 id = admin.Id,
                 name = admin.DisplayName,
+                username = admin.Username,
                 phone = MaskPhone(admin.PhoneNumber),
+                rawPhone = admin.PhoneNumber ?? string.Empty,
+                gender = NormalizeStaffGender(request.Gender),
                 role = "前台",
-                status = "正常"
+                status = "正常",
+                storeId = store.Id,
+                storeName = store.Name,
+                permissions = permissionKeys,
+                memberId = admin.WxUserId,
+                isOwner = false
             });
         });
+    }
+
+    private static string NormalizeStaffGender(string? value)
+    {
+        return (value ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "男" or "male" => "男",
+            "女" or "female" => "女",
+            _ => "未知"
+        };
+    }
+
+    private static IReadOnlyList<string> ParsePermissionKeys(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return Array.Empty<string>();
+        }
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>();
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<string>();
+        }
     }
 
     private static void MapSettings(RouteGroupBuilder merchant)
@@ -1129,6 +1559,9 @@ public static class MerchantEndpoints
                 checkIn = string.IsNullOrWhiteSpace(extra.CheckIn) ? "14:00" : extra.CheckIn,
                 checkOut = string.IsNullOrWhiteSpace(extra.CheckOut) ? "12:00" : extra.CheckOut,
                 cancelRule = extra.CancelRule,
+                joinRule = extra.JoinRule,
+                checkInNotice = extra.CheckInNotice,
+                cancelNotice = extra.CancelNotice,
                 autoAccept = extra.AutoAccept,
                 showPhone = extra.ShowPhone
             });
@@ -1149,15 +1582,38 @@ public static class MerchantEndpoints
             {
                 return Results.BadRequest(new ApiError("validation_error", "民宿名称不能为空"));
             }
+            var phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
+            var profileChanged = !string.Equals(ctx.Store.Name, name, StringComparison.Ordinal) ||
+                                 !string.Equals(ctx.Store.Phone, phone, StringComparison.Ordinal);
             ctx.Store.Name = name;
-            ctx.Store.Phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
+            ctx.Store.Phone = phone;
+            if (profileChanged)
+            {
+                ctx.Store.Status = StoreStatuses.PendingReview;
+            }
             ctx.Store.UpdatedAt = DateTime.UtcNow;
 
+            var existing = await ReadJsonAsync<MerchantSettingsItem>(
+                db,
+                $"merchant_settings:{ctx.Store.Id}",
+                cancellationToken);
+            if (existing is null)
+            {
+                var notice = await StoreBookingNoticeStore.LoadAsync(db, ctx.Store.Id, cancellationToken);
+                existing = new MerchantSettingsItem
+                {
+                    CheckInNotice = notice.CheckInNotice,
+                    CancelNotice = notice.CancelNotice
+                };
+            }
             var extra = new MerchantSettingsItem
             {
-                CheckIn = request.CheckIn,
-                CheckOut = request.CheckOut,
-                CancelRule = request.CancelRule,
+                CheckIn = string.IsNullOrWhiteSpace(request.CheckIn) ? existing.CheckIn : request.CheckIn,
+                CheckOut = string.IsNullOrWhiteSpace(request.CheckOut) ? existing.CheckOut : request.CheckOut,
+                CancelRule = request.CancelRule ?? existing.CancelRule,
+                JoinRule = existing.JoinRule,
+                CheckInNotice = existing.CheckInNotice,
+                CancelNotice = existing.CancelNotice,
                 AutoAccept = request.AutoAccept,
                 ShowPhone = request.ShowPhone
             };
@@ -1171,6 +1627,9 @@ public static class MerchantEndpoints
                 checkIn = extra.CheckIn,
                 checkOut = extra.CheckOut,
                 cancelRule = extra.CancelRule,
+                joinRule = extra.JoinRule,
+                checkInNotice = extra.CheckInNotice,
+                cancelNotice = extra.CancelNotice,
                 autoAccept = extra.AutoAccept,
                 showPhone = extra.ShowPhone
             });
@@ -1238,6 +1697,13 @@ public static class MerchantEndpoints
             roomImageUrls = ParseStringArray(store.RoomImageUrlsJson)
         };
     }
+
+    private static string ToStoreStatus(string status) =>
+        status == StoreStatuses.Active
+            ? "approved"
+            : status == StoreStatuses.PendingReview
+                ? "pending"
+                : "rejected";
 
     private static string? ValidateApplicationRequest(MerchantApplicationRequest request)
     {
@@ -1313,6 +1779,21 @@ public static class MerchantEndpoints
             new ApiError("merchant_not_bound", "当前微信账号尚未绑定门店，请先在管理端设置门店归属人"),
             statusCode: StatusCodes.Status403Forbidden);
 
+    private static string NormalizeRoomKind(string? kind, string? category)
+    {
+        if (string.Equals(kind, RoomTypeKinds.Bed, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(kind, "多人间床位", StringComparison.OrdinalIgnoreCase))
+        {
+            return RoomTypeKinds.Bed;
+        }
+        if (string.Equals(kind, RoomTypeKinds.PrivateRoom, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(kind, "独立房间", StringComparison.OrdinalIgnoreCase))
+        {
+            return RoomTypeKinds.PrivateRoom;
+        }
+        return category?.Contains("床位") == true ? RoomTypeKinds.Bed : RoomTypeKinds.PrivateRoom;
+    }
+
     private static string? ValidateRoomRequest(MerchantRoomRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Name)) return "请填写房间名称";
@@ -1358,6 +1839,9 @@ public static class MerchantEndpoints
             name = room.Name,
             title = room.LongName ?? room.Name,
             type = room.RoomCategory ?? (room.Kind == RoomTypeKinds.Bed ? "多人床位" : "独立房间"),
+            kind = room.Kind,
+            roomCategory = room.RoomCategory ?? string.Empty,
+            gender = room.Gender,
             status,
             key,
             price = (room.BasePriceCents / 100m).ToString("0.##"),
@@ -1389,11 +1873,11 @@ public static class MerchantEndpoints
     {
         var (status, statusKey) = order.Status switch
         {
-            OrderStatuses.PendingPayment => ("待支付", "pending"),
-            OrderStatuses.PaidPendingConfirmation => ("待处理", "pending"),
-            OrderStatuses.ConfirmedPendingCheckIn => ("待入住", "stay"),
-            OrderStatuses.CheckedIn => ("入住中", "stay"),
-            OrderStatuses.Completed => ("已完成", "done"),
+            OrderStatuses.PendingPayment => ("待支付", "pay"),
+            OrderStatuses.PaidPendingVerification => ("待核销", "pending"),
+            OrderStatuses.PaidPendingConfirmation or OrderStatuses.ConfirmedPendingCheckIn => ("待核销", "pending"),
+            // 入住中已停用：核销即完成，历史 CheckedIn 数据按已完成展示，避免页面再出现旧状态。
+            OrderStatuses.CheckedIn or OrderStatuses.Completed => ("已完成", "done"),
             OrderStatuses.Refunding => ("退款审核中", "cancel"),
             OrderStatuses.Refunded => ("已退款", "cancel"),
             OrderStatuses.RefundFailed => ("退款失败", "cancel"),
@@ -1401,6 +1885,12 @@ public static class MerchantEndpoints
             _ => (order.Status, "pending")
         };
         var images = ParseStringArray(order.RoomType?.ImageUrlsJson);
+        var coverImage = images.FirstOrDefault() ?? string.Empty;
+        var image = string.IsNullOrWhiteSpace(coverImage)
+            ? string.Empty
+            : coverImage.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                ? $"/room-images/{order.RoomTypeId}/0"
+                : coverImage;
         return new
         {
             id = order.OrderNumber,
@@ -1413,7 +1903,7 @@ public static class MerchantEndpoints
             status,
             statusKey,
             paymentStatus = order.PaymentStatus,
-            image = images.FirstOrDefault() ?? string.Empty,
+            image,
             createdAt = FormatCn(order.CreatedAt, "yyyy-MM-dd HH:mm"),
             checkIn = order.CheckIn.ToString("yyyy-MM-dd"),
             checkOut = order.CheckOut.ToString("yyyy-MM-dd"),
@@ -1470,37 +1960,14 @@ public static class MerchantEndpoints
         };
     }
 
-    private static async Task EnsureInventoryAsync(
+    // 每日库存的初始化/同步统一放在 InventoryPlanner，管理端和商家端共用同一套口径。
+    private static Task EnsureInventoryAsync(
         AppDbContext db,
         RoomType room,
         DateTime start,
         int days,
         CancellationToken cancellationToken)
-    {
-        var end = start.AddDays(days);
-        var existing = await db.InventoryDailies
-            .Where(x => x.RoomTypeId == room.Id && x.Date >= start && x.Date < end)
-            .ToListAsync(cancellationToken);
-        var map = existing.ToDictionary(x => x.Date.Date);
-        for (var date = start; date < end; date = date.AddDays(1))
-        {
-            if (!map.TryGetValue(date.Date, out var inventory))
-            {
-                db.InventoryDailies.Add(new InventoryDaily
-                {
-                    Id = Guid.NewGuid(),
-                    StoreId = room.StoreId,
-                    RoomTypeId = room.Id,
-                    Date = date.Date,
-                    TotalQuantity = room.DefaultInventory,
-                    UpdatedAt = DateTime.UtcNow
-                });
-                continue;
-            }
-            inventory.TotalQuantity = Math.Max(room.DefaultInventory, inventory.LockedQuantity + inventory.SoldQuantity);
-            inventory.UpdatedAt = DateTime.UtcNow;
-        }
-    }
+        => InventoryPlanner.EnsureDailyInventoryAsync(db, room, start, days, cancellationToken);
 
     private static async Task EnsureRoomUnitsAsync(
         AppDbContext db,
@@ -1601,6 +2068,47 @@ public static class MerchantEndpoints
 
     private static string? ToJson(IReadOnlyList<string>? values) =>
         values is { Count: > 0 } ? JsonSerializer.Serialize(values) : null;
+
+    private static string? NormalizeReviewStatus(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "pending" or "待审核" => ReviewStatuses.Pending,
+            "published" or "approved" or "已通过" or "上架" => ReviewStatuses.Published,
+            "hidden" or "rejected" or "未通过" or "隐藏" => ReviewStatuses.Hidden,
+            _ => null
+        };
+    }
+
+    private static string ToMerchantReviewStatus(string? value) => value switch
+    {
+        ReviewStatuses.Pending => "pending",
+        ReviewStatuses.Hidden => "hidden",
+        _ => "published"
+    };
+
+    private static List<string> ParseReviewImages(string? json) =>
+        ParseStringArray(json)
+            .Where(IsRenderableImage)
+            .ToList();
+
+    private static bool IsRenderableImage(string? value)
+    {
+        var trimmed = (value ?? string.Empty).Trim();
+        if (trimmed.Length == 0) return false;
+        if (trimmed.StartsWith("http://tmp/", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("wxfile://", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("blob:", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        return trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("/static/", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static List<string> ParseStringArray(string? json)
     {
@@ -1713,6 +2221,9 @@ public static class MerchantEndpoints
         public string? CheckIn { get; set; } = "14:00";
         public string? CheckOut { get; set; } = "12:00";
         public string? CancelRule { get; set; } = "入住前 24 小时可免费取消";
+        public string? JoinRule { get; set; }
+        public string? CheckInNotice { get; set; }
+        public string? CancelNotice { get; set; }
         public bool AutoAccept { get; set; } = true;
         public bool ShowPhone { get; set; } = true;
     }
@@ -1725,6 +2236,10 @@ public static class MerchantEndpoints
         public bool Enabled { get; set; }
     }
 }
+
+public sealed record MerchantBookingNoticeRequest(
+    string? CheckInNotice,
+    string? CancelNotice);
 
 public sealed record MerchantRoomRequest(
     string? Name,
@@ -1749,19 +2264,27 @@ public sealed record MerchantRoomRequest(
     IReadOnlyList<string>? NearbyFacilities,
     IReadOnlyList<string>? ImageUrls,
     string? ImageUrl,
-    bool Published);
+    bool Published,
+    string? Kind = null,
+    string? Gender = null);
 
 public sealed record MerchantVerifyRequest(string? Code);
 
 public sealed record MerchantWithdrawalRequest(int AmountCents, string? Account);
 
-public sealed record MerchantReviewReplyRequest(string? Content);
+public sealed record MerchantReviewModerateRequest(string? Status, string? Comment = null);
 
 public sealed record MerchantCouponRequest(string? Name, int AmountCents, string? Threshold, int? Stock);
 
 public sealed record MerchantCouponUpdateRequest(string? Status, string? Name, int? AmountCents, int? Stock);
 
-public sealed record MerchantStaffRequest(string? Name, string? Phone);
+public sealed record MerchantStaffRequest(
+    string? Name,
+    string? Phone,
+    string? Gender = null,
+    Guid? StoreId = null,
+    IReadOnlyList<string>? Permissions = null,
+    Guid? MemberId = null);
 
 public sealed record MerchantSettingsRequest(
     string? StoreName,

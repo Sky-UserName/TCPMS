@@ -1,6 +1,7 @@
 <template>
 	<view class="proto-page guests-page" :class="{ 'select-mode': selectMode }">
 		<ProtoHeader :title="selectMode ? '选择入住人' : '入住人管理'" theme="green" />
+		<CacheRefreshIndicator :refreshing="pullRefreshing" />
 
 		<view class="security-banner">
 			<view class="security-icon"><ProtoIcon name="check" tone="white" :size="25" /></view>
@@ -91,17 +92,20 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
+	import CacheRefreshIndicator from '@/components/CacheRefreshIndicator.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { showToast } from '@/common/prototype.js'
 	import { getGuests, saveGuests } from '@/common/app-store.js'
 	import { fetchMyGuests, saveMyGuests } from '@/common/api.js'
+	import { runPullRefresh } from '@/common/pull-refresh.js'
 
 	export default {
-		components: { ProtoHeader, ProtoIcon, ProtoEmptyState },
+		components: { ProtoHeader, CacheRefreshIndicator, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
 				guests: [],
+				pullRefreshing: false,
 				editorVisible: false,
 				editingGuest: null,
 				// 选择模式：从「订单填写」页带 mode=select 进来，勾选后回传入住人。
@@ -133,17 +137,23 @@
 			this.pendingEditId = String(options.edit || '')
 		},
 		async onShow() {
-			try {
-				this.guests = await fetchMyGuests()
-				saveGuests(this.guests)
-			} catch (error) {
-				this.guests = getGuests()
-				showToast(error?.message || '入住人同步失败，已显示本地缓存')
-			}
-			this.normalizeSelection()
+			await this.loadGuests()
 			this.openPendingEdit()
 		},
+		onPullDownRefresh() {
+			return runPullRefresh(this, () => this.loadGuests())
+		},
 		methods: {
+			async loadGuests() {
+				try {
+					this.guests = await fetchMyGuests()
+					saveGuests(this.guests)
+				} catch (error) {
+					this.guests = getGuests()
+					showToast(error?.message || '入住人同步失败，已显示本地缓存')
+				}
+				this.normalizeSelection()
+			},
 			// 已选 id 里可能有被删掉的人，进页面时对齐一次；勾选人数不做上限限制。
 			normalizeSelection() {
 				if (!this.selectMode) return

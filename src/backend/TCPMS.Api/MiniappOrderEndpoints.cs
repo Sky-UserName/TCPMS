@@ -38,7 +38,8 @@ public static class MiniappOrderEndpoints
             {
                 return Results.Conflict(new ApiError("refund_exists", "该订单已经存在退款处理记录"));
             }
-            if (order.Status is not OrderStatuses.PaidPendingConfirmation and
+            if (order.Status is not OrderStatuses.PaidPendingVerification and
+                not OrderStatuses.PaidPendingConfirmation and
                 not OrderStatuses.ConfirmedPendingCheckIn)
             {
                 return Results.BadRequest(new ApiError("order_not_refundable", "当前订单状态不允许申请退款"));

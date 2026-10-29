@@ -161,7 +161,7 @@ export const demoOrders = [
 		id: 'TCP202610010001',
 		store: '云舍民宿·郑州二七路店',
 		room: '阳光实木标准大床房',
-		status: '已确认·待入住',
+		status: '已支付·待核销',
 		statusKey: 'stay',
 		date: '10月03日 - 10月05日',
 		guest: '张三 等2人',
@@ -241,17 +241,33 @@ export const goPage = (path) => {
 	// 连点同一个入口会连发两次 navigateTo，第二次固定报 `navigateTo:fail timeout`，这里直接忽略。
 	if (path === lastNavigation.path && now - lastNavigation.at < 600) return
 	lastNavigation = { path, at: now }
-	uni.navigateTo({
-		url: path,
-		// 跳转失败原本没有任何反馈，页面“点了没反应”时无法定位；这里至少把原因吐出来。
-		fail: (error) => {
-			// 登录跳转会打断正在进行的 navigateTo（表现为 fail timeout），属于预期，不再弹错误提示。
-			if (isLoginRedirecting()) return
-			const reason = (error && error.errMsg) || '未知原因'
-			showToast(`页面打开失败：${reason}`)
-			console.error('[goPage]', path, reason)
-		}
-	})
+	const open = (retryable) => {
+		uni.navigateTo({
+			url: path,
+			// 跳转失败原本没有任何反馈，页面“点了没反应”时无法定位；这里至少把原因吐出来。
+			fail: (error) => {
+				// 登录跳转会打断正在进行的 navigateTo（表现为 fail timeout），属于预期，不再弹错误提示。
+				if (isLoginRedirecting()) return
+				const reason = (error && error.errMsg) || '未知原因'
+				// 分包页面刚编译完/首次加载时偶发 `navigateTo:fail timeout`，重试一次即可正常打开。
+				if (retryable && /timeout/i.test(reason)) {
+					setTimeout(() => open(false), 350)
+					return
+				}
+				// 页面栈已满（10 层）时改用 redirectTo，避免点了完全没反应。
+				if (/limit|exceed/i.test(reason)) {
+					uni.redirectTo({
+						url: path,
+						fail: () => showToast(`页面打开失败：${reason}`)
+					})
+					return
+				}
+				showToast(`页面打开失败：${reason}`)
+				console.error('[goPage]', path, reason)
+			}
+		})
+	}
+	open(true)
 }
 
 export const goRoot = (path) => {

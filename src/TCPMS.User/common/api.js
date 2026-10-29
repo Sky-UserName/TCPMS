@@ -1,10 +1,13 @@
 import { getApiToken, getBooking, logout, saveApiToken, saveOrders, upsertOrder } from './app-store.js'
 import { ALLOW_DEV_LOGIN, API_BASE_URL_OVERRIDE, IS_DEV_BUILD } from './env.js'
 import { isLoginRedirecting, setLoginRedirecting } from './auth-gate.js'
+// findStoreFallback / findRoomFallback 会用原型数据补字段，之前漏了这行导入，
+// 调用时直接抛 `demoRooms is not defined`，表现为提交订单、订单列表同步失败。
+import { demoRooms, demoStores, prototypeImages } from './prototype.js'
 
 // 后端地址：默认连本机后端，发行包用 .env.production 或 VITE_API_BASE_URL 指定线上地址。
 // 真机调试访问不到 localhost，同样用 VITE_API_BASE_URL 指到开发机的局域网地址。
-const localApiBaseUrl = 'http://localhost:5180/api/v1'
+const localApiBaseUrl = 'http://localhost:5181/api/v1'
 const remoteApiBaseUrl = 'http://39.96.200.62/api/v1'
 
 const resolveDefaultApiBaseUrl = () => {
@@ -18,6 +21,25 @@ const getApiBaseUrl = () => {
 	} catch (error) {
 		return resolveDefaultApiBaseUrl()
 	}
+}
+
+export const getVerificationQrUrl = (code) => code
+	? `${getApiBaseUrl()}/verification-qr/${encodeURIComponent(code)}`
+	: ''
+
+// 后端返回的图片可能是 relative path（如 /room-images/...），小程序 <image> 需要绝对地址。
+// data:image 等内联格式原样返回，避免把图片转成二次请求。
+export const getApiAssetUrl = (value) => {
+	const text = String(value || '').trim()
+	if (!text) return ''
+	if (/^(https?:|data:|wxfile:|cloud:)/i.test(text)) return text
+	// /static 是小程序包内的本地资源，保持原路径交给 <image> 解析。
+	if (/^\/static\//i.test(text)) return text
+	// /uploads 由后端根路径托管，不能再拼 /api/v1。
+	if (/^\/uploads\//i.test(text)) {
+		return `${getApiBaseUrl().replace(/\/api\/v\d+\/?$/i, '')}${text}`
+	}
+	return `${getApiBaseUrl()}${text.startsWith('/') ? '' : '/'}${text}`
 }
 
 const toQuery = (query = {}) => {
@@ -105,16 +127,24 @@ export const apiRequest = ({ path, method = 'GET', data, query } = {}) => new Pr
 	})
 })
 
-const findStoreFallback = (store) => {
-	return demoStores.find((item) => item.name === store.name)
-		|| demoStores.find((item) => item.name.includes(store.name) || store.name.includes(item.name))
+// 原型数据只用来补图片等缺省字段：名字可能是 undefined（远程订单刚创建、上下文没带房型名），
+// 之前直接 `room.name.includes(...)` 会抛 TypeError，这里统一先转成字符串再比。
+const findStoreFallback = (store = {}) => {
+	const name = String(store.name || '').trim()
+	if (!name) return demoStores[0] || {}
+	return demoStores.find((item) => item.name === name)
+		|| demoStores.find((item) => item.name.includes(name) || name.includes(item.name))
 		|| demoStores[0]
+		|| {}
 }
 
-const findRoomFallback = (room) => {
-	return demoRooms.find((item) => item.name === room.name)
-		|| demoRooms.find((item) => item.name.includes(room.name) || room.name.includes(item.name))
+const findRoomFallback = (room = {}) => {
+	const name = String(room.name || '').trim()
+	if (!name) return demoRooms[0] || {}
+	return demoRooms.find((item) => item.name === name)
+		|| demoRooms.find((item) => item.name.includes(name) || name.includes(item.name))
 		|| demoRooms[0]
+		|| {}
 }
 
 const isRemoteRecord = (value) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(String(value || ''))
@@ -221,9 +251,16 @@ export const mapRoom = (room, index = 0) => {
 		description: room.description || fallback.description || '',
 		area: room.area ? `${room.area}㎡` : (isRemote ? '' : fallback.area),
 		roomCount: room.roomCount || 0,
-		tags: tags.length ? tags : (isRemote ? facilities.concat(services) : fallback.tags || []),
+		tags: tags.length ? tags : (isRemote ? [] : fallback.tags || []),
+		kind: isBed ? 'Bed' : 'PrivateRoom',
+		roomCategory: room.roomCategory || fallback.roomCategory || '',
+		layout: room.layout || fallback.layout || '',
 		facilities,
 		services,
+		bathroomFacilities: parseImageList(room.bathroomFacilitiesJson),
+		nearbyFacilities: parseImageList(room.nearbyFacilitiesJson),
+		checkInTime: room.checkInTime || fallback.checkInTime || '',
+		checkOutTime: room.checkOutTime || fallback.checkOutTime || '',
 		isPublished: room.isPublished !== false,
 		availability: isRemote ? '选择日期查询房态' : fallback.availability,
 		image: images[0] || (isUsableImage(room.imageUrl) ? room.imageUrl : '') || fallback.image || (isRemote ? '' : prototypeImages.roomOne),
@@ -234,14 +271,38 @@ export const mapRoom = (room, index = 0) => {
 
 const statusMap = {
 	PendingPayment: { status: '待支付', statusKey: 'pay', action: '立即支付' },
-	PaidPendingConfirmation: { status: '已支付·待确认', statusKey: 'stay', action: '申请退款' },
-	ConfirmedPendingCheckIn: { status: '已确认·待入住', statusKey: 'stay', action: '申请退款' },
-	CheckedIn: { status: '入住中', statusKey: 'stay', action: '联系管家' },
+	PaidPendingVerification: { status: '已支付·待核销', statusKey: 'stay', action: '出示核销码' },
+	PaidPendingConfirmation: { status: '已支付·待核销', statusKey: 'stay', action: '出示核销码' },
+	ConfirmedPendingCheckIn: { status: '已支付·待核销', statusKey: 'stay', action: '出示核销码' },
+	CheckedIn: { status: '已完成', statusKey: 'done', action: '再次预订' },
 	Completed: { status: '已完成', statusKey: 'done', action: '再次预订' },
 	Refunding: { status: '退款审核中', statusKey: 'refund', action: '查看退款进度' },
 	Refunded: { status: '已退款', statusKey: 'refund', action: '查看退款进度' },
 	RefundFailed: { status: '退款失败', statusKey: 'refund', action: '联系客服' },
 	Cancelled: { status: '已取消', statusKey: 'cancel', action: '再次预订' }
+}
+
+// 订单详情会带提交订单时的入住人快照（guestSnapshotJson），实名信息直接用后端数据；
+// 解析失败或为空时回退到本地缓存里的入住人，避免这一整块空着。
+const parseOrderGuests = (value, fallback = []) => {
+	let list = value
+	if (typeof value === 'string') {
+		if (!value.trim()) return fallback
+		try {
+			list = JSON.parse(value)
+		} catch (error) {
+			return fallback
+		}
+	}
+	if (!Array.isArray(list)) return fallback
+	const guests = list
+		.filter((item) => item && (item.name || item.identity || item.phone))
+		.map((item) => ({
+			name: String(item.name || '').trim(),
+			identity: String(item.identity || item.idNumber || '').trim(),
+			phone: String(item.phone || item.phoneNumber || '').trim()
+		}))
+	return guests.length ? guests : fallback
 }
 
 export const mapOrder = (order, context = {}) => {
@@ -260,6 +321,7 @@ export const mapOrder = (order, context = {}) => {
 	const mapped = {
 		...context,
 		id: order.id || order.orderNumber,
+		orderStatus: order.status,
 		orderNumber: order.orderNumber,
 		storeId: order.storeId || context.storeId,
 		roomId: order.roomTypeId || context.roomId,
@@ -277,8 +339,11 @@ export const mapOrder = (order, context = {}) => {
 		price: String((Number(order.totalAmountCents || 0) / 100).toFixed(2).replace(/\.00$/, '')),
 		action: meta.action,
 		paymentStatus: order.paymentStatus,
+		verificationCode: order.verificationCode || context.verificationCode || '',
 		hasReview: order.hasReview === true || context.hasReview === true,
-		createdAt: order.createdAt || new Date().toISOString()
+		// 后端已把 CreatedAt 标成 UTC（带 Z），这里原样保留，页面再转本地时间展示。
+		createdAt: order.createdAt || new Date().toISOString(),
+		guests: parseOrderGuests(order.guestSnapshotJson, Array.isArray(context.guests) ? context.guests : [])
 	}
 	return mapped
 }
@@ -447,12 +512,17 @@ export const fetchStoreDetail = async (id) => {
 	const data = await apiRequest({ path: `/stores/${id}` })
 	return {
 		store: mapStore(data.store || data),
-		rooms: Array.isArray(data.roomTypes) ? data.roomTypes.map(mapRoom) : []
+		rooms: Array.isArray(data.roomTypes) ? data.roomTypes.map(mapRoom) : [],
+		bookingNotice: data.bookingNotice || null
 	}
 }
 
 // 日历选日期时按天查询真实房态与价格，避免展示已满房的日期。
 export const fetchRoomAvailability = async (roomTypeId, checkIn, checkOut) => {
+	// 后端要求离店严格晚于入住：相同或倒序区间直接返回空，避免必然的 400。
+	const start = String(checkIn || '').slice(0, 10)
+	const end = String(checkOut || '').slice(0, 10)
+	if (!start || !end || end <= start) return []
 	const data = await apiRequest({
 		path: `/room-types/${roomTypeId}/availability`,
 		query: { checkIn, checkOut }
@@ -460,18 +530,40 @@ export const fetchRoomAvailability = async (roomTypeId, checkIn, checkOut) => {
 	return Array.isArray(data) ? data : []
 }
 
+// 后端 DateTime / int 都是强类型：脏数据（"2人"、空串、undefined）会让接口直接 400 绑定失败。
+// 发请求前统一消毒成 ISO 日期字符串与正整数，并保证日期不早于今天、离店晚于入住。
+const toIsoDateTime = (value, fallback) => {
+	const raw = String(value || fallback || '').trim()
+	if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `${raw}T00:00:00`
+	if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?/.test(raw)) return raw.replace(' ', 'T')
+	const date = raw ? new Date(raw) : null
+	if (!date || Number.isNaN(date.getTime())) return ''
+	const pad = (n) => String(n).padStart(2, '0')
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T00:00:00`
+}
+
+const toPositiveInt = (value, fallback = 1) => {
+	const parsed = Math.floor(Number(value))
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
 export const createRemoteOrder = async (booking) => {
 	const defaultBooking = getBooking()
+	const checkIn = toIsoDateTime(booking.isoCheckIn, defaultBooking.isoCheckIn)
+	const checkOut = toIsoDateTime(booking.isoCheckOut, defaultBooking.isoCheckOut)
+	if (!checkIn || !checkOut) {
+		throw { code: 'invalid_date', message: '入住或离店日期无效，请重新选择日期' }
+	}
 	const data = await apiRequest({
 		path: '/orders/',
 		method: 'POST',
 		data: {
 			storeId: booking.storeId,
 			roomTypeId: booking.roomId,
-			checkIn: booking.isoCheckIn || defaultBooking.isoCheckIn,
-			checkOut: booking.isoCheckOut || defaultBooking.isoCheckOut,
-			quantity: Number(booking.roomCount || 1),
-			guestCount: Number(booking.guestCount || 1),
+			checkIn,
+			checkOut,
+			quantity: toPositiveInt(booking.roomCount, 1),
+			guestCount: toPositiveInt(booking.guestCount, 1),
 			guestSnapshotJson: JSON.stringify(booking.guests || [])
 		}
 	})
@@ -481,16 +573,21 @@ export const createRemoteOrder = async (booking) => {
 
 export const previewRemoteOrder = async (booking) => {
 	const defaultBooking = getBooking()
+	const checkIn = toIsoDateTime(booking.isoCheckIn, defaultBooking.isoCheckIn)
+	const checkOut = toIsoDateTime(booking.isoCheckOut, defaultBooking.isoCheckOut)
+	if (!checkIn || !checkOut) {
+		throw { code: 'invalid_date', message: '入住或离店日期无效，请重新选择日期' }
+	}
 	return apiRequest({
 		path: '/orders/preview',
 		method: 'POST',
 		data: {
 			storeId: booking.storeId,
 			roomTypeId: booking.roomId,
-			checkIn: booking.isoCheckIn || defaultBooking.isoCheckIn,
-			checkOut: booking.isoCheckOut || defaultBooking.isoCheckOut,
-			quantity: Number(booking.roomCount || 1),
-			guestCount: Number(booking.guestCount || 1)
+			checkIn,
+			checkOut,
+			quantity: toPositiveInt(booking.roomCount, 1),
+			guestCount: toPositiveInt(booking.guestCount, 1)
 		}
 	})
 }
@@ -506,6 +603,26 @@ export const fetchRemoteOrder = async (id, context = {}) => {
 	const data = await apiRequest({ path: `/orders/${id}` })
 	const mapped = mapOrder(data, context)
 	return upsertOrder(mapped)
+}
+
+// 退款记录单独查一次：订单主表只存 Refunding/Refunded 状态，
+// 退款金额、退款单号和到账时间都在退款记录里。
+const mapRefundRecord = (record = {}) => ({
+	id: record.id,
+	refundNumber: record.refundNumber || '',
+	amount: Number(record.amountCents || 0) / 100,
+	reason: record.reason || '',
+	status: record.status || '',
+	reviewComment: record.reviewComment || '',
+	providerRefundNumber: record.providerRefundNumber || '',
+	createdAt: record.createdAt || '',
+	reviewedAt: record.reviewedAt || '',
+	completedAt: record.completedAt || ''
+})
+
+export const fetchOrderRefunds = async (id) => {
+	const data = await apiRequest({ path: `/orders/${id}/refunds` })
+	return Array.isArray(data) ? data.map(mapRefundRecord) : []
 }
 
 export const fetchRoomReviews = async (roomTypeId, limit = 50) => {
@@ -538,8 +655,23 @@ export const cancelRemoteOrder = async (id) => {
 
 // 模拟支付只在后端 Development 环境存在，前端不再保留任何降级入口，
 // 避免支付未配置时把订单直接置为已支付。
+// 支付前拿一次 uni.login 的 code，让服务端换成当前微信账号的真实 openid。
+// 开发态固定测试账号（dev-user-001）不是有效 openid，微信会直接拒单，必须靠这一步兜底。
+const requestPayLoginCode = () => new Promise((resolve) => {
+	uni.login({
+		provider: 'weixin',
+		success: (result) => resolve(result?.code || ''),
+		fail: () => resolve('')
+	})
+})
+
 export const requestRemotePayment = async (id) => {
-	return apiRequest({ path: `/orders/${id}/pay`, method: 'POST' })
+	const code = await requestPayLoginCode()
+	return apiRequest({
+		path: `/orders/${id}/pay`,
+		method: 'POST',
+		data: code ? { code } : {}
+	})
 }
 
 // 仅开发联调使用：后端 /mock-pay 只在 Development 环境开放，生产构建里 ALLOW_MOCK_PAY 恒为 false。
@@ -636,6 +768,16 @@ export const fetchMerchantRooms = async () => {
 
 export const fetchMerchantRoom = (id) => apiRequest({ path: `/merchant/rooms/${id}` })
 
+export const fetchMerchantRoomOptions = () => apiRequest({ path: '/merchant/room-options' })
+
+export const fetchMerchantBookingNotice = () => apiRequest({ path: '/merchant/booking-notice' })
+
+export const saveMerchantBookingNotice = (payload) => apiRequest({
+	path: '/merchant/booking-notice',
+	method: 'PUT',
+	data: payload
+})
+
 export const saveMerchantRoom = (id, payload) => apiRequest({
 	path: id ? `/merchant/rooms/${id}` : '/merchant/rooms',
 	method: id ? 'PUT' : 'POST',
@@ -653,14 +795,15 @@ export const fetchMerchantOrders = async (status = '') => {
 	return Array.isArray(data) ? data : []
 }
 
-export const confirmMerchantOrder = (orderId) => apiRequest({
-	path: `/merchant/orders/${orderId}/confirm`,
-	method: 'POST'
-})
-
 export const checkInMerchantOrder = (orderId) => apiRequest({
 	path: `/merchant/orders/${orderId}/check-in`,
 	method: 'POST'
+})
+
+export const cancelMerchantOrder = (orderId, reason = '商家取消订单') => apiRequest({
+	path: `/merchant/orders/${orderId}/cancel`,
+	method: 'POST',
+	query: { reason }
 })
 
 export const checkOutMerchantOrder = (orderId) => apiRequest({
@@ -687,15 +830,48 @@ export const createMerchantWithdrawal = (amountCents, account = '') => apiReques
 	data: { amountCents, account }
 })
 
-export const fetchMerchantReviews = async () => {
-	const data = await apiRequest({ path: '/merchant/reviews' })
+export const fetchMerchantReviews = async (status = '') => {
+	const data = await apiRequest({ path: `/merchant/reviews${status ? `?status=${encodeURIComponent(status)}` : ''}` })
 	return Array.isArray(data) ? data : []
 }
 
-export const replyMerchantReview = (id, content) => apiRequest({
-	path: `/merchant/reviews/${id}/reply`,
+export const moderateMerchantReview = (id, status, comment = '') => apiRequest({
+	path: `/merchant/reviews/${id}/moderate`,
 	method: 'POST',
-	data: { content }
+	data: { status, comment }
+})
+
+export const uploadReviewImage = (filePath) => new Promise((resolve, reject) => {
+	const token = getApiToken()
+	if (!token) {
+		reject(new Error('请先登录'))
+		return
+	}
+	uni.uploadFile({
+		url: `${getApiBaseUrl()}/reviews/images`,
+		filePath,
+		name: 'file',
+		header: { Authorization: `Bearer ${token}` },
+		success: (response) => {
+			let data = response.data
+			try {
+				data = typeof data === 'string' ? JSON.parse(data) : data
+			} catch (error) {
+				// Keep the raw response for a useful error below.
+			}
+			if (response.statusCode >= 200 && response.statusCode < 300) {
+				resolve(data || {})
+				return
+			}
+			if (response.statusCode === 401) {
+				handleUnauthorized()
+				reject({ code: 'unauthorized', message: '登录状态已失效，请重新授权登录' })
+				return
+			}
+			reject({ code: data?.code || 'review_image_upload_failed', message: data?.message || '评价图片上传失败' })
+		},
+		fail: () => reject({ code: 'review_image_upload_failed', message: '评价图片上传失败，请检查网络' })
+	})
 })
 
 export const fetchMerchantCoupons = async () => {
@@ -725,6 +901,14 @@ export const createMerchantStaff = (payload = {}) => apiRequest({
 	method: 'POST',
 	data: payload
 })
+
+export const fetchMerchantStaffOptions = () => apiRequest({ path: '/merchant/staff/options' })
+
+// 手机号输入满 4 位后按片段搜索会员，供添加员工时选人并回填资料。
+export const searchMerchantMembers = async (keyword = '') => {
+	const data = await apiRequest({ path: '/merchant/members/search', query: { keyword } })
+	return Array.isArray(data) ? data : []
+}
 
 export const fetchMerchantSettings = () => apiRequest({ path: '/merchant/settings' })
 

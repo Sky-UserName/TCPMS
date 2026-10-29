@@ -18,8 +18,8 @@
 					<text>{{ roomRating }}分</text>
 				</view>
 				<view class="picker-stars">
-					<view v-for="score in 5" :key="score" class="picker-star" @tap="roomRating = score">
-						<ProtoIcon name="star" :size="48" :class="{ selected: score <= roomRating }" />
+					<view v-for="score in 5" :key="score" :class="['picker-star', { selected: score <= roomRating }]" @tap="setRoomRating(score)">
+						<ProtoIcon name="star" :size="48" />
 					</view>
 				</view>
 				<text class="review-form-caption">房间整洁、舒适度和设施是否符合预期</text>
@@ -33,8 +33,8 @@
 					<text>{{ storeRating }}分</text>
 				</view>
 				<view class="picker-stars">
-					<view v-for="score in 5" :key="score" class="picker-star" @tap="storeRating = score">
-						<ProtoIcon name="star" :size="48" :class="{ selected: score <= storeRating }" />
+					<view v-for="score in 5" :key="score" :class="['picker-star', { selected: score <= storeRating }]" @tap="setStoreRating(score)">
+						<ProtoIcon name="star" :size="48" />
 					</view>
 				</view>
 				<text class="review-form-caption">门店环境、服务态度和入住办理是否满意</text>
@@ -84,7 +84,7 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { addUserReview, findOrder, getOrders, getProfile, resolveReviewTarget, updateOrder } from '@/common/app-store.js'
-	import { createRemoteReview } from '@/common/api.js'
+	import { createRemoteReview, uploadReviewImage } from '@/common/api.js'
 	import { goPage, showToast } from '@/common/prototype.js'
 
 	const isGuid = (value) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(value || ''))
@@ -131,6 +131,12 @@
 			}
 		},
 		methods: {
+			setRoomRating(score) {
+				this.roomRating = score
+			},
+			setStoreRating(score) {
+				this.storeRating = score
+			},
 			chooseImages() {
 				const remaining = 9 - this.images.length
 				if (remaining <= 0) return
@@ -158,6 +164,22 @@
 					return
 				}
 				this.submitting = true
+				// 选择的图片只是本机临时路径，先上传换成长久地址，商家端和管理端才能预览。
+				let imageUrls = [...this.images]
+				if (imageUrls.length) {
+					uni.showLoading({ title: '正在上传图片', mask: true })
+					const uploaded = []
+					for (const image of imageUrls) {
+						try {
+							const result = await uploadReviewImage(image)
+							uploaded.push(result?.url || image)
+						} catch (error) {
+							uploaded.push(image)
+						}
+					}
+					imageUrls = uploaded
+					uni.hideLoading()
+				}
 				const payload = {
 					orderId: this.order.id,
 					roomId: this.target.roomId,
@@ -170,7 +192,7 @@
 					roomRating: this.roomRating,
 					storeRating: this.storeRating,
 					content: this.content.trim(),
-					images: this.images
+					images: imageUrls
 				}
 				let savedRemotely = false
 				if (isGuid(this.order.id)) {
@@ -310,16 +332,14 @@
 		justify-content: center;
 		width: 52rpx;
 		height: 52rpx;
-	}
-
-	.picker-star :deep(.proto-icon) {
-		opacity: 0.18;
+		opacity: 0.2;
 		filter: grayscale(1);
 	}
 
-	.picker-star :deep(.proto-icon.selected) {
+	.picker-star.selected {
 		opacity: 1;
-		filter: brightness(0) saturate(100%) invert(57%) sepia(93%) saturate(1874%) hue-rotate(347deg) brightness(102%) contrast(103%);
+		// 染色为品牌主色 #2aa9a9（青绿），保持与全局 UI 一致。
+		filter: brightness(0) saturate(100%) invert(72%) sepia(83%) saturate(984%) hue-rotate(122deg) brightness(75%) contrast(68%);
 	}
 
 	.review-form-caption {

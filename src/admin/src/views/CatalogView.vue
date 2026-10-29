@@ -69,10 +69,6 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="入住时间" min-width="120"><template #default="{ row }">{{ row.checkInTime || '—' }}</template></el-table-column>
-          <el-table-column label="退房时间" min-width="120"><template #default="{ row }">{{ row.checkOutTime || '—' }}</template></el-table-column>
-          <el-table-column label="退订规则" min-width="170"><template #default="{ row }">{{ row.cancellationRule || '—' }}</template></el-table-column>
-          <el-table-column label="加入规则" min-width="150"><template #default="{ row }">{{ row.joinRule || '—' }}</template></el-table-column>
           <el-table-column label="房屋介绍" min-width="220"><template #default="{ row }"><span class="truncate-cell" :title="row.description || ''">{{ row.description || '—' }}</span></template></el-table-column>
           <el-table-column label="状态" width="95"><template #default="{ row }"><el-tag :type="row.isPublished ? 'success' : 'info'" effect="light">{{ row.isPublished ? '正常' : '隐藏' }}</el-tag></template></el-table-column>
           <el-table-column label="总预定数" width="95"><template #default="{ row }">{{ row.totalBookings ?? 0 }}</template></el-table-column>
@@ -129,23 +125,24 @@
     </template>
 
     <el-dialog v-model="roomDialog" :title="roomForm.id ? '编辑房间' : '新增房间'" width="820px" destroy-on-close>
+      <p v-if="roomForm.id" class="dialog-data-tip">下面显示的就是这条房型的全部数据；灰色文字是填写示例，空白说明该项还没有填写过。</p>
       <el-form :model="roomForm" label-width="96px" class="dialog-form room-form">
         <div class="form-section-title">基础信息</div>
         <div class="form-grid">
           <el-form-item label="所属门店" required><el-select v-model="roomForm.storeId" :disabled="Boolean(roomForm.id)"><el-option v-for="store in stores" :key="store.id" :label="store.name" :value="store.id" /></el-select></el-form-item>
           <el-form-item label="长名称"><el-input v-model="roomForm.longName" placeholder="用于列表展示的完整标题" /></el-form-item>
           <el-form-item label="房间名称" required><el-input v-model="roomForm.name" placeholder="例如：西湖景观大床房" /></el-form-item>
-          <el-form-item label="房间类型"><el-select v-model="roomForm.kind"><el-option label="独立房间" value="PrivateRoom" /><el-option label="多人间床位" value="Bed" /></el-select></el-form-item>
-          <el-form-item label="房型分类"><el-input v-model="roomForm.roomCategory" placeholder="例如：小区、别墅、客栈" /></el-form-item>
-          <el-form-item label="性别限制"><el-select v-model="roomForm.gender" clearable><el-option label="不限性别" value="Any" /><el-option label="女生专区" value="Female" /><el-option label="男生专区" value="Male" /></el-select></el-form-item>
+          <el-form-item label="房间类型"><el-select v-model="roomForm.kind" @change="handleRoomKindChange"><el-option label="独立房间" value="PrivateRoom" /><el-option label="多人间床位" value="Bed" /></el-select></el-form-item>
+          <el-form-item label="房型分类"><el-select v-model="roomForm.roomCategory" filterable allow-create default-first-option placeholder="选择或输入房型分类" @change="syncKindFromCategory"><el-option v-for="item in categoryOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
+          <el-form-item v-if="roomForm.kind === 'Bed'" label="性别限制"><el-select v-model="roomForm.gender" clearable><el-option label="不限性别" value="Any" /><el-option label="女生专区" value="Female" /><el-option label="男生专区" value="Male" /></el-select></el-form-item>
         </div>
 
         <div class="form-section-title">容量与价格</div>
         <div class="form-grid">
           <el-form-item label="面积"><el-input-number v-model="roomForm.area" :min="0" :precision="1" controls-position="right" placeholder="例如：25"><template #suffix>㎡</template></el-input-number></el-form-item>
           <el-form-item label="朝向"><el-input v-model="roomForm.orientation" placeholder="例如：南" /></el-form-item>
-          <el-form-item label="房间数量"><el-input-number v-model="roomForm.roomCount" :min="1" controls-position="right" /></el-form-item>
-          <el-form-item label="床位数"><el-input-number v-model="roomForm.bedCount" :min="1" controls-position="right" /></el-form-item>
+          <el-form-item v-if="roomForm.kind !== 'Bed'" label="房间数量"><el-input-number v-model="roomForm.roomCount" :min="1" controls-position="right" @change="handleRoomCountChange" /></el-form-item>
+          <el-form-item v-if="roomForm.kind === 'Bed'" label="床铺数量"><el-input-number v-model="roomForm.bedCount" :min="1" controls-position="right" @change="handleBedCountChange" /></el-form-item>
           <el-form-item label="容纳人数">
             <div class="capacity-fields">
               <el-input-number v-model="roomForm.maxGuests" :min="1" controls-position="right"><template #suffix>成人</template></el-input-number>
@@ -154,25 +151,24 @@
           </el-form-item>
           <el-form-item label="户型"><el-input v-model="roomForm.layout" placeholder="例如：一室一厅" /></el-form-item>
           <el-form-item label="默认价格"><el-input-number v-model="roomForm.basePriceYuan" :min="0" :precision="2" :step="1" controls-position="right"><template #suffix>元</template></el-input-number></el-form-item>
-          <el-form-item label="默认库存"><el-input-number v-model="roomForm.defaultInventory" :min="0" controls-position="right" /></el-form-item>
         </div>
+        <p class="form-hint">{{ quantityHint }}</p>
 
         <div class="form-section-title">民宿标签与设施</div>
         <div class="form-grid">
-          <el-form-item label="民宿标签"><el-select v-model="roomForm.tags" multiple filterable allow-create default-first-option placeholder="选择或输入标签"><el-option v-for="item in tagOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
-          <el-form-item label="民宿服务"><el-select v-model="roomForm.services" multiple filterable allow-create default-first-option placeholder="选择服务"><el-option v-for="item in serviceOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
-          <el-form-item label="基础设施"><el-select v-model="roomForm.facilities" multiple filterable allow-create default-first-option placeholder="选择设施"><el-option v-for="item in facilityOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
-          <el-form-item label="卫浴设施"><el-select v-model="roomForm.bathroomFacilities" multiple filterable allow-create default-first-option placeholder="选择卫浴设施"><el-option v-for="item in bathroomOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
-          <el-form-item label="周边设施"><el-select v-model="roomForm.nearbyFacilities" multiple filterable allow-create default-first-option placeholder="选择周边设施"><el-option v-for="item in nearbyOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
+          <el-form-item label="民宿标签"><el-select v-model="roomForm.tags" multiple filterable default-first-option placeholder="选择或输入标签"><el-option v-for="item in tagOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
+          <el-form-item label="民宿服务"><el-select v-model="roomForm.services" multiple filterable default-first-option placeholder="选择服务"><el-option v-for="item in serviceOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
+          <el-form-item label="基础设施"><el-select v-model="roomForm.facilities" multiple filterable default-first-option placeholder="选择设施"><el-option v-for="item in facilityOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
+          <el-form-item label="卫浴设施"><el-select v-model="roomForm.bathroomFacilities" multiple filterable default-first-option placeholder="选择卫浴设施"><el-option v-for="item in bathroomOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
+          <el-form-item label="周边设施"><el-select v-model="roomForm.nearbyFacilities" multiple filterable default-first-option placeholder="选择周边设施"><el-option v-for="item in nearbyOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
         </div>
 
         <div class="form-section-title">入住规则</div>
         <div class="form-grid">
-          <el-form-item label="入住时间"><el-input v-model="roomForm.checkInTime" placeholder="例如：当天 14:00 后" /></el-form-item>
-          <el-form-item label="退房时间"><el-input v-model="roomForm.checkOutTime" placeholder="例如：次日 12:00 前" /></el-form-item>
-          <el-form-item label="退订规则"><el-input v-model="roomForm.cancellationRule" placeholder="例如：提前 24 小时可免费取消" /></el-form-item>
-          <el-form-item label="加入规则"><el-input v-model="roomForm.joinRule" placeholder="例如：入住须知或费用说明" /></el-form-item>
+          <el-form-item label="入住时间"><el-input v-model="roomForm.checkInTime" placeholder="例如：14:00" /></el-form-item>
+          <el-form-item label="退房时间"><el-input v-model="roomForm.checkOutTime" placeholder="例如：12:00" /></el-form-item>
         </div>
+
         <el-form-item label="房屋介绍"><el-input v-model="roomForm.description" type="textarea" :rows="3" placeholder="填写房间介绍、服务说明和注意事项" /></el-form-item>
         <el-form-item label="房间图片">
           <div class="room-image-editor">
@@ -205,6 +201,13 @@
           <el-form-item label="上架展示"><el-switch v-model="roomForm.isPublished" active-text="展示给用户" /></el-form-item>
           <el-form-item label="排序"><el-input-number v-model="roomForm.sortOrder" :min="0" controls-position="right" /></el-form-item>
         </div>
+        <div v-if="roomForm.id" class="dialog-meta">
+          <span>总预定数：{{ roomForm.totalBookings ?? 0 }}</span>
+          <span>是否草稿：{{ roomForm.isDraft ? '是' : '否' }}</span>
+          <span>审核时间：{{ formatDateTime(roomForm.reviewedAt) }}</span>
+          <span>创建时间：{{ formatDateTime(roomForm.createdAt) }}</span>
+          <span>更新时间：{{ formatDateTime(roomForm.updatedAt) }}</span>
+        </div>
       </el-form>
       <template #footer><el-button @click="roomDialog = false">取消</el-button><el-button type="primary" :loading="roomSaving" @click="saveRoom">保存房间</el-button></template>
     </el-dialog>
@@ -214,7 +217,8 @@
         <div class="price-settings-summary">
           <div class="price-settings-summary-copy">
             <strong>{{ selectedRoom?.storeName || '当前房间' }}</strong>
-            <span>默认价格 ¥{{ selectedRoom ? centsToYuan(selectedRoom.basePriceCents) : '—' }} · 默认库存 {{ selectedRoom ? defaultInventoryForRoom(selectedRoom) : '—' }}</span>
+            <span>默认价格 ¥{{ selectedRoom ? centsToYuan(selectedRoom.basePriceCents) : '—' }} · {{ selectedRoom && selectedRoom.kind === 'Bed' ? '床铺数量' : '房间数量' }} {{ selectedRoom ? defaultInventoryForRoom(selectedRoom) : '—' }}{{ selectedRoom && selectedRoom.kind === 'Bed' ? ' 床' : ' 间' }}</span>
+            <span class="price-settings-hint">改过单价的日期按日历里的总数/剩余展示，其余日期跟房型数量一致</span>
           </div>
           <div class="price-settings-controls">
             <el-button :icon="ArrowLeft" title="上个月" @click="shiftMonth(-1)" />
@@ -226,7 +230,7 @@
         <div v-loading="scheduleLoading" class="calendar-wrap">
           <div class="calendar-week"><span v-for="day in weekLabels" :key="day">{{ day }}</span></div>
           <div class="calendar-grid">
-            <div v-for="day in calendarDays" :key="day.key" class="calendar-day" :class="{ outside: !day.currentMonth, weekend: day.weekend, today: day.today, holiday: day.holiday }">
+            <div v-for="day in calendarDays" :key="day.key" class="calendar-day" :class="{ outside: !day.currentMonth, weekend: day.weekend, today: day.today, holiday: day.holiday, customized: day.customized }" :title="day.customized ? '该日期在价格设置里单独改过，按日历里的库存展示' : ''">
               <div class="calendar-day-head"><b>{{ day.number }}</b><small v-if="day.holiday">{{ day.holiday }}</small></div>
               <div v-if="calendarEdit.dayKey === day.key" class="calendar-edit">
                 <span class="calendar-edit-label">{{ calendarFieldLabel(calendarEdit.field) }}</span>
@@ -267,7 +271,7 @@
       <el-form :model="priceForm" label-width="88px" class="dialog-form">
         <el-form-item label="日期范围"><el-date-picker v-model="priceForm.range" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" /></el-form-item>
         <el-form-item label="每日价格"><el-input-number v-model="priceForm.priceYuan" :min="0" :precision="2" :step="1" controls-position="right"><template #suffix>元</template></el-input-number></el-form-item>
-        <el-form-item label="每日库存"><el-input-number v-model="priceForm.inventoryQuantity" :min="0" :precision="0" :step="1" controls-position="right"><template #suffix>间</template></el-input-number></el-form-item>
+        <el-form-item label="每日库存"><el-input-number v-model="priceForm.inventoryQuantity" :min="0" :precision="0" :step="1" controls-position="right"><template #suffix>{{ selectedRoom && selectedRoom.kind === 'Bed' ? '床' : '间' }}</template></el-input-number></el-form-item>
       </el-form>
       <template #footer><el-button @click="priceDialog = false">取消</el-button><el-button type="primary" :loading="scheduleSaving" @click="savePrices">保存价格</el-button></template>
     </el-dialog>
@@ -314,11 +318,21 @@ const roomStatusTabs = [
   { key: 'hidden', label: '已隐藏' }
 ]
 const weekLabels = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
-const tagOptions = ['超赞房东', '交通方便', '近景区', '亲子友好']
-const serviceOptions = ['免费停车', '国内长途', '行李寄存', '早餐服务']
-const facilityOptions = ['无线网络', '窗户', '地暖', '网络电视', '零食、冰箱', '空调']
-const bathroomOptions = ['独立卫浴', '吹风机', '热水淋浴', '浴缸']
-const nearbyOptions = ['餐厅', '商场', '公交站', '景区入口', '便利店']
+const roomOptions = reactive({
+  categories: [],
+  tags: [],
+  services: [],
+  facilities: [],
+  bathroomFacilities: [],
+  nearbyFacilities: []
+})
+const mergeOptionValues = (items, selected) => [...new Set([...(items || []), ...((selected || []).filter(Boolean))])]
+const categoryOptions = computed(() => mergeOptionValues((roomOptions.categories || []).map((item) => item.name), roomForm.roomCategory ? [roomForm.roomCategory] : []))
+const tagOptions = computed(() => mergeOptionValues(roomOptions.tags, roomForm.tags))
+const serviceOptions = computed(() => mergeOptionValues(roomOptions.services, roomForm.services))
+const facilityOptions = computed(() => mergeOptionValues(roomOptions.facilities, roomForm.facilities))
+const bathroomOptions = computed(() => mergeOptionValues(roomOptions.bathroomFacilities, roomForm.bathroomFacilities))
+const nearbyOptions = computed(() => mergeOptionValues(roomOptions.nearbyFacilities, roomForm.nearbyFacilities))
 
 const stores = ref([])
 const rooms = ref([])
@@ -373,7 +387,7 @@ const filteredRooms = computed(() => rooms.value.filter((row) => {
     (!roomFilters.storeId || row.storeId === roomFilters.storeId) &&
     (!roomFilters.kind || row.kind === roomFilters.kind) &&
     (roomFilters.published === '' || row.isPublished === roomFilters.published) &&
-    (!text || `${row.name} ${row.longName || ''} ${row.storeName || ''} ${row.cancellationRule || ''}`.toLowerCase().includes(text))
+    (!text || `${row.name} ${row.longName || ''} ${row.storeName || ''}`.toLowerCase().includes(text))
 }))
 const pagedRooms = computed(() => filteredRooms.value.slice((roomPage.value - 1) * roomPageSize.value, roomPage.value * roomPageSize.value))
 const pagedInventoryItems = computed(() => inventoryItems.value.slice((inventoryPage.value - 1) * inventoryPageSize.value, inventoryPage.value * inventoryPageSize.value))
@@ -382,35 +396,59 @@ const priceByDate = computed(() => new Map(priceItems.value.map((item) => [dateO
 const inventoryByDate = computed(() => new Map(inventoryItems.value.map((item) => [dateOnly(item.date), item])))
 const selectedRoom = computed(() => rooms.value.find((room) => room.id === selectedRoomId.value))
 const calendarMonthLabel = computed(() => new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long' }).format(calendarDate.value))
+// 价格日历一天的展示口径：
+// - 在价格设置里手动改过的日期（Manual 价格记录，含只调库存自动补的标记）
+//   → 总数/剩余按日历里这一天的记录展示；
+// - 没改过的日期（含历史遗留的脏库存）→ 回落到房型当前数量，也就是「正常显示」。
+// 种子数据自动铺的 Seed / Weekend 价格不算手动设置。
+function resolveCalendarDay({ currentMonth, price, inventory, defaultInventory, basePriceCents }) {
+  const inventoryTotal = inventory?.totalQuantity ?? null
+  const lockedQuantity = inventory?.lockedQuantity ?? 0
+  const soldQuantity = inventory?.soldQuantity ?? 0
+  const customized = Boolean(price) && price.source !== 'Seed' && price.source !== 'Weekend'
+  const totalQuantity = defaultInventory === null
+    ? inventoryTotal
+    : customized
+      ? (inventoryTotal ?? defaultInventory)
+      : defaultInventory
+  return {
+    priceCents: currentMonth ? (price?.priceCents ?? basePriceCents ?? null) : null,
+    totalQuantity: currentMonth ? totalQuantity : null,
+    inventoryTotal: currentMonth ? inventoryTotal : null,
+    lockedQuantity: currentMonth ? lockedQuantity : null,
+    soldQuantity: currentMonth ? soldQuantity : null,
+    availableQuantity: currentMonth && totalQuantity !== null
+      ? Math.max(0, totalQuantity - lockedQuantity - soldQuantity)
+      : null,
+    customized: currentMonth ? customized : false
+  }
+}
 const calendarDays = computed(() => {
   const monthStart = new Date(calendarDate.value.getFullYear(), calendarDate.value.getMonth(), 1)
   const monthEnd = new Date(calendarDate.value.getFullYear(), calendarDate.value.getMonth() + 1, 0)
   const total = Math.ceil((monthStart.getDay() + monthEnd.getDate()) / 7) * 7
+  const todayKey = dateOnly(new Date())
+  const defaultInventory = selectedRoom.value ? defaultInventoryForRoom(selectedRoom.value) : null
   return Array.from({ length: total }, (_, index) => {
     const date = new Date(monthStart)
     date.setDate(index - monthStart.getDay() + 1)
     const key = dateOnly(date)
-    const price = priceByDate.value.get(key)
-    const inventory = inventoryByDate.value.get(key)
     const currentMonth = date.getFullYear() === monthStart.getFullYear() && date.getMonth() === monthStart.getMonth()
-    const defaultInventory = selectedRoom.value ? defaultInventoryForRoom(selectedRoom.value) : null
-    const totalQuantity = inventory?.totalQuantity ?? defaultInventory
-    const lockedQuantity = inventory?.lockedQuantity ?? 0
-    const soldQuantity = inventory?.soldQuantity ?? 0
+    const metrics = resolveCalendarDay({
+      currentMonth,
+      price: priceByDate.value.get(key),
+      inventory: inventoryByDate.value.get(key),
+      defaultInventory,
+      basePriceCents: selectedRoom.value?.basePriceCents ?? null
+    })
     return {
       key,
       number: date.getDate(),
       currentMonth,
       weekend: date.getDay() === 0 || date.getDay() === 6,
-      today: key === dateOnly(new Date()),
+      today: key === todayKey,
       holiday: festivalLabel(date),
-      priceCents: currentMonth ? (price?.priceCents ?? selectedRoom.value?.basePriceCents ?? null) : null,
-      totalQuantity: currentMonth ? totalQuantity : null,
-      lockedQuantity: currentMonth ? lockedQuantity : null,
-      soldQuantity: currentMonth ? soldQuantity : null,
-      availableQuantity: currentMonth && totalQuantity !== null
-        ? Math.max(0, totalQuantity - lockedQuantity - soldQuantity)
-        : null
+      ...metrics
     }
   })
 })
@@ -456,8 +494,8 @@ function emptyRoom() {
   return {
     id: '', storeId: '', name: '', longName: '', kind: 'PrivateRoom', roomCategory: '', bedCount: 1, gender: 'Any',
     maxGuests: 2, childCapacity: 0, area: 15, orientation: '', roomCount: 1, layout: '', basePriceCents: 26800, basePriceYuan: 268, defaultInventory: 1,
-    tags: [], services: [], facilities: [], bathroomFacilities: [], nearbyFacilities: [], checkInTime: '当天 14:00 后',
-    checkOutTime: '次日 12:00 前', cancellationRule: '', joinRule: '', description: '',
+    checkInTime: '14:00', checkOutTime: '12:00',
+    tags: [], services: [], facilities: [], bathroomFacilities: [], nearbyFacilities: [], description: '',
     imageUrlsJson: '', facilitiesJson: '', tagsJson: '', servicesJson: '', bathroomFacilitiesJson: '', nearbyFacilitiesJson: '',
     isPublished: false, approvalStatus: 'PendingReview', isDraft: true, rejectionReason: '', sortOrder: 0
   }
@@ -478,10 +516,13 @@ function jsonArray(value) { return JSON.stringify((value || []).filter(Boolean))
 function yuanToCents(value) { return Math.max(0, Math.round((Number(value) || 0) * 100)) }
 function centsToYuan(value) { return Number(((Number(value) || 0) / 100).toFixed(2)) }
 function shortId(value) { return value ? String(value).slice(0, 8) : '—' }
+// 房型数量是唯一口径：多人间看床铺数量，独立房型看房间数量；老数据缺字段时才退回默认库存。
 function defaultInventoryForRoom(room) {
   if (!room) return null
-  if (Number(room.defaultInventory) > 0) return Number(room.defaultInventory)
-  return room.kind === 'Bed' ? Math.max(Number(room.bedCount) || 1, 1) : 8
+  const quantity = room.kind === 'Bed' ? Number(room.bedCount) : Number(room.roomCount)
+  if (Number(quantity) > 0) return Math.max(Number(quantity), 1)
+  if (Number(room.defaultInventory) > 0) return Math.max(Number(room.defaultInventory), 1)
+  return 1
 }
 function formatDateTime(value) {
   if (!value) return '—'
@@ -517,6 +558,19 @@ function removeRoomImage(index) {
   roomImages.value = roomImages.value.filter((_, itemIndex) => itemIndex !== index)
 }
 async function loadStores() { stores.value = await get('/admin/stores') }
+async function loadRoomOptions() {
+  try {
+    const data = await get('/admin/room-options')
+    roomOptions.categories = Array.isArray(data.categories) ? data.categories : []
+    roomOptions.tags = Array.isArray(data.tags) ? data.tags : []
+    roomOptions.services = Array.isArray(data.services) ? data.services : []
+    roomOptions.facilities = Array.isArray(data.facilities) ? data.facilities : []
+    roomOptions.bathroomFacilities = Array.isArray(data.bathroomFacilities) ? data.bathroomFacilities : []
+    roomOptions.nearbyFacilities = Array.isArray(data.nearbyFacilities) ? data.nearbyFacilities : []
+  } catch (error) {
+    ElMessage.error(error.message || '房间选项加载失败')
+  }
+}
 async function loadRooms() {
   loading.value = true
   try {
@@ -551,28 +605,91 @@ function shiftMonth(delta) {
   calendarDate.value = new Date(calendarDate.value.getFullYear(), calendarDate.value.getMonth() + delta, 1)
   loadSchedule('prices')
 }
+// 分类名里带「床位/多人间」按多人间处理，带「独立/单间/房间」按独立房型处理；
+// 认不出来才退回分类表里的 kind。避免历史脏数据把「独立房间」记成 Bed 后一直传染。
+function inferKindFromCategory(name) {
+  const text = String(name || '').trim()
+  if (!text) return ''
+  if (/(床位|多人间|宿舍|胶囊|铺位|青旅)/.test(text)) return 'Bed'
+  if (/(独立|单间|标间|大床|双床|套房|家庭房|房间)/.test(text)) return 'PrivateRoom'
+  return ''
+}
+function syncKindFromCategory(value) {
+  const match = (roomOptions.categories || []).find((item) => item.name === value)
+  const inferred = inferKindFromCategory(value) || (match && match.kind) || roomForm.kind
+  if (!inferred) return
+  roomForm.kind = inferred === 'Bed' ? 'Bed' : 'PrivateRoom'
+  handleRoomKindChange(roomForm.kind)
+}
+// 数量只有一个口径：独立房型用「房间数量」，多人间用「床铺数量」，默认库存始终跟着它走。
+// 之前表单里还有一个独立的「默认库存」，导致房间管理和价格设置各存一个数字、互不同步。
+const quantityHint = computed(() => roomForm.kind === 'Bed'
+  ? `每日库存按床铺数量生成：${Math.max(Number(roomForm.bedCount) || 1, 1)} 个床位；保存后自动同步到「价格设置」未来 180 天`
+  : `每日库存按房间数量生成：${Math.max(Number(roomForm.roomCount) || 1, 1)} 间；保存后自动同步到「价格设置」未来 180 天`)
+function handleRoomKindChange(value) {
+  if (value === 'Bed') {
+    roomForm.roomCount = 1
+    roomForm.bedCount = Math.max(Number(roomForm.bedCount) || 1, 1)
+    roomForm.defaultInventory = roomForm.bedCount
+  } else {
+    roomForm.bedCount = 1
+    roomForm.gender = 'Any'
+    roomForm.roomCount = Math.max(Number(roomForm.roomCount) || 1, 1)
+    roomForm.defaultInventory = roomForm.roomCount
+  }
+}
+function handleRoomCountChange(value) {
+  const count = Math.max(Number(value) || 1, 1)
+  roomForm.roomCount = count
+  roomForm.defaultInventory = count
+}
+function handleBedCountChange(value) {
+  const count = Math.max(Number(value) || 1, 1)
+  roomForm.bedCount = count
+  roomForm.defaultInventory = count
+}
 function openRoomCreate() { Object.assign(roomForm, emptyRoom(), { storeId: stores.value[0]?.id || '' }); roomImages.value = []; roomDialog.value = true }
 function openRoomEdit(row) {
   const base = emptyRoom()
   Object.assign(base, row, {
+    // 列表的「长名称」列在留空时展示的是房间名称，编辑时用同样的值回填，
+    // 避免出现「列表里有名字、点开编辑却是空」的错觉。
+    longName: row.longName || row.name || '',
     tags: parseArray(row.tagsJson),
     services: parseArray(row.servicesJson),
     facilities: parseArray(row.facilitiesJson),
     bathroomFacilities: parseArray(row.bathroomFacilitiesJson),
     nearbyFacilities: parseArray(row.nearbyFacilitiesJson),
     basePriceYuan: centsToYuan(row.basePriceCents),
-    childCapacity: row.childCapacity || 0
+    childCapacity: row.childCapacity || 0,
+    checkInTime: row.checkInTime || '',
+    checkOutTime: row.checkOutTime || '',
+    rejectionReason: row.rejectionReason || ''
   })
   Object.assign(roomForm, base)
+  // 房型分类决定类型：打开编辑时按分类名校准一次，避免「分类写着独立房间、却在填床铺数量」。
+  syncKindFromCategory(roomForm.roomCategory)
   roomImages.value = parseArray(row.imageUrlsJson)
   roomDialog.value = true
 }
 async function saveRoom() {
   if (!roomForm.storeId || !roomForm.name) return ElMessage.warning('请填写所属门店和房间名称')
+  if (!String(roomForm.roomCategory || '').trim()) return ElMessage.warning('请选择或填写房型分类')
   roomSaving.value = true
   try {
+    const kind = roomForm.kind === 'Bed' ? 'Bed' : 'PrivateRoom'
+    const bedCount = kind === 'Bed' ? Math.max(Number(roomForm.bedCount) || 1, 1) : 1
+    const roomCount = kind === 'Bed' ? 1 : Math.max(Number(roomForm.roomCount) || 1, 1)
+    // 数量即库存：保存时把「房间数量/床铺数量」写进 defaultInventory，后端据此同步每日库存。
+    const defaultInventory = kind === 'Bed' ? bedCount : roomCount
     const payload = {
       ...roomForm,
+      kind,
+      bedCount,
+      roomCount,
+      defaultInventory,
+      gender: kind === 'Bed' ? roomForm.gender : 'Any',
+      roomCategory: String(roomForm.roomCategory || '').trim(),
       basePriceCents: yuanToCents(roomForm.basePriceYuan),
       childCapacity: Number(roomForm.childCapacity) || 0,
       facilitiesJson: jsonArray(roomForm.facilities),
@@ -588,9 +705,13 @@ async function saveRoom() {
     delete payload.bathroomFacilities
     delete payload.nearbyFacilities
     delete payload.basePriceYuan
+    // 退订规则/加入规则已不再维护：不提交这两个字段，
+    // 后端 PUT 用 `?? 原值` 保留库里已有内容，不会因为界面移除而被清空。
+    delete payload.cancellationRule
+    delete payload.joinRule
     if (roomForm.id) await put(`/admin/room-types/${roomForm.id}`, payload)
     else await post('/admin/room-types', payload)
-    ElMessage.success('房间已保存'); requestNotificationRefresh(); roomDialog.value = false; await loadRooms()
+    ElMessage.success('房间已保存'); requestNotificationRefresh(); roomDialog.value = false; await Promise.all([loadRooms(), loadRoomOptions()])
   } catch (error) { ElMessage.error(error.message) } finally { roomSaving.value = false }
 }
 async function reviewRoom(row, approved) {
@@ -763,7 +884,9 @@ async function commitCalendarEdit({ silent = false, keepOpen = false, closeOnInv
     } else {
       const lockedQuantity = Number(day.lockedQuantity) || 0
       const soldQuantity = Number(day.soldQuantity) || 0
-      const currentTotal = Number(day.totalQuantity ?? defaultInventoryForRoom(selectedRoom.value) ?? 0)
+      // 改库存要基于服务端的真实总数算差值：没单独设置过的日期，展示值可能已回落到房型数量，
+      // 但库存行里仍是旧数字，直接拿展示值相减会让调整量偏小/偏大。
+      const currentTotal = Number(day.inventoryTotal ?? day.totalQuantity ?? defaultInventoryForRoom(selectedRoom.value) ?? 0)
       const nextTotal = field === 'total' ? rawValue : rawValue + lockedQuantity + soldQuantity
       if (nextTotal < lockedQuantity + soldQuantity) {
         ElMessage.warning('库存不能低于锁定和已售数量')
@@ -873,7 +996,7 @@ onMounted(async () => {
     const storedStoreId = sessionStorage.getItem('tcpms.admin.room-store-filter')
     roomFilters.storeId = String(props.storeId || storedStoreId || '')
     sessionStorage.removeItem('tcpms.admin.room-store-filter')
-    await Promise.all([loadStores(), loadRooms()])
+    await Promise.all([loadStores(), loadRooms(), loadRoomOptions()])
   } catch (error) { ElMessage.error(error.message) }
 })
 </script>
@@ -895,6 +1018,8 @@ onMounted(async () => {
 .dot-status.danger{color:#c85a63}.dot-status.danger i{background:#d96872}
 .dot-status.muted{color:var(--admin-muted)}
 .capacity-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;width:100%;min-width:0}
+.dialog-data-tip{margin:0 0 14px;padding:9px 12px;border:1px solid var(--admin-border);border-radius:8px;background:var(--admin-surface-soft);color:var(--admin-muted);font-size:12px;line-height:1.6}
+.dialog-meta{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:6px;padding:10px 12px;border-radius:8px;background:var(--admin-surface-soft);color:var(--admin-muted);font-size:12px;line-height:1.6}
 .capacity-fields :deep(.el-input-number){width:100%;min-width:0}
 .room-image-editor{width:100%}
 .room-image-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
@@ -933,6 +1058,7 @@ onMounted(async () => {
 .calendar-day:hover{background:var(--admin-primary-soft)}
 .calendar-day.outside{opacity:.45;background:var(--admin-surface-soft)}
 .calendar-day.weekend{background:#f5fbfa}
+.calendar-day.customized .calendar-day-head b::after{content:'';display:inline-block;width:5px;height:5px;margin-left:4px;border-radius:50%;background:var(--admin-primary,#0f766e);vertical-align:super}
 .calendar-day.holiday{background:#fff2f2}
 .calendar-day.holiday .calendar-day-head b,
 .calendar-day.holiday .calendar-day-head small{color:#e5535d}
@@ -961,6 +1087,7 @@ onMounted(async () => {
 .calendar-edit-status.saving{color:var(--admin-primary);font-weight:700}
 .form-section-title{font-size:14px;font-weight:700;color:var(--admin-text);padding:12px 0 8px;border-top:1px solid var(--admin-border);margin-top:4px}
 .form-section-title:first-child{border-top:0;padding-top:0}
+.form-hint{margin:-2px 0 10px;color:var(--admin-muted,#6f8085);font-size:12px}
 .room-form :deep(.el-form-item){margin-bottom:14px}
 .room-form :deep(.el-select),.room-form :deep(.el-input-number){width:100%}
 @media (max-width: 900px){.calendar-day{min-height:112px}}

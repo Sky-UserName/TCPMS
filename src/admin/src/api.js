@@ -3,6 +3,10 @@
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/+$/, '')
 const TOKEN_KEY = 'tcpms.admin.token'
 
+export const getVerificationQrUrl = (code) => code
+  ? `${API_BASE_URL}/verification-qr/${encodeURIComponent(code)}`
+  : ''
+
 const decodeJwtPayload = (token) => {
   try {
     const part = String(token || '').split('.')[1]

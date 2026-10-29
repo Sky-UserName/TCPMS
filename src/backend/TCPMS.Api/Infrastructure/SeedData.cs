@@ -36,6 +36,8 @@ public static class SeedData
         var passwordHasher = new PasswordHasher<AdminUser>();
 
         await db.Database.EnsureCreatedAsync();
+        await EnsureBookingOrderColumnsAsync(db);
+        await EnsureAdminUserColumnsAsync(db);
         await SeedRegionsAsync(db);
 
         var roles = await SeedRolesAsync(db);
@@ -48,6 +50,140 @@ public static class SeedData
         {
             await SeedDemoBusinessAsync(db, passwordHasher, roles);
             await db.SaveChangesAsync();
+        }
+    }
+
+    // EnsureCreated does not alter an existing MySQL schema. Keep the small set of
+    // order fields added after the first release compatible with existing databases.
+    private static async Task EnsureBookingOrderColumnsAsync(AppDbContext db)
+    {
+        if (!db.Database.IsRelational())
+        {
+            return;
+        }
+
+        var connection = db.Database.GetDbConnection();
+        var openedHere = connection.State != System.Data.ConnectionState.Open;
+        if (openedHere)
+        {
+            await connection.OpenAsync();
+        }
+
+        try
+        {
+            var columns = new[]
+            {
+                (Name: "VerificationStatus", Definition: "varchar(32) NOT NULL DEFAULT 'Unverified'"),
+                (Name: "VerifiedAt", Definition: "datetime(6) NULL"),
+                (Name: "Note", Definition: "longtext NULL"),
+                (Name: "VerificationCode", Definition: "varchar(64) NULL"),
+                (Name: "WxUserNickname", Definition: "varchar(255) NULL")
+            };
+            foreach (var column in columns)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+                                      "WHERE LOWER(TABLE_SCHEMA) = LOWER(DATABASE()) " +
+                                      "AND LOWER(TABLE_NAME) = LOWER('BookingOrders') " +
+                                      "AND LOWER(COLUMN_NAME) = LOWER(@columnName)";
+                var parameter = command.CreateParameter();
+                parameter.ParameterName = "@columnName";
+                parameter.Value = column.Name;
+                command.Parameters.Add(parameter);
+                var exists = Convert.ToInt32(await command.ExecuteScalarAsync()) > 0;
+                if (!exists)
+                {
+                    await using var alterCommand = connection.CreateCommand();
+                    alterCommand.CommandText = $"ALTER TABLE `BookingOrders` ADD COLUMN `{column.Name}` {column.Definition}";
+                    await alterCommand.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        finally
+        {
+            if (openedHere)
+            {
+                await connection.CloseAsync();
+            }
+        }
+
+        var paidOrders = await db.BookingOrders
+            .Where(x => x.PaymentStatus == "Paid")
+            .ToListAsync();
+        var nicknameRows = await (
+            from user in db.WxUsers.AsNoTracking()
+            join order in db.BookingOrders.AsNoTracking()
+                on user.Id equals order.WxUserId
+            where order.PaymentStatus == "Paid" && order.WxUserNickname == null
+            select new { user.Id, user.Nickname })
+            .Distinct()
+            .ToListAsync();
+        var nicknames = nicknameRows
+            .GroupBy(x => x.Id)
+            .ToDictionary(x => x.Key, x => x.First().Nickname);
+        var changed = false;
+        foreach (var order in paidOrders)
+        {
+            if (order.Status is OrderStatuses.PaidPendingConfirmation or OrderStatuses.ConfirmedPendingCheckIn)
+            {
+                order.Status = OrderStatuses.PaidPendingVerification;
+                changed = true;
+            }
+            if (string.IsNullOrWhiteSpace(order.VerificationCode) &&
+                order.Status == OrderStatuses.PaidPendingVerification)
+            {
+                order.VerificationCode = Guid.NewGuid().ToString("N");
+                changed = true;
+            }
+            if (string.IsNullOrWhiteSpace(order.WxUserNickname) && nicknames.TryGetValue(order.WxUserId, out var nickname))
+            {
+                order.WxUserNickname = nickname;
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            await db.SaveChangesAsync();
+        }
+    }
+
+    // 门店员工改为从「会员管理」选人后，AdminUsers 需要记录关联的微信会员。
+    // 老库没有这一列，启动时按需补齐，避免手工改表。
+    private static async Task EnsureAdminUserColumnsAsync(AppDbContext db)
+    {
+        if (!db.Database.IsRelational())
+        {
+            return;
+        }
+
+        var connection = db.Database.GetDbConnection();
+        var openedHere = connection.State != System.Data.ConnectionState.Open;
+        if (openedHere)
+        {
+            await connection.OpenAsync();
+        }
+
+        try
+        {
+            await using var checkCommand = connection.CreateCommand();
+            checkCommand.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+                                       "WHERE LOWER(TABLE_SCHEMA) = LOWER(DATABASE()) " +
+                                       "AND LOWER(TABLE_NAME) = LOWER('AdminUsers') " +
+                                       "AND LOWER(COLUMN_NAME) = LOWER('WxUserId')";
+            var exists = Convert.ToInt32(await checkCommand.ExecuteScalarAsync()) > 0;
+            if (!exists)
+            {
+                await using var alterCommand = connection.CreateCommand();
+                alterCommand.CommandText = "ALTER TABLE `AdminUsers` ADD COLUMN `WxUserId` char(36) NULL";
+                await alterCommand.ExecuteNonQueryAsync();
+            }
+        }
+        finally
+        {
+            if (openedHere)
+            {
+                await connection.CloseAsync();
+            }
         }
     }
 
@@ -132,11 +268,12 @@ public static class SeedData
                 ("verify", "扫码核销", "qr", "/pages/merchant/verify"),
                 ("records", "核销记录", "document", "/pages/merchant/records"),
                 ("staff", "员工管理", "group", "/pages/merchant/staff"),
-                ("property", "民宿管理", "store", "/pages/merchant/index"),
+                ("property", "民宿管理", "store", "/pages/merchant/apply"),
                 ("publish", "发布房源", "plus", "/pages/merchant/publish"),
                 ("reviews", "评价管理", "star", "/pages/merchant/reviews"),
                 ("coupon", "优惠券管理", "document", "/pages/merchant/coupons"),
                 ("settings", "民宿设置", "settings", "/pages/merchant/settings"),
+                ("notice", "预定须知", "document", "/pages/merchant/notice"),
                 ("subscriptions", "订阅消息", "document", "/pages/merchant/messages")
             };
             for (var index = 0; index < menuDefinitions.Length; index++)
@@ -154,27 +291,80 @@ public static class SeedData
             }
         }
 
+        var propertyMenu = await db.PermissionMenus.SingleOrDefaultAsync(x => x.Key == "property");
+        if (propertyMenu is not null && propertyMenu.Route == "/pages/merchant/index")
+        {
+            propertyMenu.Route = "/pages/merchant/apply";
+            propertyMenu.UpdatedAt = DateTime.UtcNow;
+        }
+        if (!await db.PermissionMenus.AnyAsync(x => x.Key == "notice"))
+        {
+            db.PermissionMenus.Add(new PermissionMenu
+            {
+                Key = "notice",
+                Title = "预定须知",
+                IconKey = "document",
+                Route = "/pages/merchant/notice",
+                Weight = 13,
+                Status = "normal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+
         await SeedManagedItemsAsync(db, "levels", new object[]
         {
             new { name = "无等级", description = "普通民宿", sort = 1, status = "active" },
             new { name = "优质民宿", description = "服务和房源质量稳定", sort = 2, status = "active" }
         });
-        await SeedManagedItemsAsync(db, "facilities", new object[]
+        // 房间表单的标签 / 服务 / 设施字典。按名称幂等补齐，不覆盖管理端后续修改。
+        await EnsureManagedItemsAsync(db, "tags", new object[]
+        {
+            new { name = "亲子友好", color = "#16b79a", usage = 0, status = "active", sort = 1 },
+            new { name = "近地铁", color = "#4387d6", usage = 0, status = "active", sort = 2 },
+            new { name = "交通方便", color = "#16b79a", usage = 0, status = "active", sort = 3 },
+            new { name = "近景区", color = "#2aa9a9", usage = 0, status = "active", sort = 4 },
+            new { name = "近商圈", color = "#4387d6", usage = 0, status = "active", sort = 5 },
+            new { name = "现代风", color = "#6f8085", usage = 0, status = "active", sort = 6 },
+            new { name = "超赞房东", color = "#f59e0b", usage = 0, status = "active", sort = 7 },
+            new { name = "私家花园", color = "#10b981", usage = 0, status = "active", sort = 8 }
+        });
+        await EnsureManagedItemsAsync(db, "services", new object[]
+        {
+            new { name = "围炉煮茶", status = "active", sort = 1 },
+            new { name = "免费接送", status = "active", sort = 2 },
+            new { name = "前台接待", status = "active", sort = 3 },
+            new { name = "管家服务", status = "active", sort = 4 },
+            new { name = "行李寄存", status = "active", sort = 5 },
+            new { name = "免费停车", status = "active", sort = 6 },
+            new { name = "国内长途", status = "active", sort = 7 },
+            new { name = "早餐服务", status = "active", sort = 8 }
+        });
+        await EnsureManagedItemsAsync(db, "facilities", new object[]
         {
             new { name = "独立卫浴", category = "卫浴设施", status = "active", sort = 1 },
             new { name = "无线网络", category = "基础设施", status = "active", sort = 2 },
-            new { name = "空调", category = "基础设施", status = "active", sort = 3 }
+            new { name = "空调", category = "基础设施", status = "active", sort = 3 },
+            new { name = "网络电视", category = "基础设施", status = "active", sort = 4 },
+            new { name = "地暖", category = "基础设施", status = "active", sort = 5 },
+            new { name = "窗户", category = "基础设施", status = "active", sort = 6 },
+            new { name = "零食、水", category = "基础设施", status = "active", sort = 7 },
+            new { name = "零食、冰箱", category = "基础设施", status = "active", sort = 8 },
+            new { name = "电吹风", category = "卫浴设施", status = "active", sort = 9 },
+            new { name = "热水", category = "卫浴设施", status = "active", sort = 10 },
+            new { name = "吹风机", category = "卫浴设施", status = "active", sort = 11 },
+            new { name = "热水淋浴", category = "卫浴设施", status = "active", sort = 12 },
+            new { name = "浴缸", category = "卫浴设施", status = "active", sort = 13 }
         });
-        await SeedManagedItemsAsync(db, "tags", new object[]
+        await EnsureManagedItemsAsync(db, "nearbyFacilities", new object[]
         {
-            new { name = "亲子友好", color = "#16b79a", usage = 0, status = "active" },
-            new { name = "近地铁", color = "#4387d6", usage = 0, status = "active" }
-        });
-        await SeedManagedItemsAsync(db, "roomTypes", new object[]
-        {
-            new { name = "大床房", sort = 1, status = "active" },
-            new { name = "双床房", sort = 2, status = "active" },
-            new { name = "多人间床位", sort = 3, status = "active" }
+            new { name = "医院", status = "active", sort = 1 },
+            new { name = "商场", status = "active", sort = 2 },
+            new { name = "餐厅", status = "active", sort = 3 },
+            new { name = "便利店", status = "active", sort = 4 },
+            new { name = "超市", status = "active", sort = 5 },
+            new { name = "公交站", status = "active", sort = 6 },
+            new { name = "景区入口", status = "active", sort = 7 }
         });
         await SeedManagedItemsAsync(db, "common", new object[]
         {
@@ -455,7 +645,7 @@ public static class SeedData
             quantity: 1,
             guestCount: 1,
             totalAmountCents: 17600,
-            status: OrderStatuses.ConfirmedPendingCheckIn,
+            status: OrderStatuses.PaidPendingVerification,
             paymentStatus: "Paid",
             sold: true);
 
@@ -516,6 +706,10 @@ public static class SeedData
             Id = Guid.NewGuid(),
             OrderNumber = orderNumber,
             WxUserId = user.Id,
+            WxUserNickname = user.Nickname,
+            VerificationCode = paymentStatus == "Paid" && status == OrderStatuses.PaidPendingVerification
+                ? Guid.NewGuid().ToString("N")
+                : null,
             StoreId = roomType.StoreId,
             RoomTypeId = roomType.Id,
             CheckIn = checkIn.Date,
@@ -577,7 +771,7 @@ public static class SeedData
                 AmountCents = totalAmountCents,
                 Reason = "行程调整",
                 Status = "PendingReview",
-                OriginalOrderStatus = OrderStatuses.ConfirmedPendingCheckIn,
+                OriginalOrderStatus = OrderStatuses.PaidPendingVerification,
                 RequestedByUserId = user.Id
             });
         }
@@ -902,6 +1096,61 @@ public static class SeedData
                 CreatedAt = now,
                 UpdatedAt = now
             });
+        }
+    }
+
+    /// <summary>
+    /// 按名称补齐字典项，保留管理端已修改的排序、颜色、状态和自定义项。
+    /// </summary>
+    private static async Task EnsureManagedItemsAsync(
+        AppDbContext db,
+        string resourceType,
+        IEnumerable<object> items)
+    {
+        var existing = await db.AdminManagedItems
+            .Where(x => x.ResourceType == resourceType)
+            .ToListAsync();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in existing)
+        {
+            var name = ReadManagedItemName(item.DataJson);
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                names.Add(name.Trim());
+            }
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var item in items)
+        {
+            var json = JsonSerializer.Serialize(item);
+            var name = ReadManagedItemName(json);
+            if (string.IsNullOrWhiteSpace(name) || !names.Add(name.Trim()))
+            {
+                continue;
+            }
+
+            db.AdminManagedItems.Add(new AdminManagedItem
+            {
+                Id = Guid.NewGuid(),
+                ResourceType = resourceType,
+                DataJson = json,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        }
+    }
+
+    private static string? ReadManagedItemName(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty("name", out var name) ? name.GetString() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

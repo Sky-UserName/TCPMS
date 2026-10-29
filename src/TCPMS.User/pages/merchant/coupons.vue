@@ -1,6 +1,7 @@
 <template>
 	<view class="proto-page merchant-tool-page">
 		<ProtoHeader title="优惠券管理" theme="green" />
+		<CacheRefreshIndicator :refreshing="pullRefreshing" />
 		<view class="coupon-banner proto-card"><view><text>优惠活动</text><text>用优惠券提升房源转化</text></view><button class="proto-primary-button" hover-class="none" @tap="addCoupon">新建优惠券</button></view>
 		<scroll-view class="coupon-tabs" scroll-x :show-scrollbar="false"><text v-for="tab in tabs" :key="tab.key" :class="{ active: activeTab === tab.key }" @tap="activeTab = tab.key">{{ tab.label }}</text></scroll-view>
 		<ProtoEmptyState v-if="!filteredCoupons.length" title="暂无优惠券" description="创建优惠券后，可在这里查看发放和使用情况" />
@@ -13,14 +14,16 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
+	import CacheRefreshIndicator from '@/components/CacheRefreshIndicator.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { createMerchantCoupon, fetchMerchantCoupons, updateMerchantCoupon } from '@/common/api.js'
 	import { showToast } from '@/common/prototype.js'
+	import { runPullRefresh } from '@/common/pull-refresh.js'
 
 	export default {
-		components: { ProtoHeader, ProtoIcon, ProtoEmptyState },
-		data() { return { coupons: [], activeTab: 'all', tabs: [{ key: 'all', label: '全部' }, { key: 'active', label: '生效中' }, { key: 'ended', label: '已结束' }] } },
+		components: { ProtoHeader, CacheRefreshIndicator, ProtoIcon, ProtoEmptyState },
+		data() { return { coupons: [], pullRefreshing: false, activeTab: 'all', tabs: [{ key: 'all', label: '全部' }, { key: 'active', label: '生效中' }, { key: 'ended', label: '已结束' }] } },
 		computed: {
 			filteredCoupons() {
 				if (this.activeTab === 'active') return this.coupons.filter((coupon) => coupon.status === '生效中')
@@ -31,12 +34,14 @@
 		async onShow() {
 			await this.loadCoupons()
 		},
+		onPullDownRefresh() {
+			return runPullRefresh(this, () => this.loadCoupons())
+		},
 		methods: {
 			async loadCoupons() {
 				try {
 					this.coupons = await fetchMerchantCoupons()
 				} catch (error) {
-					this.coupons = []
 					showToast(error?.message || '优惠券加载失败')
 				}
 			},

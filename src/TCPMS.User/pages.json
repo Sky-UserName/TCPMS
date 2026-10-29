@@ -45,7 +45,7 @@
 			"style": {
 				"navigationBarTitleText": "门店",
 				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
+				"enablePullDownRefresh": true
 			}
 		},
 		{
@@ -53,7 +53,7 @@
 			"style": {
 				"navigationBarTitleText": "附近门店",
 				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
+				"enablePullDownRefresh": true
 			}
 		},
 		{
@@ -69,7 +69,7 @@
 			"style": {
 				"navigationBarTitleText": "房型列表",
 				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
+				"enablePullDownRefresh": true
 			}
 		},
 		{
@@ -85,7 +85,7 @@
 			"style": {
 				"navigationBarTitleText": "评价列表",
 				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
+				"enablePullDownRefresh": true
 			}
 		},
 		{
@@ -125,7 +125,7 @@
 			"style": {
 				"navigationBarTitleText": "我的订单",
 				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
+				"enablePullDownRefresh": true
 			}
 		},
 		{
@@ -157,7 +157,7 @@
 			"style": {
 				"navigationBarTitleText": "入住人管理",
 				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
+				"enablePullDownRefresh": true
 			}
 		},
 		{
@@ -165,7 +165,7 @@
 			"style": {
 				"navigationBarTitleText": "我的收藏",
 				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
+				"enablePullDownRefresh": true
 			}
 		},
 		{
@@ -173,7 +173,7 @@
 			"style": {
 				"navigationBarTitleText": "浏览记录",
 				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
+				"enablePullDownRefresh": true
 			}
 		},
 		{
@@ -189,7 +189,7 @@
 			"style": {
 				"navigationBarTitleText": "消息",
 				"navigationStyle": "custom",
-				"enablePullDownRefresh": false
+				"enablePullDownRefresh": true
 			}
 		},
 		{
@@ -234,7 +234,7 @@
 					"style": {
 						"navigationBarTitleText": "房间管理",
 						"navigationStyle": "custom",
-						"enablePullDownRefresh": false
+						"enablePullDownRefresh": true
 					}
 				},
 				{
@@ -242,7 +242,7 @@
 					"style": {
 						"navigationBarTitleText": "订单管理",
 						"navigationStyle": "custom",
-						"enablePullDownRefresh": false
+						"enablePullDownRefresh": true
 					}
 				},
 				{
@@ -254,19 +254,11 @@
 					}
 				},
 				{
-					"path": "verify",
-					"style": {
-						"navigationBarTitleText": "扫码核销",
-						"navigationStyle": "custom",
-						"enablePullDownRefresh": false
-					}
-				},
-				{
 					"path": "records",
 					"style": {
 						"navigationBarTitleText": "核销记录",
 						"navigationStyle": "custom",
-						"enablePullDownRefresh": false
+						"enablePullDownRefresh": true
 					}
 				},
 				{
@@ -274,7 +266,7 @@
 					"style": {
 						"navigationBarTitleText": "员工管理",
 						"navigationStyle": "custom",
-						"enablePullDownRefresh": false
+						"enablePullDownRefresh": true
 					}
 				},
 				{
@@ -282,7 +274,7 @@
 					"style": {
 						"navigationBarTitleText": "评价管理",
 						"navigationStyle": "custom",
-						"enablePullDownRefresh": false
+						"enablePullDownRefresh": true
 					}
 				},
 				{
@@ -290,13 +282,21 @@
 					"style": {
 						"navigationBarTitleText": "优惠券管理",
 						"navigationStyle": "custom",
-						"enablePullDownRefresh": false
+						"enablePullDownRefresh": true
 					}
 				},
 				{
 					"path": "settings",
 					"style": {
 						"navigationBarTitleText": "民宿设置",
+						"navigationStyle": "custom",
+						"enablePullDownRefresh": false
+					}
+				},
+				{
+					"path": "notice",
+					"style": {
+						"navigationBarTitleText": "预定须知",
 						"navigationStyle": "custom",
 						"enablePullDownRefresh": false
 					}

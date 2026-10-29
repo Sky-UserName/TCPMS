@@ -1,13 +1,14 @@
 <template>
 	<view class="proto-page nearby-page">
 		<ProtoHeader title="附近门店" theme="green" />
+		<CacheRefreshIndicator :refreshing="pullRefreshing" />
 		<view class="nearby-state">
 			<view class="nearby-state-icon"><ProtoIcon name="location" :size="30" /></view>
 			<view class="nearby-state-copy">
 				<text class="nearby-state-title">{{ locationText }}</text>
 				<text class="nearby-state-desc">{{ locationDesc }}</text>
 			</view>
-			<button class="proto-button-small proto-button-light" hover-class="none" @tap="relocate">重新定位</button>
+			<button class="proto-button-small proto-button-light" hover-class="none" @tap="relocate(false)">重新定位</button>
 		</view>
 		<view class="nearby-heading">
 			<text>搜索半径范围</text>
@@ -48,18 +49,21 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
+	import CacheRefreshIndicator from '@/components/CacheRefreshIndicator.vue'
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
 	import { goPage, showToast } from '@/common/prototype.js'
 	import { fetchNearbyStores } from '@/common/api.js'
 	import { openStoreRoom } from '@/common/navigation.js'
+	import { runPullRefresh } from '@/common/pull-refresh.js'
 
 	export default {
-		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
+		components: { ProtoHeader, CacheRefreshIndicator, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
 				radius: '50km',
+				pullRefreshing: false,
 				radiusOptions: ['5km', '10km', '30km', '50km'],
 				locationStatus: 'loading',
 				stores: []
@@ -90,29 +94,34 @@
 		onLoad() {
 			this.relocate()
 		},
+		onPullDownRefresh() {
+			return runPullRefresh(this, () => this.relocate(true))
+		},
 		methods: {
-			relocate() {
+			relocate(silent = false) {
 				this.locationStatus = 'loading'
-				uni.getLocation({
-					type: 'gcj02',
-					success: async (res) => {
-						this.locationStatus = 'ready'
-						try {
-							const stores = await fetchNearbyStores(res.latitude, res.longitude, 50)
-							this.stores = stores
-							this.locationStatus = 'ready'
-							showToast(stores.length ? `已同步 ${stores.length} 家附近门店` : '附近暂无营业门店')
-						} catch (error) {
-							this.stores = []
-							this.locationStatus = 'error'
-							showToast('附近门店同步失败')
+				return new Promise((resolve) => {
+					uni.getLocation({
+						type: 'gcj02',
+						success: async (res) => {
+							try {
+								const stores = await fetchNearbyStores(res.latitude, res.longitude, 50)
+								this.stores = stores
+								this.locationStatus = 'ready'
+								if (!silent) showToast(stores.length ? `已同步 ${stores.length} 家附近门店` : '附近暂无营业门店')
+							} catch (error) {
+								this.locationStatus = 'error'
+								if (!silent) showToast('附近门店同步失败')
+							} finally {
+								resolve()
+							}
+						},
+						fail: () => {
+							this.locationStatus = 'denied'
+							if (!silent) showToast('未开启定位，仍可浏览门店')
+							resolve()
 						}
-					},
-					fail: () => {
-						this.stores = []
-						this.locationStatus = 'denied'
-						showToast('未开启定位，仍可浏览门店')
-					}
+					})
 				})
 			},
 			goDetail(store) {

@@ -5,11 +5,7 @@
 			<text class="settings-section-title">基础资料</text>
 			<text class="settings-label">民宿名称</text><input v-model="form.storeName" class="proto-input" placeholder="请输入民宿名称" />
 			<text class="settings-label">联系电话</text><input v-model="form.phone" class="proto-input" placeholder="请输入联系电话" />
-		</view>
-		<view class="settings-section proto-card">
-			<text class="settings-section-title">入住规则</text>
-			<view class="settings-grid"><view><text class="settings-label">入住时间</text><input v-model="form.checkIn" class="proto-input" placeholder="14:00" /></view><view><text class="settings-label">退房时间</text><input v-model="form.checkOut" class="proto-input" placeholder="12:00" /></view></view>
-			<text class="settings-label">退订规则</text><textarea v-model="form.cancelRule" class="proto-textarea" placeholder="请输入退订规则" />
+			<text class="settings-hint">修改民宿名称或电话后会重新进入审核；预定须知请到「预定须知」页面维护。</text>
 		</view>
 		<view class="settings-section proto-card">
 			<text class="settings-section-title">运营偏好</text>
@@ -32,9 +28,6 @@
 				form: {
 					storeName: '',
 					phone: '',
-					checkIn: '14:00',
-					checkOut: '12:00',
-					cancelRule: '',
 					autoAccept: true,
 					showPhone: true
 				}
@@ -43,7 +36,10 @@
 		async onShow() {
 			try {
 				const settings = await fetchMerchantSettings()
-				if (settings) this.form = { ...this.form, ...settings }
+				if (settings) {
+					const { checkIn, checkOut, cancelRule, joinRule, ...rest } = settings
+					this.form = { ...this.form, ...rest }
+				}
 			} catch (error) {
 				showToast(error?.message || '设置加载失败')
 			}
@@ -75,6 +71,7 @@
 	.settings-section { padding: 22rpx; }
 	.settings-section-title { display: block; margin-bottom: 14rpx; color: var(--proto-text); font-size: 27rpx; font-weight: 800; }
 	.settings-label { display: block; margin: 16rpx 0 9rpx; color: var(--proto-muted); font-size: 19rpx; }
+	.settings-hint { display: block; margin-top: 10rpx; color: #9a7a3a; font-size: 17rpx; line-height: 1.45; }
 	.settings-grid { display: flex; gap: 14rpx; }
 	.settings-grid > view { flex: 1; min-width: 0; }
 	.settings-grid .settings-label { margin-top: 0; }

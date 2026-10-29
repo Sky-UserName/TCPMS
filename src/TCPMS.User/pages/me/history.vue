@@ -1,6 +1,7 @@
 <template>
 	<view class="proto-page history-page">
 		<ProtoHeader title="浏览记录" theme="green" />
+		<CacheRefreshIndicator :refreshing="pullRefreshing" />
 
 		<view v-if="items.length" class="history-toolbar">
 			<text>最近浏览 {{ items.length }} 条</text>
@@ -26,6 +27,7 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
+	import CacheRefreshIndicator from '@/components/CacheRefreshIndicator.vue'
 	import ProtoBottomNav from '@/components/ProtoBottomNav.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
@@ -33,24 +35,32 @@
 	import { clearRecent, getRecent } from '@/common/app-store.js'
 	import { clearMyRecent, fetchMyRecent } from '@/common/api.js'
 	import { openLegacyStorePath } from '@/common/navigation.js'
+	import { runPullRefresh } from '@/common/pull-refresh.js'
 
 	export default {
-		components: { ProtoHeader, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
+		components: { ProtoHeader, CacheRefreshIndicator, ProtoBottomNav, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
 				items: [],
+				pullRefreshing: false,
 				fallbackImage: prototypeImages.homeHero
 			}
 		},
 		async onShow() {
-			try {
-				this.items = await fetchMyRecent()
-			} catch (error) {
-				this.items = getRecent()
-				showToast(error?.message || '浏览记录同步失败，已显示本地缓存')
-			}
+			await this.loadRecent()
+		},
+		onPullDownRefresh() {
+			return runPullRefresh(this, () => this.loadRecent())
 		},
 		methods: {
+			async loadRecent() {
+				try {
+					this.items = await fetchMyRecent()
+				} catch (error) {
+					this.items = getRecent()
+					showToast(error?.message || '浏览记录同步失败，已显示本地缓存')
+				}
+			},
 			openItem(item) {
 				if (item.path) {
 					// 旧记录里的门店详情路径统一转到房型详情。

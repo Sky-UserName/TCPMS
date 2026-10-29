@@ -540,7 +540,34 @@ public sealed class WeChatPayService(
                 path,
                 (int)response.StatusCode,
                 responseBody.Length > 500 ? responseBody[..500] : responseBody);
-            throw new HttpRequestException($"微信支付接口返回 {(int)response.StatusCode}");
+            // 微信的拒单原因（例如「无效的openid」）必须往上带，否则前端只能看到笼统的 503。
+            throw new WeChatPayApiException(
+                (int)response.StatusCode,
+                ReadErrorField(responseBody, "code"),
+                ReadErrorField(responseBody, "message") ?? $"微信支付接口返回 {(int)response.StatusCode}");
+        }
+
+        // 从微信支付错误响应里取指定字段，响应不是 JSON 时返回 null。
+        static string? ReadErrorField(string body, string field)
+        {
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(body);
+                return document.RootElement.ValueKind == JsonValueKind.Object &&
+                       document.RootElement.TryGetProperty(field, out var value) &&
+                       value.ValueKind == JsonValueKind.String
+                    ? value.GetString()
+                    : null;
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
         }
 
         if (typeof(T) == typeof(JsonElement))
@@ -949,4 +976,22 @@ public sealed class WeChatPayService(
         [JsonPropertyName("total")]
         public int Total { get; set; }
     }
+}
+
+/// <summary>
+/// 微信支付接口明确返回了业务错误（非 2xx）。保留微信的 code/message，
+/// 让调用方能区分「没配置」「网络不通」和「微信拒单（比如 openid 无效）」。
+/// </summary>
+public sealed class WeChatPayApiException : Exception
+{
+    public WeChatPayApiException(int statusCode, string? errorCode, string message)
+        : base(message)
+    {
+        StatusCode = statusCode;
+        ErrorCode = errorCode;
+    }
+
+    public int StatusCode { get; }
+
+    public string? ErrorCode { get; }
 }

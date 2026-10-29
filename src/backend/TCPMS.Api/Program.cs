@@ -297,6 +297,63 @@ api.MapGet("/health", (IConfiguration configuration) =>
     });
 });
 
+// 管理端上传房型图片时以 data:image/...;base64 形式存在 ImageUrlsJson 里。
+// 小程序 <image> 对超长 base64 支持不稳定，这里提供公开的图片地址，前端只拿短 URL。
+api.MapGet("/room-images/{roomTypeId:guid}/{index:int}", async (
+    Guid roomTypeId,
+    int index,
+    AppDbContext db,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var imageUrlsJson = await db.RoomTypes.AsNoTracking()
+        .Where(x => x.Id == roomTypeId)
+        .Select(x => x.ImageUrlsJson)
+        .SingleOrDefaultAsync(cancellationToken);
+    var images = ParseImageUrls(imageUrlsJson);
+    if (index < 0 || index >= images.Count)
+    {
+        return Results.NotFound();
+    }
+
+    var image = images[index];
+    if (image.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+    {
+        var commaIndex = image.IndexOf(',');
+        if (commaIndex <= 5)
+        {
+            return Results.NotFound();
+        }
+
+        var metadata = image[5..commaIndex];
+        var contentType = metadata.Split(';')[0];
+        if (string.IsNullOrWhiteSpace(contentType) ||
+            !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            contentType = "image/jpeg";
+        }
+
+        try
+        {
+            var bytes = Convert.FromBase64String(image[(commaIndex + 1)..]);
+            httpContext.Response.Headers.CacheControl = "public,max-age=86400";
+            return Results.File(bytes, contentType);
+        }
+        catch (FormatException)
+        {
+            return Results.NotFound();
+        }
+    }
+
+    if (Uri.TryCreate(image, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+    {
+        return Results.Redirect(image);
+    }
+
+    return Results.NotFound();
+}).ExcludeFromDescription();
+
 var auth = api.MapGroup("/auth")
     .WithTags("认证");
 auth.MapPost("/login", async (
@@ -657,6 +714,57 @@ auth.MapPost("/avatar", async (
     return Results.Ok(ToMiniappProfile(user, request));
 }).RequireAuthorization("Miniapp");
 
+// 评价图片：小程序 chooseImage 只拿到本机临时路径，必须落盘换成长久可访问的地址，
+// 否则商家端和管理端都看不到用户上传的图片。
+api.MapPost("/reviews/images", async (
+    ClaimsPrincipal principal,
+    IWebHostEnvironment environment,
+    HttpRequest request,
+    CancellationToken cancellationToken) =>
+{
+    if (GetUserId(principal) is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    IFormFile? file;
+    try
+    {
+        var form = await request.ReadFormAsync(cancellationToken);
+        file = form.Files.GetFile("file");
+    }
+    catch (InvalidDataException)
+    {
+        return Results.BadRequest(new ApiError("review_image_invalid", "图片上传内容无效"));
+    }
+
+    if (file is null || file.Length <= 0)
+    {
+        return Results.BadRequest(new ApiError("review_image_required", "请选择评价图片"));
+    }
+    if (file.Length > 10 * 1024 * 1024)
+    {
+        return Results.BadRequest(new ApiError("review_image_too_large", "评价图片不能超过 10MB"));
+    }
+
+    var extension = await DetectImageExtensionAsync(file, cancellationToken);
+    if (extension is null)
+    {
+        return Results.BadRequest(new ApiError("review_image_type_invalid", "评价图片必须是 JPG、PNG 或 WEBP 图片"));
+    }
+
+    var directoryPath = StoragePaths.Uploads(environment, "reviews");
+    Directory.CreateDirectory(directoryPath);
+    var fileName = $"{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}{extension}";
+    var targetPath = Path.Combine(directoryPath, fileName);
+    await using (var stream = new FileStream(targetPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+    {
+        await file.CopyToAsync(stream, cancellationToken);
+    }
+
+    return Results.Ok(new { url = $"/uploads/reviews/{fileName}", fileName, size = file.Length });
+}).RequireAuthorization("Miniapp").WithTags("用户评价");
+
 api.MapGet("/map/config", (IOptions<AmapOptions> options) =>
 {
     var value = options.Value;
@@ -847,7 +955,8 @@ stores.MapGet("/{id:guid}", async (
         .OrderBy(x => x.BasePriceCents)
         .Select(ToRoomTypeSummary)
         .ToList();
-    return Results.Ok(new StoreDetail(summary, roomTypes));
+    var bookingNotice = await StoreBookingNoticeStore.LoadAsync(db, store.Id, cancellationToken);
+    return Results.Ok(new StoreDetail(summary, roomTypes, bookingNotice));
 });
 
 stores.MapPost("/{id:guid}/geo/geocode", async (
@@ -954,8 +1063,7 @@ admin.MapGet("/metrics", async (
         await storesQuery.CountAsync(cancellationToken),
         await storesQuery.CountAsync(x => x.Status == StoreStatuses.Active, cancellationToken),
         await ordersQuery.CountAsync(x =>
-            x.Status == OrderStatuses.PaidPendingConfirmation ||
-            x.Status == OrderStatuses.ConfirmedPendingCheckIn, cancellationToken),
+            x.Status == OrderStatuses.PaidPendingVerification, cancellationToken),
         await ordersQuery.CountAsync(x => x.CreatedAt >= today, cancellationToken),
         await ordersQuery
             .Where(x => x.CreatedAt >= today && x.PaymentStatus == "Paid")
@@ -1035,6 +1143,7 @@ admin.MapGet("/stores/{id:guid}", async (
         businessLicenseUrl = store.BusinessLicenseUrl,
         doorImageUrl = store.DoorImageUrl,
         roomImageUrlsJson = store.RoomImageUrlsJson,
+        bookingNotice = await StoreBookingNoticeStore.LoadAsync(db, store.Id, cancellationToken),
         rating = store.Rating
     });
 });
@@ -1096,6 +1205,10 @@ admin.MapPost("/stores", async (
         CoordinatesUpdatedAt = request.Longitude.HasValue && request.Latitude.HasValue ? DateTime.UtcNow : null
     };
     db.Stores.Add(store);
+    if (request.BookingNotice is not null)
+    {
+        await StoreBookingNoticeStore.SaveAsync(db, store.Id, request.BookingNotice, cancellationToken);
+    }
     db.AuditLogs.Add(CreateAudit(principal, "store.create", "Store", store.Id.ToString(), store.Name));
     await db.SaveChangesAsync(cancellationToken);
     return Results.Created($"/api/v1/stores/{store.Id}", ToStoreListItem(store, null));
@@ -1164,6 +1277,10 @@ admin.MapPut("/stores/{id:guid}", async (
         store.CoordinatesUpdatedAt = null;
     }
     store.UpdatedAt = DateTime.UtcNow;
+    if (request.BookingNotice is not null)
+    {
+        await StoreBookingNoticeStore.SaveAsync(db, store.Id, request.BookingNotice, cancellationToken);
+    }
     db.AuditLogs.Add(CreateAudit(principal, "store.update", "Store", store.Id.ToString(), store.Name));
     await db.SaveChangesAsync(cancellationToken);
     return Results.Ok(ToStoreListItem(store, null));
@@ -1176,7 +1293,8 @@ roomTypes.MapGet("/", async (
     AppDbContext db,
     CancellationToken cancellationToken) =>
 {
-    var query = db.RoomTypes.AsNoTracking().Where(x => x.IsPublished);
+    var query = db.RoomTypes.AsNoTracking()
+        .Where(x => x.IsPublished && x.Store != null && x.Store.Status == StoreStatuses.Active);
     if (storeId.HasValue)
     {
         query = query.Where(x => x.StoreId == storeId.Value);
@@ -1198,10 +1316,12 @@ roomTypes.MapGet("/{id:guid}/availability", async (
         return Results.BadRequest(new ApiError("invalid_date_range", error!));
     }
 
-    var roomType = await db.RoomTypes.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+    var roomType = await db.RoomTypes.AsNoTracking()
+        .Include(x => x.Store)
+        .SingleOrDefaultAsync(x => x.Id == id && x.Store != null && x.Store.Status == StoreStatuses.Active, cancellationToken);
     if (roomType is null)
     {
-        return Results.NotFound(new ApiError("room_type_not_found", "房型不存在"));
+        return Results.NotFound(new ApiError("room_type_not_found", "房型不存在或门店审核中"));
     }
 
     var daily = await LoadAvailabilityAsync(db, roomType, checkIn, checkOut, cancellationToken);
@@ -1217,7 +1337,7 @@ roomTypes.MapGet("/{id:guid}/reviews", async (
     var roomType = await db.RoomTypes
         .AsNoTracking()
         .Include(x => x.Store)
-        .SingleOrDefaultAsync(x => x.Id == id && x.IsPublished, cancellationToken);
+        .SingleOrDefaultAsync(x => x.Id == id && x.IsPublished && x.Store != null && x.Store.Status == StoreStatuses.Active, cancellationToken);
     if (roomType is null || roomType.Store is null)
     {
         return Results.NotFound(new ApiError("room_type_not_found", "房型不存在或已下架"));
@@ -1256,6 +1376,25 @@ roomTypes.MapGet("/{id:guid}/reviews", async (
 var orders = api.MapGroup("/orders")
     .WithTags("用户订单")
     .RequireAuthorization("Miniapp");
+api.MapGet("/verification-qr/{code}", async (
+    string code,
+    AppDbContext db,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+{
+    var order = await db.BookingOrders.AsNoTracking()
+        .SingleOrDefaultAsync(x => x.VerificationCode == code, cancellationToken);
+    if (order is null || order.PaymentStatus != "Paid" ||
+        order.Status != OrderStatuses.PaidPendingVerification ||
+        order.VerificationStatus == OrderVerificationStatuses.Verified)
+    {
+        return Results.NotFound();
+    }
+
+    context.Response.Headers.CacheControl = "no-store";
+    return Results.File(VerificationQrCodeGenerator.CreatePng(code), "image/png");
+}).AllowAnonymous().WithTags("用户订单");
+
 orders.MapPost("/preview", async (
     OrderQuoteRequest request,
     AppDbContext db,
@@ -1326,6 +1465,10 @@ orders.MapPost("/", async (
         {
             return Results.NotFound(new ApiError("room_type_not_found", "房型不存在或已下架"));
         }
+        var orderUserNickname = await db.WxUsers.AsNoTracking()
+            .Where(x => x.Id == userId.Value)
+            .Select(x => x.Nickname)
+            .SingleOrDefaultAsync(cancellationToken);
 
         var inventories = await db.InventoryDailies
             .Where(x => x.RoomTypeId == request.RoomTypeId &&
@@ -1362,6 +1505,7 @@ orders.MapPost("/", async (
             Id = Guid.NewGuid(),
             OrderNumber = CreateOrderNumber(),
             WxUserId = userId.Value,
+            WxUserNickname = orderUserNickname,
             StoreId = request.StoreId,
             RoomTypeId = request.RoomTypeId,
             CheckIn = request.CheckIn.Date,
@@ -1372,6 +1516,7 @@ orders.MapPost("/", async (
             Status = OrderStatuses.PendingPayment,
             PaymentStatus = "Unpaid",
             GuestSnapshotJson = request.GuestSnapshotJson,
+            Note = request.Note,
             PriceSnapshotJson = JsonSerializer.Serialize(new
             {
                 dailyPrices,
@@ -1477,9 +1622,11 @@ orders.MapPost("/{id:guid}/cancel", async (
 
 orders.MapPost("/{id:guid}/pay", async (
     Guid id,
+    HttpRequest httpRequest,
     AppDbContext db,
     ClaimsPrincipal principal,
     WeChatPayService weChatPayService,
+    ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
     var userId = GetUserId(principal);
@@ -1505,6 +1652,27 @@ orders.MapPost("/{id:guid}/pay", async (
     }
 
     var openId = principal.FindFirst("openid")?.Value;
+
+    // 前端会带上 uni.login 拿到的 code：换成当前微信账号的真实 openid。
+    // 开发态的固定测试账号（dev-user-001）不是有效 openid，微信会直接拒单，这里用它兜底。
+    var loginCode = await ReadPayLoginCodeAsync(httpRequest, cancellationToken);
+    if (!string.IsNullOrWhiteSpace(loginCode))
+    {
+        try
+        {
+            var session = await weChatPayService.ExchangeCodeAsync(loginCode, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(session.OpenId))
+            {
+                openId = session.OpenId;
+            }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested &&
+                                   ex is InvalidOperationException or HttpRequestException or TaskCanceledException)
+        {
+            logger.LogWarning(ex, "支付前用登录 code 换取 openid 失败，回退到登录态里的 openid");
+        }
+    }
+
     if (string.IsNullOrWhiteSpace(openId))
     {
         return Results.BadRequest(new ApiError("wechat_openid_missing", "当前登录态缺少微信用户标识，请重新登录"));
@@ -1523,6 +1691,16 @@ orders.MapPost("/{id:guid}/pay", async (
         return Results.Json(
             new ApiError("wechat_pay_not_configured", ex.Message),
             statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    catch (WeChatPayApiException ex)
+    {
+        // 微信明确拒单：把微信的错误码和原因原样返回，别再统一压成 503。
+        var detail = string.IsNullOrWhiteSpace(ex.ErrorCode)
+            ? ex.Message
+            : $"{ex.Message}（{ex.ErrorCode}）";
+        return Results.Json(
+            new ApiError("wechat_pay_rejected", $"微信支付未受理：{detail}"),
+            statusCode: StatusCodes.Status502BadGateway);
     }
     catch (HttpRequestException)
     {
@@ -1581,6 +1759,10 @@ orders.MapGet("/{id:guid}/pay-status", async (
         return Results.Json(
             new ApiError("wechat_pay_not_configured", ex.Message),
             statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    catch (WeChatPayApiException)
+    {
+        // 微信侧还查不到这笔单（或临时拒单）时保持待支付，等回调和对账任务兜底。
     }
     catch (HttpRequestException)
     {
@@ -1747,39 +1929,34 @@ adminOrders.MapGet("/", async (
     var orderData = await query.OrderByDescending(x => x.CreatedAt)
         .Take(500)
         .ToListAsync(cancellationToken);
-    var result = orderData.Select(x => ToOrderListItem(x, x.RoomType?.Name, x.Store?.Name)).ToList();
+    if (orderData.Count == 0)
+    {
+        return Results.Ok(Array.Empty<AdminOrderListItem>());
+    }
+
+    // Materialize bounded ID sets first instead of reusing the ORDER BY/LIMIT query
+    // as nested subqueries across payment, refund, and member lookups.
+    var orderIds = orderData.Select(x => x.Id).ToArray();
+    var userIds = orderData.Select(x => x.WxUserId).Distinct().ToArray();
+    var paymentRecords = await db.PaymentRecords.AsNoTracking()
+        .Where(x => orderIds.Contains(x.OrderId))
+        .ToListAsync(cancellationToken);
+    var refundRecords = await db.RefundRecords.AsNoTracking()
+        .Where(x => orderIds.Contains(x.OrderId))
+        .ToListAsync(cancellationToken);
+    var paymentsByOrder = paymentRecords.GroupBy(x => x.OrderId).ToDictionary(x => x.Key, x => (IEnumerable<PaymentRecord>)x.ToList());
+    var refundsByOrder = refundRecords.GroupBy(x => x.OrderId).ToDictionary(x => x.Key, x => (IEnumerable<RefundRecord>)x.ToList());
+    var userNicknames = await db.WxUsers.AsNoTracking()
+        .Where(x => userIds.Contains(x.Id))
+        .ToDictionaryAsync(x => x.Id, x => x.Nickname, cancellationToken);
+    var result = orderData.Select(x => AdminEndpoints.ToAdminOrderListItem(
+        x,
+        paymentsByOrder.GetValueOrDefault(x.Id),
+        refundsByOrder.GetValueOrDefault(x.Id),
+        string.IsNullOrWhiteSpace(x.WxUserNickname)
+            ? userNicknames.GetValueOrDefault(x.WxUserId)
+            : x.WxUserNickname)).ToList();
     return Results.Ok(result);
-});
-
-adminOrders.MapPost("/{id:guid}/confirm", async (
-    Guid id,
-    AppDbContext db,
-    ClaimsPrincipal principal,
-    CancellationToken cancellationToken) =>
-{
-    if (!AdminEndpoints.CanManageOrders(principal))
-    {
-        return Results.Forbid();
-    }
-
-    var order = await db.BookingOrders.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
-    if (order is null)
-    {
-        return Results.NotFound(new ApiError("order_not_found", "订单不存在"));
-    }
-    if (!AdminEndpoints.CanAccessStore(principal, order.StoreId))
-    {
-        return Results.Forbid();
-    }
-    if (order.Status != OrderStatuses.PaidPendingConfirmation)
-    {
-        return Results.BadRequest(new ApiError("order_not_confirmable", "当前订单不允许确认"));
-    }
-    order.Status = OrderStatuses.ConfirmedPendingCheckIn;
-    order.UpdatedAt = DateTime.UtcNow;
-    db.AuditLogs.Add(CreateAudit(principal, "order.confirm", "BookingOrder", order.Id.ToString(), order.OrderNumber));
-    await db.SaveChangesAsync(cancellationToken);
-    return Results.Ok();
 });
 
 adminOrders.MapPost("/{id:guid}/check-in", async (
@@ -1845,6 +2022,8 @@ adminOrders.MapPost("/{id:guid}/check-in", async (
     order.Status = OrderStatuses.CheckedIn;
     order.AssignedResourcesJson = JsonSerializer.Serialize(units.Select(x => x.Code).ToArray());
     order.CheckedInAt = DateTime.UtcNow;
+    order.VerificationStatus = OrderVerificationStatuses.Verified;
+    order.VerifiedAt = order.CheckedInAt;
     order.UpdatedAt = DateTime.UtcNow;
     db.AuditLogs.Add(CreateAudit(
         principal,
@@ -1981,7 +2160,14 @@ static RoomTypeSummary ToRoomTypeSummary(RoomType roomType)
         roomType.TagsJson,
         roomType.ServicesJson,
         roomType.Area,
-        roomType.RoomCount);
+        roomType.RoomCount,
+        roomType.RoomCategory,
+        roomType.Layout,
+        roomType.BathroomFacilitiesJson,
+        roomType.NearbyFacilitiesJson,
+        roomType.ChildCapacity,
+        roomType.CheckInTime,
+        roomType.CheckOutTime);
 }
 
 static async Task<Dictionary<Guid, int>> LoadPublishedReviewCountsAsync(
@@ -2020,10 +2206,14 @@ static OrderListItem ToOrderListItem(
         order.TotalAmountCents,
         order.Status,
         order.PaymentStatus,
-        order.CreatedAt,
+        // CreatedAt 落库时是 UTC 时钟但 Kind 丢失，显式标回 Utc，序列化才会带 Z，
+        // 否则小程序把它当本地时间解析，下单时间会整整差 8 小时。
+        DateTime.SpecifyKind(order.CreatedAt, DateTimeKind.Utc),
         order.StoreId,
         order.RoomTypeId,
-        hasReview);
+        hasReview,
+        order.GuestSnapshotJson,
+        order.VerificationCode);
 }
 
 static ReviewItem ToReviewItem(Review review)
@@ -2371,6 +2561,33 @@ static async Task<(OrderQuote? Quote, string? Error)> BuildQuoteAsync(
         request.GuestCount,
         total,
         dailyItems), null);
+}
+
+// 读取发起支付时前端带上的 uni.login code；没有请求体或格式不对时返回 null。
+static async Task<string?> ReadPayLoginCodeAsync(HttpRequest request, CancellationToken cancellationToken)
+{
+    if (request.ContentLength == 0)
+    {
+        return null;
+    }
+
+    try
+    {
+        using var document = await JsonDocument.ParseAsync(request.Body, cancellationToken: cancellationToken);
+        if (document.RootElement.ValueKind == JsonValueKind.Object &&
+            document.RootElement.TryGetProperty("code", out var code) &&
+            code.ValueKind == JsonValueKind.String)
+        {
+            var value = code.GetString();
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+    }
+    catch (JsonException)
+    {
+        // 请求体不是合法 JSON：按没带 code 处理，回退到登录态里的 openid。
+    }
+
+    return null;
 }
 
 app.Run();

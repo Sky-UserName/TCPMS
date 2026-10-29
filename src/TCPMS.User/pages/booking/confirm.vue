@@ -94,7 +94,11 @@
 				<text>实付总计</text>
 				<text class="strong">¥{{ total }}</text>
 			</view>
-			<view v-if="isApiBooking && quoteError" class="confirm-error">报价暂不可用：{{ quoteError }}</view>
+			<view v-if="isApiBooking && quoteError" class="confirm-error">
+				<text>报价暂不可用：{{ quoteError }}</text>
+				<text v-if="quoteErrorAction === 'date'" class="confirm-error-link" @tap="goDate">修改入住日期</text>
+				<text v-if="quoteErrorAction === 'date' && canReduceRooms" class="confirm-error-link" @tap="reduceRoomCount">改为 1 间</text>
+			</view>
 			<view v-else-if="!isApiBooking" class="confirm-error">当前房源为本地演示数据，连接真实服务端房源后才能提交订单。</view>
 		</view>
 
@@ -140,7 +144,7 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { goPage, showToast } from '@/common/prototype.js'
 	import { getApiToken, getBooking, saveBooking } from '@/common/app-store.js'
-	import { createRemoteOrder, previewRemoteOrder, redirectToLogin } from '@/common/api.js'
+	import { createRemoteOrder, fetchRemoteOrders, fetchStoreDetail, previewRemoteOrder, redirectToLogin } from '@/common/api.js'
 
 	const weekdayLabels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 	const isGuid = (value) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(value || ''))
@@ -163,6 +167,10 @@
 				quoteCents: null,
 				quoteLoading: false,
 				quoteError: '',
+				// 报价失败后可以引导用户去做的动作：'date' 改日期；空串表示只能提示文案。
+				quoteErrorAction: '',
+				// 同一轮失败里 onLoad/onShow 会各请求一次，只弹一次 toast，避免连续两个提示框。
+				quoteErrorToasted: false,
 				quoteRequestId: 0,
 				quoteFixAttempted: false,
 				authRedirecting: false
@@ -177,6 +185,10 @@
 			},
 			isApiBooking() {
 				return isGuid(this.booking.storeId) && isGuid(this.booking.roomId)
+			},
+			// 库存不足且订了多间时，允许一键收回到 1 间重新报价（房源紧俏时最常见的卡点）。
+			canReduceRooms() {
+				return Number(this.booking.roomCount || 1) > 1
 			},
 			roomSubtotal() {
 				return Number(this.booking.roomPrice || 0) * Number(this.booking.roomCount || 1) * Number(this.booking.nights || 1)
@@ -241,8 +253,30 @@
 				// 实名入住人数与出行人数（guestCount）已解耦：至少 1 位、可多选，因此不做截断。
 				this.quoteCents = null
 				this.quoteError = ''
+				this.quoteErrorAction = ''
 				this.quoteFixAttempted = false
 				this.loadQuote()
+			},
+			// 房型可住人数上限（maxGuests）只有从房型详情页进来才会写进 booking，
+			// 从订单、首页等入口进来可能是空值，这里按门店详情补齐一次，避免要报价了才发现人数超限。
+			async ensureRoomMeta() {
+				if (!this.isApiBooking) return
+				if (Number(this.booking.maxGuests || 0) > 0) return
+				try {
+					const { rooms } = await fetchStoreDetail(this.booking.storeId)
+					const room = (rooms || []).find((item) => String(item.id) === String(this.booking.roomId))
+					const maxGuests = Number((room && room.maxGuests) || 0)
+					if (!maxGuests) return
+					this.booking = saveBooking({
+						...this.booking,
+						maxGuests,
+						room: room.name || this.booking.room,
+						roomImage: room.image || this.booking.roomImage,
+						roomPrice: Number(room.price || this.booking.roomPrice || 0)
+					})
+				} catch (error) {
+					// 门店详情拿不到不影响报价本身，交给后面的报价错误提示兜底。
+				}
 			},
 			// 床位房等房型限制「maxGuests × 间数」，超员会让报价接口 400；发请求前先收敛到上限内。
 			sanitizeGuestCount() {
@@ -253,20 +287,28 @@
 					this.booking = saveBooking({ ...this.booking, guestCount: limit })
 				}
 			},
-			// 报价 400 里有两类可自动修复的问题（人数超限、日期过期），修正后重试一次；其余如实展示。
-			applyQuoteFix(message) {
-				if (typeof message !== 'string' || this.quoteFixAttempted) return false
+			// 报价 400 的收尾：能就地修的（人数超限、日期过期）修完重试一次；
+			// 修不了的给出可读原因和去处（换日期），避免页面只剩一句「库存不足」。
+			// 返回值：'retry' 重试 / 'handled' 已给出提示 / false 交给默认文案。
+			resolveQuoteError(error) {
+				const message = typeof error?.message === 'string' ? error.message : ''
+				if (!message) return false
+				const canRetry = !this.quoteFixAttempted
+				const roomCount = Math.max(1, Number(this.booking.roomCount || 1))
+
 				if (message.includes('承载人数')) {
+					// 人数超限但本地没有 maxGuests（不是从房型详情进来的）：按「每间 1 位」兜底收敛。
 					const maxGuests = Number(this.booking.maxGuests || 0)
-					if (!maxGuests) return false
-					this.booking = saveBooking({
-						...this.booking,
-						guestCount: Math.max(1, maxGuests * Math.max(1, Number(this.booking.roomCount || 1)))
-					})
+					const limit = maxGuests ? maxGuests * roomCount : roomCount
+					if (Number(this.booking.guestCount || 1) <= limit) return false
+					if (!canRetry) return false
 					this.quoteFixAttempted = true
-					return true
+					this.booking = saveBooking({ ...this.booking, guestCount: limit })
+					return 'retry'
 				}
-				if (message.includes('不能早于今天') || message.includes('必须早于离店日期')) {
+
+				if (message.includes('不能早于今天') || message.includes('必须早于离店日期') || message.includes('最多 90 晚')) {
+					if (!canRetry) return false
 					const pad = (value) => String(value).padStart(2, '0')
 					const toIso = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T00:00:00`
 					const toLabel = (date) => `${pad(date.getMonth() + 1)}月${pad(date.getDate())}日`
@@ -282,8 +324,22 @@
 						nights: 1
 					})
 					this.quoteFixAttempted = true
-					return true
+					return 'retry'
 				}
+
+				if (message.includes('库存')) {
+					const rooms = roomCount > 1 ? `（当前预订 ${roomCount} 间，可减少房间数）` : ''
+					this.quoteError = `${message}${rooms}，请更换入住日期或稍后再试`
+					this.quoteErrorAction = 'date'
+					return 'handled'
+				}
+
+				if (message.includes('房型不存在或已下架')) {
+					this.quoteError = '该房型已下架或暂不可售，请返回重新选择房源'
+					this.quoteErrorAction = ''
+					return 'handled'
+				}
+
 				return false
 			},
 			async loadQuote() {
@@ -292,13 +348,18 @@
 					this.quoteLoading = false
 					return
 				}
-				this.sanitizeGuestCount()
 				this.quoteLoading = true
 				try {
+					// 补齐 maxGuests 再收敛人数，避免「人数超承载」这类本来能自动避免的 400。
+					await this.ensureRoomMeta()
+					if (requestId !== this.quoteRequestId) return
+					this.sanitizeGuestCount()
 					const quote = await previewRemoteOrder(this.booking)
 					if (requestId !== this.quoteRequestId) return
 					this.quoteCents = Number(quote.totalAmountCents)
 					this.quoteError = ''
+					this.quoteErrorAction = ''
+					this.quoteErrorToasted = false
 				} catch (error) {
 					if (requestId !== this.quoteRequestId) return
 					this.quoteCents = null
@@ -307,11 +368,20 @@
 						this.authRedirecting = true
 						return
 					}
-					if (this.applyQuoteFix(error?.message)) {
+					const resolution = this.resolveQuoteError(error)
+					if (resolution === 'retry') {
 						await this.loadQuote()
 						return
 					}
-					this.quoteError = error?.message || '请检查登录状态、库存或网络后重试'
+					if (resolution !== 'handled') {
+						this.quoteError = error?.message || '请检查登录状态、库存或网络后重试'
+						this.quoteErrorAction = ''
+					}
+					// 报价失败时提交按钮是禁用的，光靠费用区的小字容易被忽略，这里显式提示一次原因。
+					if (this.quoteError && !this.quoteErrorToasted) {
+						this.quoteErrorToasted = true
+						showToast(this.quoteError)
+					}
 				} finally {
 					if (requestId === this.quoteRequestId) this.quoteLoading = false
 				}
@@ -373,6 +443,9 @@
 					order = await createRemoteOrder(booking)
 				} catch (error) {
 					this.submitStatus = 'idle'
+					// 409 库存不足最常见的场景：自己刚下过一单还没支付，库存已被这笔订单锁住
+					//（房量少的房型尤其明显）。这时把用户直接领到待支付订单，而不是只弹“库存不足”。
+					if (error?.code === 'inventory_insufficient' && await this.focusPendingOrder()) return
 					showToast(error?.message || '订单未提交，请检查网络后重试')
 					return
 				}
@@ -381,6 +454,31 @@
 						goPage(`/pages/pay/result?orderId=${order.id}`)
 					}
 				}, 700)
+			},
+			// 库存不足时先看看是不是自己已有待支付订单占着库存：是就引导去支付/取消，避免反复撞 409。
+			async focusPendingOrder() {
+				let orders = []
+				try {
+					orders = await fetchRemoteOrders()
+				} catch (error) {
+					return false
+				}
+				const target = (Array.isArray(orders) ? orders : []).find((item) =>
+					item &&
+					item.statusKey === 'pay' &&
+					String(item.roomId) === String(this.booking.roomId) &&
+					(!this.booking.storeId || String(item.storeId) === String(this.booking.storeId)))
+				if (!target) return false
+				uni.showModal({
+					title: '你已有一笔待支付订单',
+					content: `订单 ${target.orderNumber} 已锁定该房型库存，请先完成支付或取消这笔订单，再重新下单。`,
+					confirmText: '去支付',
+					cancelText: '稍后处理',
+					success: (res) => {
+						if (res.confirm) goPage(`/pages/pay/result?orderId=${target.id}`)
+					}
+				})
+				return true
 			},
 			deleteGuest(guest) {
 				uni.showModal({
@@ -407,6 +505,17 @@
 						guestsSelected: (picked) => this.applyGuestSelection(picked)
 					}
 				})
+			},
+			// 报价失败时直接去改入住日期，回来 onShow 会自动重新报价。
+			goDate() {
+				goPage('/pages/booking/date?from=confirm')
+			},
+			// 库存不足时一键收回房间数，立刻重新报价。
+			reduceRoomCount() {
+				this.booking = saveBooking({ ...this.booking, roomCount: 1 })
+				this.quoteFixAttempted = false
+				this.quoteErrorToasted = false
+				this.loadQuote()
 			}
 		}
 	}
@@ -571,6 +680,13 @@
 		background: #ffe7e4;
 		border-radius: 14rpx;
 		font-size: 19rpx;
+	}
+
+	.confirm-error-link {
+		margin-left: 8rpx;
+		font-weight: 600;
+		color: var(--proto-error);
+		text-decoration: underline;
 	}
 
 	.confirm-guest .proto-ghost-button {

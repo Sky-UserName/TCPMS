@@ -18,24 +18,24 @@
 		</view>
 
 		<view class="me-panel order-panel">
-			<view class="me-panel-heading"><view class="me-heading-title"><text>我的订单</text><text class="me-heading-caption">{{ ordersSyncError ? '同步失败' : '实时同步' }}</text></view><view @tap="goOrders"><text>查看更多</text><ProtoIcon name="chevron-right" :size="22" /></view></view>
+			<view class="me-panel-heading"><view class="me-heading-title"><text>我的订单</text><text class="me-heading-caption">{{ ordersSyncError ? '同步失败' : '实时同步' }}</text></view><view @tap="goOrders('all')"><text>查看更多</text><ProtoIcon name="chevron-right" :size="22" /></view></view>
 			<view class="me-order-summary"><view><text class="me-order-total">{{ orders.length }}</text><text>笔订单</text></view><text>{{ ordersSyncError ? '当前显示本机缓存' : '状态实时更新，入住更安心' }}</text></view>
 			<view class="me-order-grid">
-				<view v-for="item in orderShortcuts" :key="item.key" class="me-order-entry" @tap="goOrders">
+				<view v-for="item in orderShortcuts" :key="item.key" class="me-order-entry" @tap="goOrders(item.key)">
 					<view class="me-order-icon"><ProtoIcon :name="item.icon" :size="36" /></view>
 					<text>{{ item.label }}</text>
 				</view>
 			</view>
 		</view>
 
-		<view v-if="loggedIn && merchant.enabled && merchant.status === 'approved'" class="me-panel merchant-panel">
+		<view v-if="merchantPanelVisible" class="me-panel merchant-panel">
 			<view class="me-panel-heading merchant-panel-heading">
 				<view class="me-heading-title"><text>民宿管理</text><text class="me-heading-caption">{{ merchant.storeName }}</text></view>
 				<view class="merchant-store-switch" @tap="handleMerchantStore"><text>{{ merchant.role || '店主' }}</text><ProtoIcon name="chevron-down" :size="22" /></view>
 			</view>
 			<view class="merchant-summary">
-				<view class="merchant-summary-copy"><text class="merchant-summary-title">{{ merchant.storeName }}</text><text class="merchant-summary-desc">已审核 · {{ merchant.roomCount || 0 }} 间房源在管理</text></view>
-				<view class="merchant-summary-status"><ProtoIcon name="verified" :size="26" /><text>经营中</text></view>
+				<view class="merchant-summary-copy"><text class="merchant-summary-title">{{ merchant.storeName }}</text><text class="merchant-summary-desc">{{ merchantSummaryText }}</text></view>
+				<view class="merchant-summary-status" :class="merchant.status"><ProtoIcon :name="merchantStatusIcon" :size="26" /><text>{{ merchantStatusLabel }}</text></view>
 			</view>
 			<view class="merchant-grid">
 				<view v-for="item in merchantEntries" :key="item.key" class="merchant-entry" :class="{ disabled: item.disabled }" @tap="handleMerchantEntry(item)">
@@ -68,10 +68,13 @@
 	import { getApiToken, getGuests, getMerchantProfile, getOrders, getProfile, isLoggedIn, logout, saveMerchantProfile, setLoggedIn } from '@/common/app-store.js'
 	import { IS_DEV_BUILD } from '@/common/env.js'
 	import { fetchMerchantPermissionMenus, fetchMerchantProfile, fetchMiniappProfile, fetchMySummary, fetchRemoteOrders } from '@/common/api.js'
+	import { scanAndVerifyOrder } from '@/common/verify.js'
 
 	// 个人中心「民宿管理」不展示的入口：发布房源、订阅消息。
 	const HIDDEN_MERCHANT_MENU_KEYS = ['publish', 'subscriptions']
 	const HIDDEN_MERCHANT_MENU_ROUTES = ['/pages/merchant/publish', '/pages/merchant/messages']
+	// 订单列表是 tabBar 页，switchTab 不支持带参数，用一次性缓存把要看的分类传过去。
+	const ORDER_TAB_STORAGE_KEY = 'tcpms.orderListTab'
 
 	export default {
 		components: { ProtoBottomNav, ProtoIcon },
@@ -99,7 +102,7 @@
 				guests: [],
 				orderShortcuts: [
 					{ key: 'all', label: '全部', icon: 'wallet', badge: '' },
-					{ key: 'pay', label: '待付款', icon: 'clock', badge: '' },
+					{ key: 'pay', label: '待支付', icon: 'clock', badge: '' },
 					{ key: 'stay', label: '可使用', icon: 'receipt', badge: '' },
 					{ key: 'done', label: '已使用', icon: 'check-circle', badge: '' },
 					{ key: 'refund', label: '取消/退款', icon: 'refresh', badge: '' }
@@ -129,6 +132,24 @@
 			}
 		},
 		computed: {
+			merchantPanelVisible() {
+				return Boolean(this.loggedIn && this.merchant.enabled && this.merchant.status === 'approved')
+			},
+			merchantSummaryText() {
+				if (this.merchant.status === 'pending') return '资料审核中 · 审核期间门店和所有房间暂不展示'
+				if (this.merchant.status === 'rejected') return '资料未通过 · 请修改资料后重新提交'
+				return `已审核 · ${this.merchant.roomCount || 0} 间房源在管理`
+			},
+			merchantStatusLabel() {
+				if (this.merchant.status === 'pending') return '审核中'
+				if (this.merchant.status === 'rejected') return '未通过'
+				return '经营中'
+			},
+			merchantStatusIcon() {
+				if (this.merchant.status === 'pending') return 'clock'
+				if (this.merchant.status === 'rejected') return 'info'
+				return 'verified'
+			},
 			visibleFeatureEntries() {
 				const merchantApproved = this.loggedIn && this.merchant.enabled && this.merchant.status === 'approved'
 				return merchantApproved ? this.featureEntries.filter((item) => item.action !== 'apply') : this.featureEntries
@@ -208,10 +229,21 @@
 				this.merchantMenuError = false
 				try {
 					const items = await fetchMerchantPermissionMenus()
-					this.merchantEntries = items
+					const entries = items
 						.filter((item) => item.key && item.title && /^\/pages\/[A-Za-z0-9/_-]+$/.test(item.route || ''))
 						.filter((item) => !HIDDEN_MERCHANT_MENU_KEYS.includes(item.key) && !HIDDEN_MERCHANT_MENU_ROUTES.includes(item.route))
-						.map((item) => ({ ...item, icon: item.iconKey || 'store', iconUrl: item.iconUrl || '' }))
+						.map((item) => ({
+							...item,
+							icon: item.iconKey || 'store',
+							iconUrl: item.iconUrl || '',
+							route: item.key === 'property' || item.route === '/pages/merchant/index' ? '/pages/merchant/apply' : item.route
+						}))
+					if (!entries.some((item) => item.key === 'notice' || item.route === '/pages/merchant/notice')) {
+						const settingsIndex = entries.findIndex((item) => item.key === 'settings')
+						const noticeEntry = { key: 'notice', title: '预定须知', icon: 'document', iconUrl: '', route: '/pages/merchant/notice' }
+						entries.splice(settingsIndex >= 0 ? settingsIndex + 1 : entries.length, 0, noticeEntry)
+					}
+					this.merchantEntries = entries
 				} catch (error) {
 					this.merchantEntries = []
 					this.merchantMenuError = true
@@ -226,7 +258,7 @@
 				this.guests = getGuests()
 				this.orderShortcuts = [
 					{ key: 'all', label: '全部', icon: 'wallet', badge: String(this.orders.length) },
-					{ key: 'pay', label: '待付款', icon: 'clock', badge: String(this.orders.filter((order) => order.statusKey === 'pay').length) },
+					{ key: 'pay', label: '待支付', icon: 'clock', badge: String(this.orders.filter((order) => order.statusKey === 'pay').length) },
 					{ key: 'stay', label: '可使用', icon: 'receipt', badge: String(this.orders.filter((order) => order.statusKey === 'stay').length) },
 					{ key: 'done', label: '已使用', icon: 'check-circle', badge: String(this.orders.filter((order) => order.statusKey === 'done').length) },
 					{ key: 'refund', label: '取消/退款', icon: 'refresh', badge: String(this.orders.filter((order) => ['refund', 'cancel'].includes(order.statusKey)).length) }
@@ -289,6 +321,11 @@
 					showToast('该功能将在商家服务完善后开放')
 					return
 				}
+				// 扫码核销已改为直接唤起微信扫码，不再进入单独的核销页。
+				if (item.key === 'verify' || item.route === '/pages/merchant/verify') {
+					scanAndVerifyOrder()
+					return
+				}
 				if (item.route) {
 					goPage(item.route)
 				}
@@ -318,7 +355,13 @@
 				}
 				showToast(item.message || '暂无可用信息')
 			},
-			goOrders() {
+			// 点哪个分类（待支付/可使用…）就带着它进订单页，而不是永远打开「全部」。
+			goOrders(tab = 'all') {
+				try {
+					uni.setStorageSync(ORDER_TAB_STORAGE_KEY, String(tab || 'all'))
+				} catch (error) {
+					// 缓存写失败不影响跳转，订单页会退回「全部」。
+				}
 				goTab('/pages/order/list')
 			},
 			goTodayOrder() {
@@ -719,6 +762,16 @@
 		border-radius: 20rpx;
 		font-size: 18rpx;
 		font-weight: 700;
+	}
+
+	.merchant-summary-status.pending {
+		color: #8a5a12;
+		background: #fff7e8;
+	}
+
+	.merchant-summary-status.rejected {
+		color: #a13f3f;
+		background: #fff0f0;
 	}
 
 	.merchant-grid {

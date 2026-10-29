@@ -10,9 +10,14 @@
 					<text class="merchant-property-sub">{{ storeSubtitle }}</text>
 				</view>
 			</view>
-			<button class="merchant-property-switch" hover-class="none" @tap="switchProperty">
-				<text>切换门店</text><ProtoIcon name="chevron-down" :size="20" />
+			<button class="merchant-property-switch" hover-class="none" @tap="editProfile">
+				<text>编辑资料</text><ProtoIcon name="edit" :size="20" />
 			</button>
+		</view>
+
+		<view v-if="status === 'pending'" class="merchant-status-banner">
+			<ProtoIcon name="clock" :size="22" />
+			<text>资料审核中，审核期间门店所有房间暂不展示。</text>
 		</view>
 
 		<view class="merchant-highlight">
@@ -41,12 +46,14 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { goPage, showToast } from '@/common/prototype.js'
 	import { fetchMerchantProfile } from '@/common/api.js'
+	import { scanAndVerifyOrder } from '@/common/verify.js'
 
 	export default {
 		components: { ProtoHeader, ProtoIcon },
 		data() {
 			return {
 				pendingCount: 0,
+				status: '',
 				storeName: '门店加载中',
 				storeSubtitle: '正在同步门店资料',
 				modules: [
@@ -58,6 +65,7 @@
 					{ key: 'staff', title: '员工管理', caption: '协同运营成员', icon: 'group', route: '/pages/merchant/staff' },
 					{ key: 'publish', title: '发布房源', caption: '创建新房型', icon: 'plus', route: '/pages/merchant/publish' },
 					{ key: 'settings', title: '民宿设置', caption: '基础资料与规则', icon: 'settings', route: '/pages/merchant/settings' },
+					{ key: 'notice', title: '预定须知', caption: '入住与退改规则', icon: 'document', route: '/pages/merchant/notice' },
 					{ key: 'reviews', title: '评价管理', caption: '维护住客口碑', icon: 'star', route: '/pages/merchant/reviews' },
 					{ key: 'coupon', title: '优惠券管理', caption: '配置优惠活动', icon: 'document', route: '/pages/merchant/coupons' },
 					{ key: 'messages', title: '订阅消息', caption: '运营通知管理', icon: 'support', route: '/pages/merchant/messages' }
@@ -67,12 +75,19 @@
 		async onShow() {
 			try {
 				const profile = await fetchMerchantProfile()
-				if (!profile || !profile.enabled) {
+				if (!profile || !profile.storeId) {
 					showToast('当前账号尚未绑定门店')
 					return
 				}
+				this.status = profile.status || ''
 				this.storeName = profile.storeName || '我的民宿'
-				this.storeSubtitle = `已入驻 · ${profile.roomCount || 0} 个房型 · ${profile.city || ''}`
+				if (this.status === 'pending') {
+					this.storeSubtitle = `审核中 · ${profile.roomCount || 0} 个房型`
+				} else if (this.status === 'rejected') {
+					this.storeSubtitle = '资料未通过 · 请修改后重新提交'
+				} else {
+					this.storeSubtitle = `已入驻 · ${profile.roomCount || 0} 个房型 · ${profile.city || ''}`
+				}
 				this.pendingCount = Number(profile.pendingOrderCount || 0)
 			} catch (error) {
 				showToast(error?.message || '门店资料同步失败')
@@ -80,6 +95,10 @@
 		},
 		methods: {
 			openModule(item) {
+				if (item.key === 'verify' || item.route === '/pages/merchant/verify') {
+					scanAndVerifyOrder()
+					return
+				}
 				if (item.route) {
 					goPage(item.route)
 					return
@@ -89,8 +108,8 @@
 			goOrders() {
 				goPage('/pages/merchant/orders')
 			},
-			switchProperty() {
-				showToast(this.storeName)
+			editProfile() {
+				goPage('/pages/merchant/apply')
 			}
 		}
 	}
@@ -176,6 +195,20 @@
 		border-radius: 29rpx;
 		font-size: 20rpx;
 		white-space: nowrap;
+	}
+
+	.merchant-status-banner {
+		display: flex;
+		align-items: center;
+		gap: 10rpx;
+		margin: 14rpx 24rpx 0;
+		padding: 16rpx 18rpx;
+		color: #8a5a12;
+		background: #fff7e8;
+		border: 1rpx solid #f3d9a4;
+		border-radius: 16rpx;
+		font-size: 19rpx;
+		line-height: 1.45;
 	}
 
 	.merchant-highlight {

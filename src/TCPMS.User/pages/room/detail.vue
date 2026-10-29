@@ -3,7 +3,7 @@
 		<view class="room-detail-hero">
 			<image :src="roomImages[0] || room.image" mode="aspectFill"></image>
 			<view class="hero-shade"></view>
-			<button class="hero-back-button" hover-class="none" aria-label="返回" @tap="goBack">
+			<button class="hero-back-button" hover-class="none" aria-label="返回" :style="{ top: backButtonTop }" @tap.stop="goBack">
 				<ProtoIcon name="back" tone="white" :size="38" />
 			</button>
 			<text class="hero-photo-count">1 / {{ roomImages.length || 1 }}</text>
@@ -13,9 +13,9 @@
 		</view>
 
 		<view class="room-hero-summary">
-			<view class="room-store-bar" @tap="openLocation">
+			<view class="room-store-bar">
 				<view class="room-store-title-row">
-					<ProtoIcon name="store" :size="22" />
+					<ProtoIcon name="store" :size="24" />
 					<text class="room-store-name">{{ store.name || '门店信息加载中' }}</text>
 					<text v-if="store.status" class="room-store-status">{{ store.status }}</text>
 				</view>
@@ -23,7 +23,6 @@
 					<text v-if="store.rating">{{ store.rating }} 分</text>
 					<text v-if="store.reviews">{{ store.reviews }} 条门店评价</text>
 					<text v-if="store.distance && !store.unknownDistance">距您 {{ store.distance }}</text>
-					<view class="room-store-link"><text>门店位置</text><ProtoIcon name="chevron-right" :size="16" /></view>
 				</view>
 			</view>
 			<view class="detail-title-row">
@@ -32,17 +31,28 @@
 					<text class="room-detail-subtitle">静谧采光 · 独立卫浴 · 入住更安心</text>
 				</view>
 			</view>
-			<view class="room-detail-tags">
-				<text v-for="tag in detailTags" :key="tag">{{ tag }}</text>
+			<view v-if="roomMetaTags.length" class="room-detail-tags room-meta-tags">
+				<text v-for="tag in roomMetaTags" :key="tag">{{ tag }}</text>
+			</view>
+			<view v-if="roomTags.length" class="room-detail-tags room-tag-list">
+				<text v-for="tag in roomTags" :key="tag">#{{ tag }}</text>
 			</view>
 			<view class="detail-highlight-grid">
 				<view class="detail-highlight review-highlight" @tap="goReviews">
-					<view class="highlight-value"><ProtoIcon name="star" :size="25" /><text>{{ roomRatingLabel }} 超棒</text></view>
-					<text>{{ reviewSummary.reviewCount }}条真实评价</text>
+					<view class="review-highlight-head">
+						<ProtoIcon name="star" :size="27" />
+						<text class="review-score">{{ reviewScoreText }}</text>
+						<text class="review-count">{{ reviewSummary.reviewCount }}条</text>
+					</view>
+					<text class="review-quote">{{ reviewQuote }}</text>
 				</view>
 				<view class="detail-highlight location-highlight" @tap="openLocation">
-					<view class="highlight-value"><ProtoIcon name="location" :size="25" /><text>{{ store.distance && !store.unknownDistance ? `距您 ${store.distance}` : '民宿位置' }}</text></view>
-					<text>{{ store.address || '郑州市中心 · 交通便利' }}</text>
+					<text class="location-title-line">{{ locationTitle }}</text>
+					<text class="location-address-line">{{ store.address || '郑州市中心，出行便利' }}</text>
+					<view class="location-map-action">
+						<view class="location-map-button"><ProtoIcon name="location" tone="white" :size="24" /></view>
+						<text class="location-map-label">地图</text>
+					</view>
 				</view>
 			</view>
 		</view>
@@ -81,26 +91,38 @@
 					<button class="room-book-button" hover-class="none" @tap.stop="goBooking"><text>订</text></button>
 				</view>
 			</view>
-			<view class="room-choice-footer"><ProtoIcon name="check-circle" :size="20" /><text>{{ room.availability || '今日可预订' }}</text></view>
+			<view class="room-choice-footer" :class="currentStock ? `is-${currentStock.tone}` : ''">
+				<ProtoIcon name="check-circle" :size="20" />
+				<text>{{ currentStockText }}</text>
+				<text v-if="currentStockTotal" class="room-choice-total">共 {{ currentStockTotal }} 间</text>
+			</view>
 		</view>
 
 		<view class="proto-card other-room-card">
-			<view class="section-heading"><text>其他房型</text><text class="proto-link">{{ otherRooms.length }}间可选</text></view>
-			<view v-for="item in otherRooms" :key="item.id" class="other-room-item" @tap="goOtherRoom(item)">
+			<view class="section-heading"><text>其他房型</text><text class="proto-link">{{ otherRoomList.length }}间可选</text></view>
+			<view v-for="item in otherRoomList" :key="item.id" class="other-room-item" @tap="goOtherRoom(item)">
 				<image :src="item.image" mode="aspectFill"></image>
-				<view class="other-room-copy"><text class="other-room-title">{{ item.name }}</text><text class="other-room-spec">{{ item.capacity }} · {{ item.area }}</text><view class="other-room-tags"><text v-for="tag in (item.tags || []).slice(0, 2)" :key="tag">{{ tag }}</text></view></view>
+				<view class="other-room-copy">
+					<text class="other-room-title">{{ item.name }}</text>
+					<text class="other-room-spec">{{ item.capacity }} · {{ item.area }}</text>
+					<view class="other-room-tags"><text v-for="tag in (item.tags || []).slice(0, 2)" :key="tag">{{ tag }}</text></view>
+					<text v-if="item.stock" class="other-room-stock" :class="`is-${item.stock.tone}`">{{ item.stock.short || item.stock.text }}</text>
+				</view>
 				<view class="other-room-price"><text>¥{{ item.price }}</text><text>/晚</text><button class="other-room-button" hover-class="none" @tap.stop="bookOtherRoom(item)"><text>订</text></button></view>
 			</view>
 		</view>
 
 		<view class="proto-card feature-card">
 			<view class="section-heading"><text>房屋特色</text><text class="proto-caption">让每次入住都更舒服</text></view>
-			<text class="feature-copy">{{ store.description || '静谧采光，干净整洁，适合短住与周末放松。' }}</text>
+			<text class="feature-copy">{{ room.description || '房东暂未填写房屋介绍' }}</text>
 		</view>
 
 		<view class="proto-card facilities-card">
 			<view class="section-heading"><text>服务与设施</text><text class="proto-caption">已为你准备</text></view>
-			<view v-for="group in facilityGroups" :key="group.title" class="facility-group"><text class="facility-group-title">{{ group.title }}</text><view class="facility-items"><view v-for="item in group.items" :key="item"><ProtoIcon name="check-circle" :size="26" /><text>{{ item }}</text></view></view></view>
+			<view v-if="facilityGroups.length" class="facility-groups">
+				<view v-for="group in facilityGroups" :key="group.title" class="facility-group"><text class="facility-group-title">{{ group.title }}</text><view class="facility-items"><view v-for="item in group.items" :key="item"><ProtoIcon name="check-circle" :size="26" /><text>{{ item }}</text></view></view></view>
+			</view>
+			<text v-else class="facility-empty">暂无服务与设施信息</text>
 		</view>
 
 		<view class="proto-card policy-card">
@@ -175,8 +197,8 @@
 	import ProtoHeader from '@/components/ProtoHeader.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { demoRooms, demoStores, goPage, showToast } from '@/common/prototype.js'
-	import { getBooking, getFavorites, getRoomReviewSummary, saveBooking, toggleFavorite } from '@/common/app-store.js'
-	import { addMyFavorite, fetchMyFavorites, fetchRoomReviews, fetchStoreDetail, recordMyRecent, removeMyFavorite } from '@/common/api.js'
+	import { getBooking, getFavorites, getRoomReviewSummary, getRoomReviews, saveBooking, toggleFavorite } from '@/common/app-store.js'
+	import { addMyFavorite, fetchMyFavorites, fetchRoomAvailability, fetchRoomReviews, fetchStoreDetail, recordMyRecent, removeMyFavorite } from '@/common/api.js'
 	import { openBookingConfirm } from '@/common/navigation.js'
 	import { ALLOW_DEMO_DATA } from '@/common/env.js'
 	import { geocodeAddress, searchNearby } from '@/common/amap.js'
@@ -194,6 +216,32 @@
 
 	// 坐标彻底拿不到时的兜底视野，避免地图白屏。
 	const CITY_CENTER = { latitude: 34.74725, longitude: 113.62493 }
+
+	// 房型库存：取入住区间内「每日可售量」的最小值，连住时最紧的那天决定最多能订几间。
+	// 文案里一定带上数字（满房也要显示「可订 0 间」），否则用户看不出这是实时库存还是没查到。
+	const inventoryLabel = (available, total) => {
+		const count = Number(available)
+		if (!Number.isFinite(count)) return null
+		const availableCount = Math.max(0, Math.floor(count))
+		const totalCount = Number.isFinite(Number(total)) && Number(total) > 0 ? Math.floor(Number(total)) : null
+		if (availableCount <= 0) {
+			return { text: '已满房 · 可订 0 间', short: '已满房 · 0 间', tone: 'full', available: 0, total: totalCount }
+		}
+		if (availableCount <= 3) {
+			const text = `仅剩 ${availableCount} 间`
+			return { text, short: text, tone: 'low', available: availableCount, total: totalCount }
+		}
+		const text = `可订 ${availableCount} 间`
+		return { text, short: text, tone: 'ok', available: availableCount, total: totalCount }
+	}
+
+	// 接口只要日期部分（YYYY-MM-DD），booking 里可能带 T00:00:00。
+	const dateKeyOf = (value) => {
+		const matched = String(value || '').match(/^\d{4}-\d{2}-\d{2}/)
+		return matched ? matched[0] : ''
+	}
+
+	const isRemoteRoomId = (value) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(value || ''))
 
 	const getDateContext = (isoDate, fallback) => {
 		const parts = String(isoDate || '').split('T')[0].split('-').map(Number)
@@ -218,12 +266,16 @@
 				storeId: getBooking().storeId || '',
 				favorite: false,
 				booking: getBooking(),
+				bookingNotice: null,
 				reviewSummary: {
 					roomAverageRating: 0,
 					storeAverageRating: 0,
 					reviewCount: 0
 				},
+				latestReviewText: '',
 				showScrollHeader: false,
+				// 状态栏高度（rpx）：返回按钮要落在状态栏下方，避免被系统栏吞掉点击。
+				statusBarHeightRpx: 0,
 				openPolicies: ['checkin', 'cancel'],
 				mapCenter: { ...CITY_CENTER },
 				mapScale: 14,
@@ -235,29 +287,20 @@
 				nearbyPlaces: [],
 				nearbyLoading: false,
 				selectedPlace: null,
-				facilityGroups: [
-					{ title: '服务', items: ['围炉煮茶', '前台接待', '行李寄存', '免费停车'] },
-					{ title: '基础', items: ['零食、饮品', '网络电视', '空调', '窗户', '无线网络'] },
-					{ title: '卫浴', items: ['电吹风', '独立卫浴', '热水'] },
-					{ title: '周边', items: ['医院', '商场', '超市'] }
-				],
-				policies: [
-					{
-						key: 'checkin',
-						icon: 'clock',
-						title: '入住离店与安保须知',
-						lines: ['入离时间：当日14:00以后办理入住，次日12:00之前办理退房。', '押金政策：免收住宿押金，入住需办理居民身份证实名核验。', '环境守则：房内全面禁烟，严禁携带宠物，22:00后请调低音量。']
-					},
-					{
-						key: 'cancel',
-						icon: 'refresh',
-						title: '取消与退改说明',
-						lines: ['免费取消：入住日前1天18:00前申请，支持免费无条件全额退还。', '逾期扣减：超过规定时间取消或未如期入住，将扣除首晚房费。']
-					}
-				]
+				// 库存：roomId -> { text, tone, available }；查询中先占位，避免列表闪空。
+				inventoryMap: {},
+				// 已查询的日期区间，日期一变就整体重查。
+				inventoryDateKey: '',
+				// 同一 roomId+日期只请求一次（onLoad / onShow 会重复触发）。
+				inventoryCache: {}
 			}
 		},
 		computed: {
+			// 顶部图片没有导航栏，返回按钮要自己避开状态栏（与 ProtoHeader 的 88rpx 导航条对齐）。
+			backButtonTop() {
+				const statusBar = Number(this.statusBarHeightRpx) || 40
+				return `${statusBar + 12}rpx`
+			},
 			roomImages() {
 				const raw = this.room && (this.room.images || this.room.imageUrls || this.room.gallery || this.room.photos)
 				const values = (Array.isArray(raw) ? raw : [])
@@ -265,14 +308,60 @@
 				const fallback = this.room && this.room.image ? [this.room.image] : []
 				return [...new Set([...values, ...fallback].filter(Boolean))].slice(0, 6)
 			},
-			detailTags() {
+			isBed() {
 				const room = this.room || {}
-				return [...new Set([room.type, room.gender, room.capacity, room.beds, room.area ? `建筑面积 ${room.area}` : '', '有外窗'].filter(Boolean))].slice(0, 6)
+				return room.kind === 'Bed' || String(room.type || '').includes('床位')
+			},
+			genderLabel() {
+				const value = this.room && this.room.gender
+				const labels = { Any: '不限性别', Female: '女生专区', Male: '男生专区' }
+				return labels[value] || (value ? String(value) : '不限性别')
+			},
+			roomMetaTags() {
+				const room = this.room || {}
+				const tags = [room.roomCategory]
+				if (this.isBed) tags.push(this.genderLabel)
+				tags.push(room.layout)
+				return [...new Set(tags.filter(Boolean))]
+			},
+			roomTags() {
+				return Array.isArray(this.room && this.room.tags) ? this.room.tags.filter(Boolean) : []
+			},
+			facilityGroups() {
+				const room = this.room || {}
+				const groups = [
+					{ title: '民宿服务', items: room.services },
+					{ title: '基础设施', items: room.facilities },
+					{ title: '卫浴设施', items: room.bathroomFacilities },
+					{ title: '周边设施', items: room.nearbyFacilities }
+				]
+				return groups
+					.map((group) => ({ title: group.title, items: Array.isArray(group.items) ? group.items.filter(Boolean) : [] }))
+					.filter((group) => group.items.length)
 			},
 			otherRooms() {
 				if (this.relatedRooms.length) return this.relatedRooms
 				if (!ALLOW_DEMO_DATA) return []
 				return demoRooms.filter((item) => String(item.id) !== String(this.room && this.room.id))
+			},
+			// 其他房型列表挂上各自的库存文案，模板里直接取，避免在 wxml 里做判断。
+			otherRoomList() {
+				return this.otherRooms.map((item) => ({
+					...item,
+					stock: this.inventoryMap[String(item.id)] || null
+				}))
+			},
+			currentStock() {
+				return this.inventoryMap[String(this.room && this.room.id)] || null
+			},
+			currentStockText() {
+				if (this.currentStock && this.currentStock.text) return this.currentStock.text
+				return this.room.availability || '今日可预订'
+			},
+			// 区间内每日总房量的最小值，用来告诉用户「一共只有几间」，满房时也能看出数字来源。
+			currentStockTotal() {
+				const stock = this.currentStock
+				return stock && stock.total ? stock.total : null
 			},
 			checkInContext() {
 				return getDateContext(this.booking.isoCheckIn, '入住')
@@ -283,14 +372,69 @@
 			roomRatingLabel() {
 				return Number(this.reviewSummary.roomAverageRating || 0).toFixed(1)
 			},
+			reviewQuote() {
+				const text = String(this.latestReviewText || '').trim()
+				if (!text) return '暂无评价，期待你的入住分享'
+				return `“${text}”`
+			},
+			reviewScoreText() {
+				const count = Number(this.reviewSummary.reviewCount || 0)
+				return count ? `${this.roomRatingLabel}超棒` : '暂无评分'
+			},
+			// 地址形如「上海市上海市松江区余山镇…」，取「市 + 区/县」作为定位卡标题。
+			locationTitle() {
+				const raw = String(this.store.address || '').trim()
+				if (!raw) return this.store.name || '民宿位置'
+				// 去掉重复的市前缀：上海市上海市松江区 → 上海市松江区
+				const address = raw.replace(/^([^省]{2,6}市)\1/, '$1')
+				const cityMatch = address.match(/(?:^|省)([^省市]{2,6}市)/)
+				const city = cityMatch ? cityMatch[1] : ''
+				const cityStart = cityMatch ? cityMatch.index + (cityMatch[0].length - city.length) : 0
+				const rest = city ? address.slice(cityStart + city.length) : address
+				const districtMatch = rest.match(/^[^区县]{1,8}[区县]/) || rest.match(/[^区县]{1,8}[区县]/)
+				const district = districtMatch ? districtMatch[0] : ''
+				if (city && district) return `${city}·${district}`
+				if (city) return city
+				if (district) return district
+				return address.length > 14 ? `${address.slice(0, 14)}…` : address
+			},
 			locationNote() {
 				const place = this.selectedPlace
 				if (place) return `${place.typeLabel} · 距离民宿约 ${this.formatDistance(place.distance)}`
 				if (this.nearbyPlaces.length) return `周边 ${this.nearbyPlaces.length} 个地点，点击标签可定位`
 				return '步行可达餐饮、商圈与公共交通'
+			},
+			policies() {
+				const notice = this.bookingNotice || {}
+				const splitLines = (value) => String(value || '')
+					.split(/\r?\n/)
+					.map((line) => line.trim())
+					.filter(Boolean)
+				const checkInLines = splitLines(notice.checkInNotice)
+				const cancelLines = splitLines(notice.cancelNotice)
+				return [
+					{
+						key: 'checkin',
+						icon: 'clock',
+						title: '入住离店须知',
+						lines: checkInLines.length ? checkInLines : ['民宿暂未填写']
+					},
+					{
+						key: 'cancel',
+						icon: 'refresh',
+						title: '取消退改通知',
+						lines: cancelLines.length ? cancelLines : ['民宿暂未填写']
+					}
+				]
 			}
 		},
 		async onLoad(options) {
+			try {
+				const info = uni.getSystemInfoSync()
+				this.statusBarHeightRpx = Math.round((Number(info.statusBarHeight) || 0) * 750 / (Number(info.windowWidth) || 375))
+			} catch (error) {
+				this.statusBarHeightRpx = 0
+			}
 			const requestedRoomId = options && options.id
 			const localRoom = demoRooms.find((item) => String(item.id) === String(requestedRoomId))
 			if (localRoom) this.room = localRoom
@@ -298,10 +442,12 @@
 			const localStore = demoStores.find((item) => String(item.id) === String(this.storeId))
 			if (localStore) this.store = localStore
 			this.reviewSummary = getRoomReviewSummary(this.room.id, this.storeId)
+			this.syncLocalLatestReview()
 			if (this.storeId && (!localStore || !localRoom)) {
 				try {
 					const result = await fetchStoreDetail(this.storeId)
 					if (result.store) this.store = result.store
+					if (result.bookingNotice) this.bookingNotice = result.bookingNotice
 					const remoteRoom = result.rooms.find((item) => String(item.id) === String(requestedRoomId))
 					if (remoteRoom) this.room = remoteRoom
 					else if (result.rooms.length) {
@@ -310,16 +456,21 @@
 					}
 					this.relatedRooms = result.rooms.filter((item) => String(item.id) !== String(this.room.id))
 				} catch (error) {
-					// Keep the bundled room detail available when the API is offline.
+					// 门店审核中/下架时接口返回 store_not_found，不再回退演示房型。
+					if (error?.code === 'store_not_found') {
+						showToast('门店审核中或已下架')
+						setTimeout(() => {
+							uni.navigateBack({
+								delta: 1,
+								fail: () => uni.switchTab({ url: '/pages/index/index' })
+							})
+						}, 600)
+					}
 				}
 			}
 			this.reviewSummary = getRoomReviewSummary(this.room.id, this.storeId)
 			if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(this.room.id))) {
-				try {
-					this.reviewSummary = await fetchRoomReviews(this.room.id)
-				} catch (error) {
-					// Keep local review data available when the API is offline.
-				}
+				await this.refreshReviewSummary()
 			}
 			this.booking = saveBooking({
 				...this.booking,
@@ -341,12 +492,21 @@
 				image: this.room.image,
 				path: `/pages/room/detail?id=${this.room.id}&storeId=${this.storeId || ''}`
 			}).catch(() => {})
+			this.loadInventory()
 			this.prepareLocation()
 		},
 		onShow() {
 			this.booking = getBooking()
 			this.refreshFavoriteState()
-			this.reviewSummary = getRoomReviewSummary(this.room.id, this.storeId)
+			if (isRemoteRoomId(this.room.id)) {
+				// A local-only summary would overwrite the server rating whenever we return from reviews.
+				this.refreshReviewSummary()
+			} else {
+				this.reviewSummary = getRoomReviewSummary(this.room.id, this.storeId)
+				this.syncLocalLatestReview()
+			}
+			// 从日期页改完入住日期回来时，库存要按新日期重查。
+			this.loadInventory()
 		},
 		onShareAppMessage() {
 			// 底部「分享」按钮用 open-type="share" 触发，这里提供标题、路径与封面。
@@ -367,8 +527,101 @@
 			}
 		},
 		methods: {
+			async refreshReviewSummary() {
+				const roomId = String(this.room && this.room.id || '')
+				if (!isRemoteRoomId(roomId)) {
+					this.reviewSummary = getRoomReviewSummary(roomId, this.storeId)
+					this.syncLocalLatestReview()
+					return
+				}
+				try {
+					const response = await fetchRoomReviews(roomId)
+					if (String(this.room && this.room.id || '') !== roomId) return
+					this.reviewSummary = response
+					this.applyLatestReview(response.items)
+				} catch (error) {
+					// Keep the last known remote summary visible while offline.
+				}
+			},
+			// 评价卡右下角的引用文案：远端列表优先，其次本地评价。
+			applyLatestReview(items) {
+				const first = (Array.isArray(items) ? items : []).find((item) => item && String(item.content || '').trim())
+				if (first) this.latestReviewText = String(first.content).trim()
+			},
+			syncLocalLatestReview() {
+				const reviews = getRoomReviews(this.room.id, this.storeId)
+				const first = reviews.find((item) => item && String(item.content || '').trim())
+				if (first) this.latestReviewText = String(first.content).trim()
+			},
 			goBack() {
-				uni.navigateBack({ delta: 1 })
+				// 直接用页面路径编译/分享进来时页面栈只有 1 层，navigateBack 会静默失败，
+				// 表现就是「点了没反应」，这里兜底回首页。
+				const stack = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+				if (!stack || stack.length <= 1) {
+					uni.reLaunch({ url: '/pages/index/index' })
+					return
+				}
+				uni.navigateBack({
+					delta: 1,
+					fail: () => uni.reLaunch({ url: '/pages/index/index' })
+				})
+			},
+			// 库存展示：按当前入住日期查询「当前房型 + 其他房型」的可售数量。
+			// 查询失败不报错、也不清空已有值，只是不展示库存，避免影响主流程。
+			async loadInventory() {
+				const checkIn = dateKeyOf(this.booking.isoCheckIn)
+				const checkOut = dateKeyOf(this.booking.isoCheckOut)
+				if (!checkIn || !checkOut || checkOut <= checkIn) return
+				const dateKey = `${checkIn}|${checkOut}`
+				if (dateKey !== this.inventoryDateKey) {
+					this.inventoryDateKey = dateKey
+					this.inventoryMap = {}
+				}
+				const rooms = [this.room, ...this.otherRooms]
+					.filter((item) => item && isRemoteRoomId(item.id))
+				const missing = rooms.filter((item) => !this.inventoryMap[String(item.id)])
+				if (!missing.length) return
+				// 先给占位文案，列表里不会出现一段空白再突然冒出库存。
+				const placeholders = { ...this.inventoryMap }
+				missing.forEach((item) => {
+					placeholders[String(item.id)] = { text: '库存查询中…', tone: 'loading', available: null }
+				})
+				this.inventoryMap = placeholders
+
+				await Promise.all(missing.map(async (item) => {
+					const id = String(item.id)
+					const stock = await this.fetchInventory(id, checkIn, checkOut)
+					this.inventoryMap = {
+						...this.inventoryMap,
+						[id]: stock || { text: '', tone: 'unknown', available: null }
+					}
+				}))
+			},
+			fetchInventory(roomId, checkIn, checkOut) {
+				const key = `${roomId}|${checkIn}|${checkOut}`
+				if (!this.inventoryCache[key]) {
+					this.inventoryCache[key] = (async () => {
+						try {
+							const daily = await fetchRoomAvailability(roomId, checkIn, checkOut)
+							if (!Array.isArray(daily) || !daily.length) return null
+							const availableValues = daily
+								.map((item) => Number(item.availableQuantity))
+								.filter((value) => Number.isFinite(value))
+							if (!availableValues.length) return null
+							// 总房量同样取区间内最小值，与可售量保持同一天的口径。
+							const totalValues = daily
+								.map((item) => Number(item.totalQuantity))
+								.filter((value) => Number.isFinite(value) && value > 0)
+							return inventoryLabel(
+								Math.min(...availableValues),
+								totalValues.length ? Math.min(...totalValues) : null
+							)
+						} catch (error) {
+							return null
+						}
+					})()
+				}
+				return this.inventoryCache[key]
 			},
 			prepareBooking(room = this.room) {
 				const maxGuests = Number(room.maxGuests || 0) || null
@@ -932,8 +1185,9 @@
 		min-width: 0;
 		overflow: hidden;
 		color: var(--proto-primary-dark);
-		font-size: 25rpx;
-		font-weight: 700;
+		font-size: 28rpx;
+		font-weight: 800;
+		line-height: 1.3;
 		white-space: nowrap;
 		text-overflow: ellipsis;
 	}
@@ -952,16 +1206,9 @@
 		display: flex;
 		align-items: center;
 		flex-wrap: wrap;
-		gap: 12rpx;
+		gap: 16rpx;
 		color: var(--proto-muted);
-		font-size: 20rpx;
-	}
-
-	.room-store-link {
-		display: inline-flex;
-		align-items: center;
-		margin-left: auto;
-		color: var(--proto-primary-dark);
+		font-size: 21rpx;
 	}
 
 	.detail-title-row {
@@ -1003,53 +1250,132 @@
 		font-size: 18rpx;
 	}
 
+	.room-meta-tags text {
+		color: #0f6b6b;
+		background: #eef8f8;
+		border-color: rgba(24, 133, 143, 0.2);
+		font-size: 19rpx;
+		font-weight: 650;
+	}
+
+	.room-tag-list {
+		margin-top: 8rpx;
+	}
+
+	.room-tag-list text {
+		color: #5f7378;
+		background: #f5f9fa;
+		border-color: rgba(24, 133, 143, 0.12);
+		font-weight: 400;
+	}
+
 	.detail-highlight-grid {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 12rpx;
-		margin-top: 18rpx;
+		gap: 14rpx;
+		margin-top: 20rpx;
 	}
 
 	.detail-highlight {
+		position: relative;
 		min-width: 0;
-		padding: 15rpx 14rpx;
-		background: #f2f8f9;
-		border-radius: 16rpx;
+		padding: 18rpx 18rpx 20rpx;
+		background: #f5f6f7;
+		border-radius: 18rpx;
 	}
 
-	.detail-highlight .highlight-value {
+	// 评价卡：星级 + 评分 + 条数，下方引用最新一条评价。
+	.review-highlight-head {
 		display: flex;
 		align-items: center;
 		min-width: 0;
-		color: var(--proto-text);
-		font-size: 21rpx;
-		font-weight: 750;
+		gap: 6rpx;
 	}
 
-	.detail-highlight .highlight-value .proto-icon {
-		margin-right: 7rpx;
+	.review-highlight-head :deep(.proto-icon) {
 		flex: 0 0 auto;
+		// 染色为品牌主色 #2aa9a9（青绿）。
+		filter: brightness(0) saturate(100%) invert(72%) sepia(83%) saturate(984%) hue-rotate(122deg) brightness(75%) contrast(68%);
 	}
 
-	.review-highlight .highlight-value {
-		color: var(--proto-primary-dark);
+	.review-score {
+		min-width: 0;
+		overflow: hidden;
+		color: var(--proto-primary-deep, #18858f);
+		font-size: 33rpx;
+		font-weight: 850;
+		line-height: 1.1;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
-	.detail-highlight > text:last-child {
+	.review-count {
+		flex: 0 0 auto;
+		color: #9aa0a6;
+		font-size: 20rpx;
+	}
+
+	.review-quote {
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		overflow: hidden;
+		margin-top: 8rpx;
+		color: #4a5057;
+		font-size: 22rpx;
+		line-height: 1.5;
+		word-break: break-all;
+	}
+
+	// 定位卡：市·区县 + 完整地址，右侧圆形地图按钮。
+	.location-title-line {
 		display: block;
-		margin-top: 7rpx;
-		color: var(--proto-muted);
-		font-size: 17rpx;
 		overflow: hidden;
+		padding-right: 96rpx;
+		color: #1f2329;
+		font-size: 29rpx;
+		font-weight: 850;
+		line-height: 1.25;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
-	.location-highlight .highlight-value text,
-	.location-highlight > text:last-child {
+	.location-address-line {
+		display: block;
 		overflow: hidden;
+		padding-right: 96rpx;
+		margin-top: 6rpx;
+		color: #9aa0a6;
+		font-size: 20rpx;
+		line-height: 1.3;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.location-map-action {
+		position: absolute;
+		top: 14rpx;
+		right: 14rpx;
+		display: flex;
+		align-items: center;
+		flex-direction: column;
+		gap: 4rpx;
+	}
+
+	.location-map-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 50rpx;
+		height: 50rpx;
+		background: var(--proto-primary, #2aa9a9);
+		border-radius: 50%;
+	}
+
+	.location-map-label {
+		color: var(--proto-primary-deep, #18858f);
+		font-size: 20rpx;
+		line-height: 1.2;
 	}
 
 
@@ -1202,7 +1528,7 @@
 
 	.room-choice-footer > text {
 		min-width: 0;
-		color: var(--proto-primary-dark);
+		color: var(--proto-primary-dark, #006a6a);
 		font-size: 17rpx;
 	}
 
@@ -1210,6 +1536,56 @@
 		height: 58rpx;
 		padding: 0 18rpx;
 		font-size: 19rpx;
+	}
+
+	// 库存紧张 / 满房时换成警示色，正常库存保持主题绿。
+	.room-choice-footer.is-low > text {
+		color: #c2410c;
+		font-weight: 600;
+	}
+
+	.room-choice-footer.is-full > text {
+		color: var(--proto-error, #ef4444);
+		font-weight: 600;
+	}
+
+	.room-choice-footer.is-loading > text {
+		color: var(--proto-muted, #6f8085);
+	}
+
+	// 右侧总房量：始终弱化，不跟随紧张/满房的警示色。
+	.room-choice-footer > text.room-choice-total {
+		margin-left: auto;
+		color: var(--proto-muted, #6b7280);
+		font-size: 17rpx;
+		font-weight: 500;
+	}
+
+	.other-room-stock {
+		display: inline-block;
+		margin-top: 6rpx;
+		padding: 2rpx 10rpx;
+		color: var(--proto-primary-dark);
+		background: rgba(42, 169, 169, 0.1);
+		border-radius: 8rpx;
+		font-size: 17rpx;
+		font-weight: 600;
+		line-height: 1.5;
+	}
+
+	.other-room-stock.is-low {
+		color: #c2410c;
+		background: rgba(234, 88, 12, 0.12);
+	}
+
+	.other-room-stock.is-full {
+		color: var(--proto-error);
+		background: rgba(220, 38, 38, 0.1);
+	}
+
+	.other-room-stock.is-loading {
+		color: var(--proto-muted);
+		background: rgba(148, 163, 184, 0.16);
 	}
 
 	.other-room-item {
@@ -1289,11 +1665,13 @@
 	}
 
 	.facility-group-title {
-		width: 80rpx;
-		flex: 0 0 80rpx;
+		width: 112rpx;
+		flex: 0 0 112rpx;
 		color: var(--proto-text);
 		font-size: 24rpx;
 		font-weight: 750;
+		line-height: 1.35;
+		white-space: nowrap;
 	}
 
 	.facility-items {
@@ -1312,6 +1690,13 @@
 
 	.facility-items .proto-icon {
 		margin-right: 7rpx;
+	}
+
+	.facility-empty {
+		display: block;
+		margin-top: 16rpx;
+		color: #6f8085;
+		font-size: 20rpx;
 	}
 
 	.policy-card .policy-item {
@@ -1519,12 +1904,24 @@
 	}
 
 	.room-bottom-actions .detail-bottom-link {
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		width: 88rpx;
+		height: 74rpx;
 		flex: 0 0 88rpx;
 		flex-direction: column;
-		gap: 6rpx;
+		gap: 4rpx;
+		margin: 0;
+		padding: 0;
 		color: var(--proto-muted);
+		// 微信 button 默认 line-height 2.55，会把图标和文字整体顶偏。
 		font-size: 21rpx;
+		line-height: 1;
+	}
+
+	.room-bottom-actions .detail-bottom-link text {
+		line-height: 1;
 	}
 
 	.room-bottom-actions .detail-bottom-link .proto-icon {
@@ -1533,10 +1930,20 @@
 
 
 	.room-bottom-actions .proto-primary-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		min-width: 168rpx;
 		height: 74rpx;
+		margin: 0;
+		padding: 0 20rpx;
 		flex: 1;
 		font-size: 22rpx;
+		line-height: 1;
+	}
+
+	.room-bottom-actions .proto-primary-button text {
+		line-height: 1;
 	}
 
 	/* Final detail-page controls: keep labels visible across mp-weixin button resets. */
@@ -1681,11 +2088,16 @@
 		line-height: 1.45;
 	}
 
-	.room-detail-page .detail-highlight,
 	.room-detail-page .stay-strip,
 	.room-detail-page .room-choice-footer {
 		background: #f1f8f9;
 		border-color: rgba(42, 169, 169, 0.12);
+	}
+
+	// 评价 / 定位卡用中性浅灰，突出橙色评分与地图按钮。
+	.room-detail-page .detail-highlight {
+		background: #f5f6f7;
+		border-color: transparent;
 	}
 
 	.room-detail-page .room-choice-footer {
@@ -1853,20 +2265,23 @@
 	/* Keep the first viewport focused on the room image. The full title bar appears after scrolling. */
 	.room-detail-page .hero-back-button {
 		position: absolute;
-		top: 76rpx;
+		/* 真实位置由 backButtonTop 按状态栏高度计算，这里只做无 JS 时的兜底。 */
+		top: 104rpx;
 		left: 24rpx;
-		z-index: 6;
+		z-index: 20;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 64rpx;
-		height: 64rpx;
+		width: 72rpx;
+		height: 72rpx;
 		margin: 0;
 		padding: 0;
 		color: #ffffff;
 		background: rgba(0, 55, 67, 0.42);
 		border: 1rpx solid rgba(255, 255, 255, 0.24);
 		border-radius: 50%;
+		// 微信 button 默认 line-height 2.55 会把里层图标顶偏，这里统一压成 1。
+		line-height: 1;
 	}
 
 	.room-detail-page .room-scroll-header {
@@ -1875,7 +2290,6 @@
 		right: 0;
 		left: 0;
 		z-index: 60;
-		pointer-events: none;
 	}
 
 	.room-detail-page .room-scroll-header .proto-header {
@@ -1886,7 +2300,6 @@
 		background: #2aa9a9 !important;
 		border-bottom-color: rgba(255, 255, 255, 0.18) !important;
 		box-shadow: 0 6rpx 18rpx rgba(0, 106, 106, 0.16);
-		pointer-events: auto;
 	}
 
 	.room-detail-page .room-scroll-header .proto-header-title,

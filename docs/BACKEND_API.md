@@ -52,6 +52,7 @@ Authorization: Bearer <JWT>
 | GET | /api/v1/auth/me | miniapp | 查询当前微信用户资料 |
 | POST | /api/v1/auth/phone | miniapp | 使用微信手机号授权凭证绑定手机号 |
 | POST | /api/v1/auth/avatar | miniapp | 上传当前用户头像并保存到本地文件目录 |
+| POST | /api/v1/reviews/images | miniapp | 上传评价图片（multipart `file`），返回 `{ url }`，用于评价提交前替换本机临时路径 |
 | GET | /api/v1/map/config | 无 | 返回高德小程序 Key 是否启用和默认附近半径 |
 
 登录请求模型：
@@ -127,7 +128,7 @@ AvailabilityItem 字段：date、totalQuantity、lockedQuantity、soldQuantity�
 | GET | /api/v1/orders/me | 当前用户订单列表 |
 | GET | /api/v1/orders/{id} | 当前用户订单详情 |
 | POST | /api/v1/orders/{id}/cancel | 仅待支付订单可取消 |
-| POST | /api/v1/orders/{id}/pay | 创建微信小程序 JSAPI 支付参数 |
+| POST | /api/v1/orders/{id}/pay | 创建微信小程序 JSAPI 支付参数，可带 `{ code }`（uni.login 凭证）换成真实 openid |
 | POST | /api/v1/orders/{id}/mock-pay | 开发环境模拟支付 |
 | POST | /api/v1/orders/{id}/refunds | CreateRefundRequest，创建退款申请 |
 | GET | /api/v1/orders/{id}/refunds | 当前用户退款记录 |
@@ -137,6 +138,17 @@ AvailabilityItem 字段：date、totalQuantity、lockedQuantity、soldQuantity�
 - OrderQuoteRequest：storeId、roomTypeId、checkIn、checkOut、quantity、guestCount。
 - CreateOrderRequest：以上字段加 guestSnapshotJson。
 - CreateRefundRequest：amountCents、reason。
+
+发起支付（`POST /orders/{id}/pay`）可以带请求体 `{ "code": "<uni.login 的 code>" }`：服务端会用它换取当前微信账号的真实 openid 作为 payer，换取失败时回退到登录态里的 openid。开发态固定账号 `dev-user-001` 不是有效 openid，微信会直接以 `PARAM_ERROR 无效的openid` 拒单；前端因此每次发起支付前都会 `uni.login` 拿新鲜 code。
+
+支付错误码：
+
+| HTTP | code | 含义 |
+| --- | --- | --- |
+| 400 | order_not_payable / order_payment_expired / wechat_openid_missing | 订单不可支付、支付超时、登录态缺 openid |
+| 502 | wechat_pay_rejected | 微信明确拒单，message 里带微信原因（如「无效的openid（PARAM_ERROR）」） |
+| 503 | wechat_pay_not_configured | 商户号、证书、API v3 Key、回调地址未配齐 |
+| 503 | wechat_pay_unavailable | 网络层调用微信支付失败 |
 
 微信支付回调：
 
@@ -151,7 +163,7 @@ AvailabilityItem 字段：date、totalQuantity、lockedQuantity、soldQuantity�
 | GET | /api/v1/admin/integrations | admin | 返回微信支付和高德地图脱敏配置状态 |
 | POST | /api/v1/admin/integrations/{provider}/test | admin | `provider` 为 `wechat` 或 `amap`，测试外部服务连接 |
 
-OrderQuote 包含 nights、quantity、guestCount、totalAmountCents、dailyItems。OrderListItem 包含 id、orderNumber、storeId、roomTypeId、storeName、roomTypeName、checkIn、checkOut、quantity、totalAmountCents、status、paymentStatus、createdAt、hasReview。
+OrderQuote 包含 nights、quantity、guestCount、totalAmountCents、dailyItems。OrderListItem 包含 id、orderNumber、storeId、roomTypeId、storeName、roomTypeName、checkIn、checkOut、quantity、totalAmountCents、status、paymentStatus、createdAt、hasReview、guestSnapshotJson。其中 createdAt 统一按 UTC 序列化（带 Z），小程序端再转本地时间展示；guestSnapshotJson 为下单时提交的入住人快照，订单详情页的实名入住信息直接取这个字段。房型摘要（RoomTypeSummary）额外返回 checkInTime / checkOutTime，供订单详情展示房型自己的入住退房时间。
 
 创建订单时逐日增加 lockedQuantity；mock-pay 将锁定库存转为 soldQuantity，并写入 PaymentRecord。已支付订单不能直接 cancel，需走退款申请。
 
@@ -176,7 +188,13 @@ CreateReviewRequest 的评分范围为 1-5，文字最多 500 字；重复评价
 | POST | /api/v1/admin/room-types/{roomTypeId}/units | RoomUnitRequest |
 | PUT | /api/v1/admin/room-units/{id} | RoomUnitRequest |
 
-RoomTypeRequest：storeId、name、kind、bedCount、gender、maxGuests、basePriceCents、description、facilitiesJson、imageUrlsJson、isPublished、approvalStatus。
+RoomTypeRequest：storeId、name、kind、bedCount、gender、maxGuests、basePriceCents、description、facilitiesJson、imageUrlsJson、isPublished、approvalStatus，另有 roomCount、roomCategory、defaultInventory。
+
+房型数量只有一个口径：`kind=PrivateRoom` 时取 `roomCount`（房间数量），`kind=Bed` 时取 `bedCount`（床铺数量），服务端据此写 `defaultInventory`，忽略请求里与之不一致的 `defaultInventory`。新建或修改房型时会把未来 180 天的 `InventoryDailies.TotalQuantity` 同步成这个数量（已锁定/已售的日期按占用量兜底，不会压到低于占用），所以「房间管理」里的数量和「价格设置」日历里的总数天然一致。
+
+例外：在价格设置里手动改过单价的日期（`PriceCalendars.Source` 不是 `Seed` / `Weekend`）属于日期例外，保存房型数量时保留这一天的 `TotalQuantity`，不会被刷回统一数量；日历里的「总数/剩余」也按这一天的记录展示。手动调整库存（`POST /admin/inventory/adjust`）同样会给当天补一条 `Source=Manual` 的价格记录作为标记，保证调过的日期不会被下一次保存房型覆盖。种子数据自动生成的 `Seed` / `Weekend` 价格不算手动设置。
+
+`kind` 也可以由 `roomCategory` 推断：名称含「床位/多人间/宿舍/胶囊/铺位/青旅」判为 Bed，含「独立/单间/标间/大床/双床/套房/家庭房/房间」判为 PrivateRoom（`/admin/room-options` 返回的 categories[].kind 也按这个规则校准）。
 
 RoomUnitRequest：roomTypeId、code、kind、gender、status、note。房间或床位状态通常使用 Available、Occupied 等值，实际枚举以代码和 Swagger 为准。
 
@@ -193,7 +211,11 @@ BulkPriceRequest：roomTypeId、from、to、priceCents、source。InventoryAdjus
 
 InventorySummaryItem：id、storeId、roomTypeId、date、totalQuantity、lockedQuantity、soldQuantity、availableQuantity、updatedAt。
 
-库存人工调整必须传 reason；调整不能让总量、锁定量或已售量产生非法负数。
+库存人工调整必须传 reason；调整不能让总量、锁定量或已售量产生非法负数。调整成功后会给涉及日期补一条 `Source=Manual` 的 `PriceCalendars` 记录（价格取当天已有价格，没有则取房型默认价），用于标记「这一天在价格设置里单独设置过」：
+
+- 管理端价格日历：有 Manual 记录的日期，总数/剩余按该日 `InventoryDailies` 展示；没有 Manual 记录的日期，总数回落到房型数量（历史脏库存不会撑大格子）。
+- 保存房型/修改房型数量：`InventoryPlanner` 只同步没有 Manual 记录的日期，日期例外原样保留。
+- `PUT /admin/prices/bulk` 只改单价时也会补建缺少的库存行（总数取房型数量），避免价格日历出现只有价格、没有总数的空格。
 
 ## 8. 后台订单和入住
 
@@ -201,6 +223,7 @@ InventorySummaryItem：id、storeId、roomTypeId、date、totalQuantity、locked
 | --- | --- | --- |
 | GET | /api/v1/admin/orders | status、storeId |
 | GET | /api/v1/admin/orders/{id} | 返回 AdminOrderDetail |
+| POST | /api/v1/admin/orders/{id}/verify | 无 Body，仅标记已支付且已确认待入住订单的核销状态 |
 | POST | /api/v1/admin/orders/{id}/confirm | 无 Body |
 | POST | /api/v1/admin/orders/{id}/check-in | 可选 CheckInRequest |
 | POST | /api/v1/admin/orders/{id}/check-out | 无 Body |
@@ -211,11 +234,14 @@ CheckInRequest：resourceCodes、note。resourceCodes 不传时后端按数量�
 状态转换：
 
 1. PaidPendingConfirmation -> ConfirmedPendingCheckIn：confirm。
-2. ConfirmedPendingCheckIn -> CheckedIn：check-in，资源标记 Occupied。
-3. CheckedIn -> Completed：check-out，释放已分配资源。
-4. 待支付订单可以由后台 cancel，并释放锁定库存。
+2. ConfirmedPendingCheckIn -> 已核销：verify，仅写入核销状态和时间。
+3. ConfirmedPendingCheckIn -> CheckedIn：check-in，资源标记 Occupied，并同步记录核销状态和时间。
+4. CheckedIn -> Completed：check-out，释放已分配资源。
+5. 待支付订单可以由后台 cancel，并释放锁定库存。
 
-AdminOrderDetail 包含订单、门店、房型、金额、状态、支付记录和退款记录。PaymentItem 金额为分；RefundItem 包含退款单号、金额、状态、审核意见和第三方退款号。
+管理端订单列表使用 AdminOrderListItem，提供用户 ID、订单号、商品总价、成功支付金额、订单状态、支付时间、核销状态和时间、退款完成时间、预约起止时间、门店 ID、备注、人数和创建时间。金额单位为分。
+
+AdminOrderDetail 包含订单字段、实际支付金额、支付/核销/退款时间、备注、支付记录和退款记录。PaymentItem 金额为分；RefundItem 包含退款单号、金额、状态、审核意见和第三方退款号。
 
 ## 9. 后台退款
 
@@ -259,8 +285,9 @@ AdminUserRequest：username、displayName、password、phoneNumber、storeId、i
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET/PUT/DELETE | /api/v1/admin/reviews、/api/v1/admin/reviews/{id} | 评价查询、编辑、上架/隐藏和删除 |
-| GET/POST/PUT/DELETE | /api/v1/admin/store-staff、/api/v1/admin/store-staff/{id} | 门店员工账号、门店归属和权限菜单 |
+| GET/PUT/DELETE | /api/v1/admin/reviews、/api/v1/admin/reviews/{id} | 评价查询、编辑（星级/内容/图片，门店与用户房间只读）、上架/隐藏和删除 |
+| POST | /api/v1/admin/uploads/review-image | 上传评价图片，返回 `{ url }`，供管理端编辑评价时替换图片 |
+| GET/POST/PUT/DELETE | /api/v1/admin/store-staff、/api/v1/admin/store-staff/{id} | 门店员工账号、门店归属和权限菜单；`username` 取自会员昵称，`displayName` 为员工名称，`wxUserId` 关联所选会员 |
 | GET/POST/PUT/DELETE | /api/v1/admin/permission-menus、/api/v1/admin/permission-menus/{key} | 用户端民宿管理入口维护 |
 | POST | /api/v1/admin/permission-menus/sync | 从用户端 merchantEntries 同步权限菜单 |
 | GET/POST/PUT/DELETE | /api/v1/admin/managed-items/{resourceType} | 装修、等级、设施、标签等配置型页面的持久化 JSON 记录 |
@@ -286,18 +313,22 @@ AdminUserRequest：username、displayName、password、phoneNumber、storeId、i
 | POST | /api/v1/merchant/orders/{id}/confirm | 已支付待确认 → 已确认待入住 |
 | POST | /api/v1/merchant/orders/{id}/check-in | 办理入住并占用房间资源 |
 | POST | /api/v1/merchant/orders/{id}/check-out | 办理退房，释放资源并结算库存 |
-| GET | /api/v1/merchant/verify-records | 本店已核销订单 |
-| POST | /api/v1/merchant/verify | body { code }，按订单号核销并办理入住 |
+| GET | /api/v1/merchant/verify-records | 本店已核销订单，返回 `orderNumber`、`roomName`、`storeName`、`guest`、`verifiedAt`、`time` |
+| POST | /api/v1/merchant/verify | body { code }，按核销码或订单号核销，订单置为已完成并返回核销详情 |
 | GET | /api/v1/merchant/finance | 今日/7 天/30 天/全部统计和钱包余额 |
 | POST | /api/v1/merchant/withdrawals | body { amountCents, account }，提交提现申请 |
-| GET | /api/v1/merchant/reviews | 本店评价及商家回复 |
-| POST | /api/v1/merchant/reviews/{id}/reply | body { content } |
+| GET | /api/v1/merchant/reviews | 本店评价（用户、房间、星级、内容、图片、审核状态），支持 status=pending/published/hidden |
+| POST | /api/v1/merchant/reviews/{id}/moderate | body { status: published\|hidden, comment? }，通过后用户端可见，不通过置为隐藏 |
 | GET/POST/PUT | /api/v1/merchant/coupons、/coupons/{id} | 优惠券列表、创建、启停 |
 | GET/POST | /api/v1/merchant/staff | 店主和门店员工，新增员工会创建 AdminUser（初始密码需首次登录修改） |
+| GET | /api/v1/merchant/staff/options | 添加员工弹层的可选项：当前账号名下门店（默认选中当前民宿）和启用中的权限菜单 |
+| GET | /api/v1/merchant/members/search?keyword=1380 | 按手机号或昵称片段搜索会员，关键词少于 4 位返回空数组，用于添加员工时选人回填 |
 | GET/PUT | /api/v1/merchant/settings | 民宿名称、电话、入离时间、退订规则 |
 | GET/PUT | /api/v1/merchant/message-settings | 订阅消息偏好 |
 
 商家端轻量配置（优惠券、评价回复、设置、订阅偏好）存放在 `AdminManagedItems` 的 JSON 行中，键名带门店 ID，避免为原型阶段新增表结构。
+
+`POST /merchant/staff` 请求体：`{ name, phone, gender, storeId, permissions, memberId }`。`name`、`phone` 必填，手机号需为 11 位；`gender` 支持男/女/未知（兼容微信的 Male/Female）；`storeId` 省略时默认当前民宿，且必须是当前账号名下门店；`permissions` 只保留权限菜单中启用中的 key；`memberId` 为搜索选中的会员 ID，会写入 `AdminUser.WxUserId`。同一门店下手机号或会员重复返回 409。
 
 ## 13. 小程序用户内容
 

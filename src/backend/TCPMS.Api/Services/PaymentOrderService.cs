@@ -39,8 +39,9 @@ public static class PaymentOrderService
             inventory.UpdatedAt = DateTime.UtcNow;
         }
 
-        order.Status = OrderStatuses.PaidPendingConfirmation;
+        order.Status = OrderStatuses.PaidPendingVerification;
         order.PaymentStatus = "Paid";
+        order.VerificationCode ??= Guid.NewGuid().ToString("N");
         order.UpdatedAt = DateTime.UtcNow;
         if (existingPayment is null)
         {

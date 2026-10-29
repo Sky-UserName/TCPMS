@@ -191,14 +191,6 @@ const configs = {
     columns: [{ key: 'name', label: '页面名称', minWidth: 190 }, { key: 'page', label: '页面位置', minWidth: 140 }, { key: 'status', label: '状态', width: 110, kind: 'status' }, { key: 'updatedAt', label: '更新时间', minWidth: 170 }],
     fields: [{ key: 'name', label: '页面名称', required: true }, { key: 'page', label: '页面位置', required: true }, { key: 'status', label: '状态', type: 'select', options: [{ label: '已发布', value: 'published' }, { label: '草稿', value: 'draft' }] }, { key: 'description', label: '页面说明', type: 'textarea' }]
   },
-  roomTypes: {
-    eyebrow: 'ROOM TAXONOMY',
-    title: '房间类型',
-    description: '维护房间类型字典，供门店房源和搜索筛选使用。',
-    tabs: [{ key: 'all', label: '全部' }, { key: 'active', label: '正常' }, { key: 'hidden', label: '隐藏' }],
-    columns: [{ key: 'name', label: '名称', minWidth: 220 }, { key: 'status', label: '状态', width: 110, kind: 'status' }, { key: 'sort', label: '排序', width: 90 }, { key: 'createdAt', label: '创建时间', minWidth: 170 }, { key: 'updatedAt', label: '更新时间', minWidth: 170 }],
-    fields: [{ key: 'name', label: '类型名称', required: true }, { key: 'sort', label: '排序', type: 'number' }, { key: 'status', label: '状态', type: 'select', options: [{ label: '正常', value: 'active' }, { label: '隐藏', value: 'hidden' }] }]
-  },
   levels: {
     eyebrow: 'PROPERTY LEVELS',
     title: '民宿等级',
@@ -214,6 +206,22 @@ const configs = {
     tabs: [{ key: 'all', label: '全部' }, { key: 'active', label: '正常' }, { key: 'hidden', label: '隐藏' }],
     columns: [{ key: 'name', label: '设施名称', minWidth: 220 }, { key: 'category', label: '分类', minWidth: 140 }, { key: 'status', label: '状态', width: 110, kind: 'status' }, { key: 'sort', label: '排序', width: 90 }],
     fields: [{ key: 'name', label: '设施名称', required: true }, { key: 'category', label: '设施分类', type: 'select', options: [{ label: '基础设施', value: '基础设施' }, { label: '卫浴设施', value: '卫浴设施' }, { label: '公共服务', value: '公共服务' }] }, { key: 'sort', label: '排序', type: 'number' }, { key: 'status', label: '状态', type: 'select', options: [{ label: '正常', value: 'active' }, { label: '隐藏', value: 'hidden' }] }]
+  },
+  services: {
+    eyebrow: 'ROOM SERVICES',
+    title: '民宿服务',
+    description: '维护发布房源时可选的民宿服务，统一展示口径。',
+    tabs: [{ key: 'all', label: '全部' }, { key: 'active', label: '正常' }, { key: 'hidden', label: '隐藏' }],
+    columns: [{ key: 'name', label: '服务名称', minWidth: 220 }, { key: 'status', label: '状态', width: 110, kind: 'status' }, { key: 'sort', label: '排序', width: 90 }],
+    fields: [{ key: 'name', label: '服务名称', required: true }, { key: 'sort', label: '排序', type: 'number' }, { key: 'status', label: '状态', type: 'select', options: [{ label: '正常', value: 'active' }, { label: '隐藏', value: 'hidden' }] }]
+  },
+  nearbyFacilities: {
+    eyebrow: 'NEARBY FACILITIES',
+    title: '周边设施',
+    description: '维护发布房源时可选的周边设施，统一展示口径。',
+    tabs: [{ key: 'all', label: '全部' }, { key: 'active', label: '正常' }, { key: 'hidden', label: '隐藏' }],
+    columns: [{ key: 'name', label: '设施名称', minWidth: 220 }, { key: 'status', label: '状态', width: 110, kind: 'status' }, { key: 'sort', label: '排序', width: 90 }],
+    fields: [{ key: 'name', label: '设施名称', required: true }, { key: 'sort', label: '排序', type: 'number' }, { key: 'status', label: '状态', type: 'select', options: [{ label: '正常', value: 'active' }, { label: '隐藏', value: 'hidden' }] }]
   },
   tags: {
     eyebrow: 'PROPERTY TAGS',
@@ -401,7 +409,7 @@ const configs = {
 }
 
 const config = computed(() => configs[props.viewKey] || configs.common)
-const managedResourceKeys = new Set(['decoration', 'pages', 'levels', 'facilities', 'tags', 'guideTypes', 'guides', 'search', 'messages', 'subscriptions', 'plugins', 'storePermissions', 'common', 'carousel'])
+const managedResourceKeys = new Set(['decoration', 'pages', 'levels', 'facilities', 'tags', 'services', 'nearbyFacilities', 'guideTypes', 'guides', 'search', 'messages', 'subscriptions', 'plugins', 'storePermissions', 'common', 'carousel'])
 const canCreate = computed(() => config.value.canCreate !== false && !config.value.readOnly)
 const canEdit = computed(() => config.value.canEdit !== false && !config.value.readOnly)
 const canDelete = computed(() => config.value.canDelete !== false && !config.value.readOnly)
@@ -443,7 +451,6 @@ function seedFor(key) {
       { id: 1, name: '小程序首页', page: '首页', status: 'published', updatedAt: now, description: '首页运营布局' },
       { id: 2, name: '发现页', page: '发现', status: 'draft', updatedAt: now, description: '旅行攻略内容流' }
     ],
-    roomTypes: ['电竞房', '阁楼', '江景房', '山景房', '海景房', '小区', '花园洋房', '老式公寓', '别墅'].map((name, index) => ({ id: index + 1, name, status: 'active', sort: index + 1, createdAt: '2026-10-01 10:20:00', updatedAt: '2026-10-07 09:12:00' })),
     facilities: [
       { id: 1, name: '独立卫浴', category: '卫浴设施', status: 'active', sort: 1 },
       { id: 2, name: '无线网络', category: '基础设施', status: 'active', sort: 2 },

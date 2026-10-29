@@ -799,8 +799,11 @@
 				})
 			},
 			openDatePage() {
+				const store = this.selectedStore
+				const query = ['from=home']
+				if (store && store.id) query.push(`storeId=${encodeURIComponent(store.id)}`)
 				uni.navigateTo({
-					url: '/pages/booking/date?from=home'
+					url: `/pages/booking/date?${query.join('&')}`
 				})
 			},
 			selectStore(store) {

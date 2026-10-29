@@ -1,17 +1,18 @@
 <template>
 	<view class="proto-page merchant-orders-page">
 		<ProtoHeader title="订单管理" theme="green" />
+		<CacheRefreshIndicator :refreshing="pullRefreshing" />
 		<view class="merchant-search-box"><ProtoIcon name="search" :size="34" /><input v-model="keyword" placeholder="输入订单号或房间名" placeholder-class="merchant-search-placeholder" /></view>
 		<scroll-view class="merchant-order-tabs" scroll-x :show-scrollbar="false">
 			<text v-for="tab in tabs" :key="tab.key" :class="{ active: activeTab === tab.key }" @tap="activeTab = tab.key">{{ tab.label }}</text>
 		</scroll-view>
-		<view class="merchant-order-summary"><view><text class="merchant-order-summary-value">{{ filteredOrders.length }}</text><text>笔订单</text></view><view><ProtoIcon name="info" :size="22" /><text>数据来自服务端</text></view></view>
+		<view class="merchant-order-summary"><view><text class="merchant-order-summary-value">{{ filteredOrders.length }}</text><text>笔订单</text></view></view>
 		<ProtoEmptyState v-if="!filteredOrders.length" title="暂无订单数据" description="住客下单后，订单会显示在这里" />
 		<view v-else class="merchant-order-list">
 			<view v-for="order in filteredOrders" :key="order.id" class="merchant-order-card proto-card">
 				<view class="merchant-order-heading"><view><text class="merchant-order-id">订单 {{ order.id }}</text><text class="proto-pill" :class="order.statusKey === 'pending' ? 'warn' : order.statusKey === 'cancel' ? 'danger' : 'info'">{{ order.status }}</text></view><text class="merchant-order-date">{{ order.createdAt }}</text></view>
-				<view class="merchant-order-main"><image :src="order.image" mode="aspectFill" /><view><text class="merchant-order-room">{{ order.roomName }}</text><text class="merchant-order-meta">入住 {{ order.date }}</text><text class="merchant-order-meta">入住人 {{ order.guest }}</text></view></view>
-				<view class="merchant-order-footer"><view><text class="merchant-order-amount">¥{{ order.amount }}</text><text class="merchant-order-caption">订单金额</text></view><view class="merchant-order-actions"><button v-if="order.status === '待处理'" class="proto-primary-button" hover-class="none" @tap="updateStatus(order, 'confirm')">确认订单</button><button v-else-if="order.status === '待入住'" class="proto-primary-button" hover-class="none" @tap="updateStatus(order, 'check-in')">办理入住</button><button v-else-if="order.status === '入住中'" class="proto-secondary-button" hover-class="none" @tap="updateStatus(order, 'check-out')">办理退房</button><button v-else class="proto-ghost-button" hover-class="none" @tap="showOrderNote(order)">查看备注</button></view></view>
+				<view class="merchant-order-main"><image v-if="order.image" :src="order.image" mode="aspectFill" /><view v-else class="merchant-order-image-empty"><ProtoIcon name="image" :size="44" /></view><view><text class="merchant-order-room">{{ order.roomName }}</text><text class="merchant-order-meta">入住 {{ order.date }}</text><text class="merchant-order-meta">入住人 {{ order.guest }}</text></view></view>
+				<view class="merchant-order-footer"><view><text class="merchant-order-amount">¥{{ order.amount }}</text><text class="merchant-order-caption">订单金额</text></view><view v-if="order.status === '待核销'" class="merchant-order-actions"><button class="proto-ghost-button merchant-cancel-button" hover-class="none" @tap="cancelOrder(order)">取消订单</button><button class="proto-primary-button" hover-class="none" @tap="goVerify">扫码核销</button></view></view>
 			</view>
 		</view>
 	</view>
@@ -19,21 +20,24 @@
 
 <script>
 	import ProtoHeader from '@/components/ProtoHeader.vue'
+	import CacheRefreshIndicator from '@/components/CacheRefreshIndicator.vue'
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import ProtoEmptyState from '@/components/ProtoEmptyState.vue'
-	import { checkInMerchantOrder, checkOutMerchantOrder, confirmMerchantOrder, fetchMerchantOrders } from '@/common/api.js'
+	import { cancelMerchantOrder, fetchMerchantOrders, getApiAssetUrl } from '@/common/api.js'
 	import { showToast } from '@/common/prototype.js'
+	import { scanAndVerifyOrder } from '@/common/verify.js'
+	import { runPullRefresh } from '@/common/pull-refresh.js'
 
 	export default {
-		components: { ProtoHeader, ProtoIcon, ProtoEmptyState },
+		components: { ProtoHeader, CacheRefreshIndicator, ProtoIcon, ProtoEmptyState },
 		data() {
 			return {
 				keyword: '',
+				pullRefreshing: false,
 				activeTab: 'all',
 				tabs: [
 					{ key: 'all', label: '全部' },
-					{ key: 'pending', label: '待处理' },
-					{ key: 'stay', label: '待入住' },
+					{ key: 'pending', label: '待核销' },
 					{ key: 'done', label: '已完成' },
 					{ key: 'cancel', label: '退款/取消' }
 				],
@@ -42,6 +46,9 @@
 		},
 		async onShow() {
 			await this.loadOrders()
+		},
+		onPullDownRefresh() {
+			return runPullRefresh(this, () => this.loadOrders())
 		},
 		computed: {
 			filteredOrders() {
@@ -56,26 +63,45 @@
 		methods: {
 			async loadOrders() {
 				try {
-					this.orders = await fetchMerchantOrders()
+					const data = await fetchMerchantOrders()
+					this.orders = data.map((order) => ({
+						...order,
+						image: getApiAssetUrl(order.image)
+					}))
 				} catch (error) {
-					this.orders = []
 					showToast(error?.message || '订单加载失败')
 				}
 			},
-			async updateStatus(order, action) {
-				const actionText = { confirm: '确认订单', 'check-in': '办理入住', 'check-out': '办理退房' }[action] || '更新订单'
+			async goVerify() {
+				await scanAndVerifyOrder()
+				await this.loadOrders()
+			},
+			cancelOrder(order) {
+				const paid = order.paymentStatus === 'Paid'
+				uni.showModal({
+					title: '取消订单',
+					content: paid ? '取消后将把已支付金额原路退回用户，确定继续吗？' : '确定取消该订单吗？',
+					confirmText: paid ? '退款取消' : '确认取消',
+					confirmColor: '#c25b5b',
+					success: (result) => {
+						if (result.confirm) this.submitCancel(order, paid)
+					},
+					fail: (error) => {
+						showToast(error?.errMsg || '确认弹窗打开失败，请重试')
+					}
+				})
+			},
+			async submitCancel(order, paid) {
+				uni.showLoading({ title: paid ? '正在退款' : '正在取消', mask: true })
 				try {
-					if (action === 'confirm') await confirmMerchantOrder(order.orderId)
-					else if (action === 'check-in') await checkInMerchantOrder(order.orderId)
-					else if (action === 'check-out') await checkOutMerchantOrder(order.orderId)
-					showToast(`${actionText}成功`)
+					await cancelMerchantOrder(order.orderId)
+					uni.hideLoading()
+					uni.showToast({ title: paid ? '已取消，退款将原路退回' : '订单已取消', icon: 'none' })
 					await this.loadOrders()
 				} catch (error) {
-					showToast(error?.message || `${actionText}失败`)
+					uni.hideLoading()
+					showToast(error?.message || '取消订单失败')
 				}
-			},
-			showOrderNote(order) {
-				showToast(`${order.id}：${order.paymentStatus === 'Paid' ? '已支付' : '未支付'} · ${order.quantity}间/${order.guestCount}人`)
 			}
 		}
 	}
@@ -226,6 +252,18 @@
 		background: var(--proto-surface-low);
 	}
 
+	.merchant-order-image-empty {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 156rpx;
+		height: 118rpx;
+		flex: 0 0 156rpx;
+		color: #a9b9bd;
+		background: var(--proto-surface-low);
+		border-radius: 14rpx;
+	}
+
 	.merchant-order-main > view {
 		display: flex;
 		justify-content: center;
@@ -288,6 +326,12 @@
 		padding: 0 18rpx;
 		font-size: 18rpx;
 		white-space: nowrap;
+	}
+
+	.merchant-order-actions .merchant-cancel-button {
+		color: #b44f4f;
+		background: #fff2f2;
+		border: 1rpx solid #f0cccc;
 	}
 
 	.merchant-orders-page :deep(.proto-empty-state) {
