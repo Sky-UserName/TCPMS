@@ -47,7 +47,16 @@
 					<scroll-view class="store-tags" scroll-x show-scrollbar="false"><text v-for="tag in store.tags" :key="tag">{{ tag }}</text></scroll-view>
 						<view class="store-meta"><text>{{ store.room || store.tags[0] || '门店房型' }}</text><text v-if="store.tags[1]">·</text><text v-if="store.tags[1]">{{ store.tags[1] }}</text></view>
 					<view class="store-address"><ProtoIcon name="location" :size="21" /><text>{{ store.address }}</text><text class="store-distance">{{ store.distance }}</text></view>
-					<view class="store-price-row"><text class="store-price">{{ store.price === null || store.price === undefined ? '暂无报价' : `¥${store.price}` }}</text><text v-if="store.price !== null && store.price !== undefined" class="price-unit">/晚起</text><button class="store-detail-button" hover-class="none" @tap.stop="goDetail(store)">查看房型</button></view>
+					<view class="store-price-row">
+						<view class="store-price-block">
+							<text class="store-price">{{ store.price === null || store.price === undefined ? '暂无报价' : `¥${store.price}` }}</text>
+							<text v-if="store.price !== null && store.price !== undefined" class="price-unit">/晚起</text>
+						</view>
+						<button class="store-detail-button" hover-class="store-detail-button-hover" @tap.stop="goDetail(store)">
+							<text>查看房型</text>
+							<ProtoIcon name="chevron-right" tone="white" :size="17" />
+						</button>
+					</view>
 				</view>
 			</view>
 		</view>
@@ -344,18 +353,20 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+		gap: 16rpx;
 		margin-top: 20rpx;
 	}
 
-	.store-price-row > view:first-child {
+	.store-price-block {
 		display: flex;
 		align-items: baseline;
+		flex: 1;
+		min-width: 0;
 		flex-wrap: wrap;
 	}
 
 
 	.store-price {
-		margin-left: 6rpx;
 		color: var(--proto-primary-dark);
 		font-size: 38rpx;
 		font-weight: 800;
@@ -709,8 +720,17 @@
 
 	.store-price-row {
 		display: flex;
-		align-items: baseline;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16rpx;
 		margin-top: 20rpx;
+	}
+
+	.store-price-block {
+		display: flex;
+		align-items: baseline;
+		flex: 1;
+		min-width: 0;
 	}
 
 	.store-price {
@@ -726,13 +746,36 @@
 	}
 
 	.store-detail-button {
-		margin-left: auto;
-		padding: 0 22rpx;
-		height: 54rpx;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		box-sizing: border-box;
+		margin: 0 0 0 auto;
+		padding: 0 22rpx 0 28rpx;
+		height: 62rpx;
 		color: #ffffff;
 		background: var(--proto-primary);
-		border-radius: 27rpx;
-		font-size: 19rpx;
+		border-radius: 31rpx;
+		box-shadow: 0 8rpx 18rpx rgba(42, 169, 169, 0.22);
+		font-size: 22rpx;
+		font-weight: 700;
+		line-height: 1;
+		letter-spacing: 1rpx;
+		white-space: nowrap;
+	}
+
+	.store-detail-button::after {
+		display: none;
+	}
+
+	.store-detail-button .proto-icon {
+		margin-left: 2rpx;
+	}
+
+	.store-detail-button-hover {
+		background: var(--proto-primary-dark);
+		box-shadow: 0 4rpx 10rpx rgba(42, 169, 169, 0.18);
 	}
 
 </style>

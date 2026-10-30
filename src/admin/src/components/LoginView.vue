@@ -1,15 +1,22 @@
 <template>
   <main class="login-page">
     <section class="login-brand-panel">
-      <div class="brand-mark">T</div>
-      <span class="eyebrow">TCPMS · SERENE STAY</span>
-      <h1>智选旅宿运营中台</h1>
-      <p>统一管理门店、房源、库存、订单与退款，让每一次入住都清晰可控。</p>
-      <div class="brand-points">
+      <div class="login-brand-lockup">
+        <img class="login-brand-logo" src="/brand-mark.jpg" alt="择居青旅" />
+        <div>
+          <strong>择居青旅</strong>
+          <span>运营管理中台</span>
+        </div>
+      </div>
+      <span class="eyebrow">ZE JU HOSTEL · OPERATIONS</span>
+      <h1>让每一次入住，<br />都清晰可控</h1>
+      <p>统一管理门店、房源、库存、订单与核销，让旅客和门店都能从容抵达。</p>
+      <div class="login-brand-points">
         <span><i></i> 多门店经营总览</span>
         <span><i></i> 房态库存实时协同</span>
-        <span><i></i> 高德地图位置管理</span>
+        <span><i></i> 支付订单快速核销</span>
       </div>
+      <img class="login-illustration" src="/zeju-login-illustration.jpg" alt="择居青旅房间插图" />
     </section>
     <section class="login-form-panel">
       <div class="login-form-wrap">
@@ -68,7 +75,7 @@
             保存并进入
           </el-button>
         </el-form>
-        <p class="login-footer">TCPMS 智选旅宿管理系统</p>
+        <p class="login-footer">择居青旅管理系统</p>
       </div>
     </section>
   </main>

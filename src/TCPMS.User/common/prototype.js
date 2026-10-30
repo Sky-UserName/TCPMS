@@ -1,17 +1,19 @@
 import { isLoginRedirecting } from './auth-gate.js'
+import { brandImages } from './brand-assets.js'
 
+// 品牌图走后端 /brand/ 托管，静态图仅作为 <image> 加载失败时的兜底。
 export const prototypeImages = {
-	avatar: '/static/logo.png',
-	homeHero: '/static/prototype/home-hero.jpg',
-	storeOne: '/static/prototype/home-hero.jpg',
-	storeTwo: '/static/prototype/store-city.jpg',
-	hostel: '/static/prototype/store-hostel.jpg',
-	roomOne: '/static/prototype/home-hero.jpg',
-	roomTwo: '/static/prototype/store-city.jpg',
-	roomThree: '/static/prototype/home-hero.jpg',
-	roomFour: '/static/prototype/store-city.jpg',
-	article: '/static/prototype/store-hostel.jpg',
-	articleDetail: '/static/prototype/home-hero.jpg'
+	avatar: brandImages.mark,
+	homeHero: brandImages.hero,
+	storeOne: brandImages.hero,
+	storeTwo: brandImages.storeCity,
+	hostel: brandImages.hostel,
+	roomOne: brandImages.hero,
+	roomTwo: brandImages.storeCity,
+	roomThree: brandImages.hero,
+	roomFour: brandImages.storeCity,
+	article: brandImages.hostel,
+	articleDetail: brandImages.hero
 }
 
 export const demoStores = [

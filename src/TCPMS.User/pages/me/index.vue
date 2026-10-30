@@ -116,8 +116,7 @@
 				merchantEntries: [],
 				merchantMenuError: false,
 				travelEntries: [
-					{ title: '常用入住人', desc: '添加常用入住人，预订时免重复输入', icon: 'group', route: '/pages/me/guests' },
-					{ title: '我的发票抬头', desc: '增值税电子普通/专用发票抬头管理', icon: 'document', action: 'invoice' }
+					{ title: '常用入住人', desc: '添加常用入住人，预订时免重复输入', icon: 'group', route: '/pages/me/guests' }
 				],
 				serviceEntries: [
 					{ title: '官方微信客服', desc: '在线解答预订变更、房费退还与入住咨询', icon: 'support', route: '/pages/service/contact' },
@@ -127,7 +126,7 @@
 				policyEntries: [
 					{ title: '用户服务协议', desc: '', icon: 'document', route: '/pages/rule/index' },
 					{ title: '用户隐私手册', desc: '', icon: 'shield', route: '/pages/rule/index?tab=privacy' },
-					{ title: '关于 TCPMS 智选旅宿', desc: '', icon: 'info', version: 'v2.4.1', message: 'TCPMS 智选旅宿小程序' }
+					{ title: '关于择居青旅', desc: '', icon: 'info', version: 'v2.4.1', message: '择居青旅住宿预订小程序' }
 				]
 			}
 		},
@@ -345,14 +344,6 @@
 					goPage(item.route)
 					return
 				}
-				if (item.action === 'invoice') {
-					uni.showModal({
-						title: '发票抬头',
-						content: '离店后打开对应订单详情，即可提交电子发票申请。发票将发送至您填写的邮箱。',
-						showCancel: false
-					})
-					return
-				}
 				showToast(item.message || '暂无可用信息')
 			},
 			// 点哪个分类（待支付/可使用…）就带着它进订单页，而不是永远打开「全部」。
@@ -376,7 +367,7 @@
 			},
 			copyProfileCode() {
 				uni.setClipboardData({
-					data: `TCPMS会员 UID ${this.profile.uid || '未登录'}`,
+					data: `择居青旅会员 UID ${this.profile.uid || '未登录'}`,
 					success: () => showToast('会员信息已复制')
 				})
 			},

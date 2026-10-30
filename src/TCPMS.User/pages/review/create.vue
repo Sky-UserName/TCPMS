@@ -103,7 +103,7 @@
 					roomId: '',
 					storeId: '',
 					roomName: '已入住房型',
-					storeName: 'TCPMS 门店',
+					storeName: '择居青旅门店',
 					roomImage: '/static/prototype/home-hero.jpg'
 				},
 				roomRating: 5,

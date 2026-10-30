@@ -152,9 +152,9 @@ builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new OpenApiInfo
     {
-        Title = "TCPMS 民宿预订平台 API",
+        Title = "择居青旅预订平台 API",
         Version = "v1",
-        Description = "TCPMS（短租民宿管理平台）后端接口。接口覆盖微信小程序端的门店、房型、库存、订单和退款流程，以及管理后台的门店、房型、价格、库存、订单、用户、统计和审计日志能力。金额统一使用分（CNY），时间统一使用 ISO 8601 格式。"
+        Description = "择居青旅后端接口。接口覆盖微信小程序端的门店、房型、库存、订单和退款流程，以及管理后台的门店、房型、价格、库存、订单、用户、统计和审计日志能力。金额统一使用分（CNY），时间统一使用 ISO 8601 格式。"
     });
 
     // 让 Swagger 能够复用项目中的 XML 文档注释，便于前端直接查看字段和类型说明。
@@ -192,9 +192,9 @@ if (swaggerEnabled)
     });
     app.UseSwaggerUI(options =>
     {
-        options.SwaggerEndpoint("/swagger/v1/swagger.json", "TCPMS API v1");
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "择居青旅 API v1");
         options.RoutePrefix = "swagger";
-        options.DocumentTitle = "TCPMS API 接口文档";
+        options.DocumentTitle = "择居青旅 API 接口文档";
         options.DisplayRequestDuration();
         options.EnableDeepLinking();
         options.EnableTryItOutByDefault();
@@ -213,7 +213,20 @@ app.UseExceptionHandler(errorApp =>
     });
 });
 
-app.UseStaticFiles();
+// 品牌图（/brand/...）和商家上传图（/uploads/...）都由后端直出：
+// 小程序只引 URL，不依赖打包产物里的图片文件，重新发版也不会丢 logo。
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        var path = context.Context.Request.Path.Value ?? string.Empty;
+        if (path.StartsWith("/brand/", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Context.Response.Headers.CacheControl = "public,max-age=604800";
+        }
+    }
+});
 var miniappStaticDirectory = Path.GetFullPath(
     Path.Combine(developmentProjectDirectory ?? builder.Environment.ContentRootPath, "..", "..", "TCPMS.User", "static"));
 if (Directory.Exists(miniappStaticDirectory))

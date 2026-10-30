@@ -67,7 +67,7 @@
 			</view>
 		</view>
 
-		<view v-if="visibleOrders.length" class="order-footer-note">已加载全部订单 · TCPMS 智选保障<text class="small">房源真实性 100% 官方现场实勘</text></view>
+		<view v-if="visibleOrders.length" class="order-footer-note">已加载全部订单 · 择居青旅安心保障<text class="small">房源信息透明，入住服务可追踪</text></view>
 		</template>
 
 		<template v-else>

@@ -3,7 +3,7 @@
 		{
 			"path": "pages/index/index",
 			"style": {
-				"navigationBarTitleText": "TCPMS",
+				"navigationBarTitleText": "择居青旅",
 				"navigationStyle": "custom",
 				"enablePullDownRefresh": false
 			}
@@ -358,7 +358,7 @@
 	},
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
-		"navigationBarTitleText": "TCPMS",
+		"navigationBarTitleText": "择居青旅",
 		"navigationBarBackgroundColor": "#F4FAFB",
 		"backgroundColor": "#F4FAFB",
 		"backgroundTextStyle": "light",

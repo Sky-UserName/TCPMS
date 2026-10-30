@@ -11,7 +11,7 @@
 			</view>
 			<text class="article-title">{{ article.title || '攻略加载中' }}</text>
 			<view class="article-byline">
-				<view class="article-author"><ProtoIcon name="user" :size="20" /><text>{{ article.author || 'TCPMS 智选生活局' }}</text></view>
+				<view class="article-author"><ProtoIcon name="user" :size="20" /><text>{{ article.author || '择居青旅生活局' }}</text></view>
 				<text>{{ article.publishedAt }}　·　{{ article.readCount || 0 }}次阅读</text>
 			</view>
 			<image class="article-cover" :src="articleImage" mode="aspectFill"></image>

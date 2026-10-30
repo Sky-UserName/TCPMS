@@ -10,8 +10,8 @@ namespace TCPMS.Api.Infrastructure;
 /// <summary>
 /// 初始化基础数据。
 /// 原则：地区、角色、菜单、字典、订阅消息模板属于配置，必须存在；
-/// 门店 / 房型 / 订单 / 用户等业务数据只在空库且 Seed:DemoData 为 true 时写入少量样例，
-/// 方便本地把流程走通，生产环境可以用 Seed:DemoData=false 关掉。
+/// 门店 / 房型 / 订单 / 用户等业务数据只在空库且 Seed:DemoData 显式为 true 时写入少量样例。
+/// 默认关：生产环境忘记配置时不会把演示门店、房型和订单灌进真实库。
 /// </summary>
 public static class SeedData
 {
@@ -45,7 +45,7 @@ public static class SeedData
         await SeedConfigurationAsync(db);
         await db.SaveChangesAsync();
 
-        var seedDemoData = configuration?.GetValue<bool?>("Seed:DemoData") ?? true;
+        var seedDemoData = configuration?.GetValue<bool?>("Seed:DemoData") ?? false;
         if (seedDemoData && !await db.Stores.AnyAsync())
         {
             await SeedDemoBusinessAsync(db, passwordHasher, roles);
@@ -814,7 +814,7 @@ public static class SeedData
                     Id = "autumn-nearby",
                     Title = "早上好！从附近开始一段清爽舒心的秋日漫居旅程",
                     Subtitle = "出行攻略 / 官方精选",
-                    Author = "TCPMS 智选生活局",
+                    Author = "择居青旅生活局",
                     PublishedAt = "2026-09-30",
                     ReadCount = 1420,
                     CoverImage = "/static/prototype/home-hero.jpg",
@@ -822,13 +822,13 @@ public static class SeedData
                     StoreId = ShanghaiStoreId.ToString(),
                     Sections = new object[]
                     {
-                        new { Type = "quote", Text = "秋风渐起，逃离城市喧嚣并不需要太远跋涉。TCPMS 智选旅宿为您甄选城市中心偏中取静的质感住所，无论是独自放空、好友小聚还是青年创客同行，这里都有恰到好处的停留方式。" },
+                        new { Type = "quote", Text = "秋风渐起，逃离城市喧嚣并不需要太远跋涉。择居青旅为您甄选城市中心偏中取静的质感住所，无论是独自放空、好友小聚还是青年创客同行，这里都有恰到好处的停留方式。" },
                         new { Type = "heading", Text = "01　从附近开始，给旅途减一点负担" },
                         new { Type = "paragraph", Text = "距离地铁、商圈和公园都不远的门店，适合临时起意的短途出行。抵达后可以把时间留给散步、阅读和一顿慢慢吃完的晚餐，而不是消耗在往返路上。" },
                         new { Type = "heading", Text = "02　选一间适合自己的房间" },
                         new { Type = "paragraph", Text = "喜欢安静，可以选择采光好的独立大床房；和朋友同行，可以看看双床房或多人间床位。先确定入住日期和人数，再根据设施、价格和评价做决定，会比只看一张照片更可靠。" },
                         new { Type = "heading", Text = "03　把入住变成旅途的一部分" },
-                        new { Type = "paragraph", Text = "提前保存门店地址，打开导航入口，抵达时直接联系前台。需要发票、寄存行李或调整入住时间，也可以在订单详情里联系官方客服和门店管家。" }
+                        new { Type = "paragraph", Text = "提前保存门店地址，打开导航入口，抵达时直接联系前台。需要寄存行李或调整入住时间，也可以在订单详情里联系官方客服和门店管家。" }
                     },
                     Related = new object[]
                     {
@@ -841,7 +841,7 @@ public static class SeedData
                     Id = "quiet-corner-map",
                     Title = "一张地图，发现城市里的安静角落",
                     Subtitle = "城市漫游 / 附近灵感",
-                    Author = "TCPMS 内容团队",
+                    Author = "择居青旅内容团队",
                     PublishedAt = "2026-09-18",
                     ReadCount = 860,
                     CoverImage = "/static/prototype/store-city.jpg",
@@ -866,7 +866,7 @@ public static class SeedData
                     Id = "checkin-checklist",
                     Title = "入住前要准备的 5 件小事",
                     Subtitle = "入住指南 / 新手必读",
-                    Author = "TCPMS 客服团队",
+                    Author = "择居青旅客服团队",
                     PublishedAt = "2026-09-06",
                     ReadCount = 2310,
                     CoverImage = "/static/prototype/store-hostel.jpg",
@@ -936,7 +936,7 @@ public static class SeedData
         {
             Key = "rule",
             Title = "规则与政策",
-            Subtitle = "TCPMS 智选旅宿服务条款",
+            Subtitle = "择居青旅服务条款",
             Kicker = "合规与数字隐私标准",
             Badge = "合规与数字隐私标准",
             Summary = "我们致力于守护您的旅途隐私与数据安全，为您提供透明、值得信赖的数字化入住体验。",
@@ -949,7 +949,7 @@ public static class SeedData
                 {
                     Key = "service",
                     Label = "服务协议",
-                    Kicker = "TCPMS 智选旅宿服务协议",
+                    Kicker = "择居青旅服务协议",
                     Title = "让每一次入住，都有清晰的规则和可预期的服务",
                     UpdatedAt = $"更新日期：{updatedAt}",
                     Highlights =
@@ -960,7 +960,7 @@ public static class SeedData
                     ],
                     Blocks =
                     [
-                        new PageBlock { Type = "paragraph", Text = "欢迎使用 TCPMS 智选旅宿小程序。使用门店浏览、房型预订、支付、入住、退款和客服等服务前，请阅读并理解本协议。完成登录、勾选同意或继续使用服务，视为你已阅读并同意本协议。" },
+                        new PageBlock { Type = "paragraph", Text = "欢迎使用择居青旅小程序。使用门店浏览、房型预订、支付、入住、退款和客服等服务前，请阅读并理解本协议。完成登录、勾选同意或继续使用服务，视为你已阅读并同意本协议。" },
                         new PageBlock { Type = "heading", Text = "核心隐私与合规摘要" },
                         new PageBlock { Type = "highlights" },
                         new PageBlock { Type = "heading", Text = "一、服务范围" },
@@ -977,7 +977,7 @@ public static class SeedData
                 {
                     Key = "privacy",
                     Label = "隐私政策",
-                    Kicker = "TCPMS 智选旅宿隐私政策",
+                    Kicker = "择居青旅隐私政策",
                     Title = "我们只为完成旅宿服务而使用必要信息",
                     UpdatedAt = $"更新日期：{updatedAt}",
                     Highlights =
@@ -1010,7 +1010,7 @@ public static class SeedData
                     [
                         new PagePermission { Icon = "user", Title = "微信登录与手机号", Desc = "用于账号创建、身份识别和订单联系。", Required = true },
                         new PagePermission { Icon = "location", Title = "位置权限", Desc = "用于附近门店排序、距离展示和导航入口。", Required = false },
-                        new PagePermission { Icon = "image", Title = "相册与相机", Desc = "用于后续客服举证、发票或入住材料上传。", Required = false },
+                        new PagePermission { Icon = "image", Title = "相册与相机", Desc = "用于客服举证或入住材料上传。", Required = false },
                         new PagePermission { Icon = "book", Title = "订阅消息", Desc = "用于发送订单状态、入住提醒和退款结果。", Required = false },
                         new PagePermission { Icon = "map", Title = "高德地图服务", Desc = "用于门店地图、地址解析和坐标能力。", Required = true }
                     ],
@@ -1029,7 +1029,7 @@ public static class SeedData
         var authPrivacyPage = new PageContentItem
         {
             Key = "auth-privacy",
-            Title = "欢迎使用 TCPMS",
+            Title = "欢迎使用择居青旅",
             Subtitle = "多门店快捷预订 · 智能客房管理",
             Badge = "安全合规保障",
             Intro = "为了向您提供门店浏览、精准定位、房源预订、微信支付及极速退款等核心服务，我们将依据合法、正当、必要的原则收集与使用您的相关信息。",
@@ -1056,11 +1056,11 @@ public static class SeedData
         {
             Key = "service-contact",
             Title = "需要帮助？我们随时在这里",
-            Kicker = "TCPMS 智选旅宿",
+            Kicker = "择居青旅",
             Summary = "预订、改期、入住和退款问题，都可以从官方服务入口获得帮助。",
             Badge = "官方微信客服",
             ServiceHours = "工作日 09:00 - 22:00 在线，订单问题会优先处理",
-            SupportText = "TCPMS 官方客服：请在微信中搜索“TCPMS智选旅宿”进入客服会话。",
+            SupportText = "择居青旅官方客服：请在微信中搜索“择居青旅”进入客服会话。",
             Tags = ["订单变更", "入住咨询", "退款进度"],
             Notices =
             [

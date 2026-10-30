@@ -3,21 +3,21 @@
 		<view class="auth-topbar">
 			<view class="auth-brand">
 				<view class="auth-brand-icon"><ProtoIcon name="user" tone="white" :size="24" /></view>
-				<text>TCPMS 智选旅宿</text>
+				<text>择居青旅</text>
 			</view>
 		</view>
 
 		<view class="auth-logo">
 			<view class="logo-mark">
-				<image src="/static/logo.png" mode="aspectFit"></image>
+				<image :src="brandLogoSrc" mode="aspectFit" @error="useLocalBrandLogo"></image>
 			</view>
-			<text>TCPMS 智选云宿</text>
+			<text>住宿预订与安心入住</text>
 		</view>
 
 		<view class="privacy-card">
 			<view class="privacy-title-row">
 				<view>
-					<text class="privacy-title">{{ page.title || '欢迎使用 TCPMS' }}</text>
+					<text class="privacy-title">{{ page.title || '欢迎使用择居青旅' }}</text>
 					<text class="privacy-subtitle">{{ page.subtitle }}</text>
 				</view>
 				<text class="proto-pill info">{{ page.badge || '安全合规保障' }}</text>
@@ -54,7 +54,7 @@
 
 		<view class="proto-check" @tap="agreed = !agreed">
 			<view class="proto-check-box" :class="{ checked: agreed }"><ProtoIcon v-if="agreed" name="check" tone="white" :size="22" /></view>
-			<text>我已充分阅读并理解 <text class="proto-link" @tap.stop="showAgreement = true">《TCPMS用户协议》</text> 与 <text class="proto-link" @tap.stop="showAgreement = true">《隐私政策》</text>，并同意依法使用必要服务。</text>
+			<text>我已充分阅读并理解 <text class="proto-link" @tap.stop="showAgreement = true">《择居青旅用户协议》</text> 与 <text class="proto-link" @tap.stop="showAgreement = true">《隐私政策》</text>，并同意依法使用必要服务。</text>
 		</view>
 
 		<text v-if="errorMessage" class="form-error">{{ errorMessage }}</text>
@@ -82,6 +82,7 @@
 <script>
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { fetchPageContent } from '@/common/api.js'
+	import { brandImages, brandImageFallbacks } from '@/common/brand-assets.js'
 
 	const EMPTY_PAGE = {
 		title: '',
@@ -100,6 +101,7 @@
 				showAgreement: false,
 				errorMessage: '',
 				loadState: 'loading',
+				brandLogoSrc: brandImages.logo,
 				page: { ...EMPTY_PAGE }
 			}
 		},
@@ -107,6 +109,10 @@
 			this.loadPage()
 		},
 		methods: {
+			// 后端托管图不可用时退回包内 logo。
+			useLocalBrandLogo() {
+				this.brandLogoSrc = brandImageFallbacks.logo
+			},
 			async loadPage() {
 				try {
 					const data = await fetchPageContent('auth-privacy')
@@ -197,8 +203,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 112rpx;
-		height: 112rpx;
+		width: 270rpx;
+		height: 150rpx;
 		margin-bottom: 18rpx;
 		color: var(--proto-primary);
 		background: #ffffff;
@@ -207,9 +213,9 @@
 	}
 
 	.logo-mark image {
-		width: 62rpx;
-		height: 62rpx;
-		border-radius: 16rpx;
+		width: 250rpx;
+		height: 136rpx;
+		border-radius: 12rpx;
 	}
 
 	.privacy-card {

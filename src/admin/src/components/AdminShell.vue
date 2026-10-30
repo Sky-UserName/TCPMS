@@ -2,9 +2,9 @@
   <div class="admin-shell">
     <aside class="sidebar" :class="{ 'sidebar-collapsed': collapsed }">
       <div class="sidebar-brand">
-        <div class="brand-mark small">T</div>
+        <div class="brand-mark small"><img src="/brand-mark.jpg" alt="择居青旅" /></div>
         <div class="brand-copy">
-          <strong>TCPMS 智选旅宿</strong>
+          <strong>择居青旅</strong>
           <span>运营管理中台</span>
         </div>
         <button
@@ -103,7 +103,7 @@
     <section class="main-shell">
       <header class="topbar">
         <div>
-          <span class="topbar-kicker">TCPMS · SERENE STAY</span>
+          <span class="topbar-kicker">ZE JU HOSTEL · OPERATIONS</span>
           <h1>{{ currentTitle }}</h1>
         </div>
         <div class="topbar-actions">

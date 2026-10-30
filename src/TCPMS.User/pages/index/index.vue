@@ -198,10 +198,10 @@
 			<view class="brand-footer">
 				<view class="brand-footer-line">
 					<text class="brand-footer-rule"></text>
-					<text>TCPMS 智能旅宿云管系统承载</text>
+					<text>择居青旅，为每次出发留一盏灯</text>
 					<text class="brand-footer-rule"></text>
 				</view>
-				<text class="brand-footer-desc">房源直联房态系统 · 零押金免查房 · 离店开票</text>
+				<text class="brand-footer-desc">房源直联房态系统 · 入住流程清晰 · 旅途轻松无忧</text>
 			</view>
 		</view>
 
@@ -323,6 +323,7 @@
 
 <script>
 	import { demoRooms, demoStores, goPage, prototypeImages } from '@/common/prototype.js'
+	import { brandImageFallbacks } from '@/common/brand-assets.js'
 	import { getBooking, saveBooking } from '@/common/app-store.js'
 	import { fetchCarousel, fetchStores } from '@/common/api.js'
 	import { reverseGeocode } from '@/common/amap.js'
@@ -444,7 +445,7 @@
 
 	const toCarouselSlide = (slide, index = 0) => ({
 		image: slide.image || [PROTOTYPE_IMAGES.hero, PROTOTYPE_IMAGES.storeTwo, PROTOTYPE_IMAGES.hostel][index % 3],
-		badge: slide.badge || 'TCPMS 智选旅宿',
+		badge: slide.badge || '择居青旅',
 		title: slide.title || '住进城市，走近风景',
 		subtitle: slide.subtitle || '为每一次出发，准备一个舒服的落脚点',
 		link: slide.link || ''
@@ -685,7 +686,7 @@
 					portal: this.selectedPortal.title,
 					menu: '更多服务'
 				}
-				return titles[this.sheetType] || 'TCPMS'
+				return titles[this.sheetType] || '择居青旅'
 			}
 		},
 		methods: {
@@ -1130,6 +1131,12 @@
 				this.showMessage('筛选条件已清除')
 			},
 			handleHeroImageError(index = 0) {
+				const slide = this.heroSlides[index]
+				// 托管在后端的品牌图加载失败时，先用包内同款图片兜底；再失败才用门店实拍图。
+				if (slide && /^https?:/i.test(String(slide.image || ''))) {
+					slide.image = [brandImageFallbacks.hero, brandImageFallbacks.storeCity, brandImageFallbacks.hostel][index % 3]
+					return
+				}
 				const fallback = this.stores[0] && this.stores[0].image
 				if (!fallback || !this.heroSlides[index]) return
 				this.heroSlides[index].image = fallback

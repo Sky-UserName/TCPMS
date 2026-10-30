@@ -1,15 +1,15 @@
 <script>
 	export default {
 		onLaunch: function() {
-			console.log('TCPMS user app launch')
+			console.log('择居青旅 user app launch')
 			uni.hideTabBar({ animation: false, fail: () => {} })
 		},
 		onShow: function() {
-			console.log('TCPMS user app show')
+			console.log('择居青旅 user app show')
 			uni.hideTabBar({ animation: false, fail: () => {} })
 		},
 		onHide: function() {
-			console.log('TCPMS user app hide')
+			console.log('择居青旅 user app hide')
 		}
 	}
 </script>

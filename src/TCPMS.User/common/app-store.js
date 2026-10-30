@@ -219,7 +219,7 @@ export const addUserReview = (review = {}) => {
 		roomId: review.roomId || '',
 		storeId: review.storeId || '',
 		roomName: review.roomName || '已入住房型',
-		storeName: review.storeName || 'TCPMS 门店',
+		storeName: review.storeName || '择居青旅门店',
 		guest: review.guest || getProfile().name || '微信用户',
 		nickname: review.nickname || review.guest || getProfile().name || '微信用户',
 		avatar: review.avatar || getProfile().avatar || prototypeImages.avatar,
@@ -294,7 +294,7 @@ export const resolveReviewTarget = (order = {}) => {
 		roomId: order.roomId || order.roomTypeId || room?.id || '',
 		storeId: order.storeId || store?.id || room?.storeId || '',
 		roomName: order.room || room?.name || '已入住房型',
-		storeName: order.store || store?.name || 'TCPMS 门店',
+		storeName: order.store || store?.name || '择居青旅门店',
 		roomImage: order.image || room?.image || prototypeImages.roomOne
 	}
 }

@@ -11,7 +11,7 @@
 						<text class="collection-title">{{ item.title }}</text>
 						<text class="collection-type">{{ typeLabel(item.type) }}</text>
 					</view>
-					<text class="collection-subtitle">{{ item.subtitle || '已保存的 TCPMS 内容' }}</text>
+					<text class="collection-subtitle">{{ item.subtitle || '已保存的择居青旅内容' }}</text>
 					<view class="collection-action"><text>查看详情</text><ProtoIcon name="chevron-right" :size="24" /></view>
 				</view>
 				<button class="collection-remove" hover-class="none" @tap.stop="removeItem(item)"><ProtoIcon name="heart" :size="25" /></button>

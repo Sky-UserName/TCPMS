@@ -55,7 +55,7 @@
 		</view>
 
 		<button class="proto-primary-button refund-submit" hover-class="none" @tap="submitRefund"><ProtoIcon name="receipt" tone="white" :size="22" /><text>提交退款申请（¥{{ amount || '0.00' }}）</text></button>
-		<text class="refund-agreement">点击提交即代表同意《TCPMS旅宿退订规则与保障协议》</text>
+		<text class="refund-agreement">点击提交即代表同意《择居青旅退订规则与保障协议》</text>
 
 		<view v-if="state === 'success' || state === 'existing'" class="proto-mask" @tap="state = 'default'">
 			<view class="proto-sheet success-sheet" @tap.stop>

@@ -1,7 +1,7 @@
 {
-    "name" : "TCPMS.User",
+    "name" : "择居青旅",
     "appid" : "",
-    "description" : "",
+    "description" : "择居青旅住宿预订小程序",
     "versionName" : "1.0.0",
     "versionCode" : "100",
     "transformPx" : false,

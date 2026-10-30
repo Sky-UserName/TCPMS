@@ -292,7 +292,7 @@
 				}
 				return { icon: 'clock', text: '申请已提交，平台审核通过后资金原路退回，通常 1-15 分钟内完成审核。' }
 			},
-			// 门店三件套：名称、地址、电话全部取门店档案，不再写死「TCPMS 精品直营门店」。
+			// 门店三件套：名称、地址、电话全部取门店档案，不再写死品牌门店名称。
 			storeName() {
 				return (this.storeInfo && this.storeInfo.name) || this.order.store || '预订门店'
 			},

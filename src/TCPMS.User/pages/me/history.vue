@@ -13,7 +13,7 @@
 				<image :src="item.image || fallbackImage" mode="aspectFill"></image>
 				<view class="history-copy">
 					<text class="history-title">{{ item.title }}</text>
-					<text class="history-subtitle">{{ item.subtitle || 'TCPMS 旅宿内容' }}</text>
+					<text class="history-subtitle">{{ item.subtitle || '择居青旅旅宿内容' }}</text>
 					<view class="history-time"><text>{{ formatTime(item.updatedAt) }}　查看详情</text><ProtoIcon name="chevron-right" :size="22" /></view>
 				</view>
 			</view>

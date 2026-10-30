@@ -2,17 +2,17 @@
 	<view class="proto-page proto-page-plain login-page">
 		<view class="login-shell">
 			<view class="login-brand">
-				<view class="brand-mark"><image src="/static/logo.png" mode="aspectFit"></image></view>
+				<view class="brand-mark"><image :src="brandMarkSrc" mode="aspectFit" @error="useLocalBrandMark"></image></view>
 				<view class="brand-copy">
-					<text class="brand-title">TCPMS</text>
-					<text class="brand-subtitle">智选旅宿</text>
+					<text class="brand-title">择居青旅</text>
+					<text class="brand-subtitle">自在入住，轻松出发</text>
 				</view>
 			</view>
 
 			<view class="login-identity">
 				<button class="identity-avatar" open-type="chooseAvatar" hover-class="none" @chooseavatar="handleChooseAvatar">
 					<image v-if="avatarUrl" :src="avatarUrl" mode="aspectFill" />
-					<image v-else src="/static/logo.png" mode="aspectFit" />
+					<image v-else :src="brandMarkSrc" mode="aspectFit" @error="useLocalBrandMark" />
 					<view class="identity-avatar-edit"><ProtoIcon name="edit" tone="white" :size="17" /></view>
 				</button>
 				<text class="identity-avatar-tip">{{ avatarUrl ? '点击可更换微信头像' : '点击获取微信头像' }}</text>
@@ -29,7 +29,6 @@
 					@blur="syncNickname"
 				/>
 				<text class="identity-hint">头像和昵称均读取自你的微信资料</text>
-				<text v-if="isDevtools" class="identity-dev-tip">开发者工具不显示「用微信昵称」，真机预览才会出现</text>
 			</view>
 
 			<view class="login-action-area">
@@ -57,7 +56,7 @@
 			</view>
 
 			<view class="login-feedback" :class="status">
-				<text v-if="status === 'success'">资料已授权，正在进入 TCPMS</text>
+				<text v-if="status === 'success'">资料已授权，正在进入择居青旅</text>
 				<text v-else-if="status === 'loading'">正在连接微信，请稍候</text>
 				<text v-else-if="status === 'error'">{{ errorMessage || '授权失败，请检查网络后重试' }}</text>
 			</view>
@@ -65,7 +64,7 @@
 			<view class="agreement-list">
 				<view class="agreement-row" @tap="toggleAgreement('service')">
 					<checkbox :checked="agreements.service" color="#148b83" />
-					<text>我已阅读并同意 <text class="agreement-link">《TCPMS用户协议》</text> 与 <text class="agreement-link">《隐私政策》</text></text>
+					<text>我已阅读并同意 <text class="agreement-link">《择居青旅用户协议》</text> 与 <text class="agreement-link">《隐私政策》</text></text>
 				</view>
 				<view class="agreement-row" @tap="toggleAgreement('thirdParty')">
 					<checkbox :checked="agreements.thirdParty" color="#148b83" />
@@ -83,6 +82,7 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { getProfile, setLoggedIn } from '@/common/app-store.js'
 	import { miniappLogin, uploadMiniappAvatar } from '@/common/api.js'
+	import { brandImages, brandImageFallbacks } from '@/common/brand-assets.js'
 
 	export default {
 		components: { ProtoIcon },
@@ -94,7 +94,7 @@
 				avatarUrl: '',
 				avatarTempPath: '',
 				nicknameFocus: false,
-				isDevtools: false,
+				brandMarkSrc: brandImages.mark,
 				errorMessage: '',
 				agreements: {
 					service: false,
@@ -112,13 +112,12 @@
 		},
 		onLoad() {
 			this.prefillWechatProfile()
-			try {
-				this.isDevtools = uni.getSystemInfoSync()?.platform === 'devtools'
-			} catch (error) {
-				this.isDevtools = false
-			}
 		},
 		methods: {
+			// 后端托管图加载失败（离线/域名未备案）时退回包内同款图片，避免登录页出现空图标。
+			useLocalBrandMark() {
+				this.brandMarkSrc = brandImageFallbacks.mark
+			},
 			// 微信已回收静默获取昵称头像的接口，这里只回填上一次从微信带过来的资料，避免重复选择。
 			prefillWechatProfile() {
 				const profile = getProfile()
@@ -227,7 +226,7 @@
 					}
 					this.phoneStatus = profile.phoneNumber ? 'success' : 'idle'
 				} catch (error) {
-					console.error('[TCPMS] miniapp login failed', error)
+					console.error('[择居青旅] miniapp login failed', error)
 					this.errorMessage = error?.message || error?.errMsg || '微信授权失败，请稍后重试'
 					this.status = 'error'
 					return
@@ -379,13 +378,6 @@
 		margin-top: 12rpx;
 		color: #759091;
 		font-size: 19rpx;
-	}
-
-	.identity-dev-tip {
-		margin-top: 8rpx;
-		color: #b07a2a;
-		font-size: 18rpx;
-		line-height: 1.5;
 	}
 
 	.login-action-area {

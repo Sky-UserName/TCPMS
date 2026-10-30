@@ -17,6 +17,11 @@ export const IS_DEV_BUILD = !detectProductionBuild()
 // 接口地址覆盖：发行包用 .env.production 或 VITE_API_BASE_URL 指定线上域名。
 export const API_BASE_URL_OVERRIDE = buildEnv.VITE_API_BASE_URL || ''
 
+// 接口地址默认值：开发连本机后端，发行包连部署服务器（真机访问不到 localhost）。
+export const DEFAULT_API_BASE_URL = IS_DEV_BUILD
+	? 'http://localhost:5181/api/v1'
+	: 'http://39.96.200.62/api/v1'
+
 const readFlag = (value, fallback) => {
 	if (value === undefined || value === null || value === '') return fallback
 	return String(value).toLowerCase() === 'true'

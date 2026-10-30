@@ -88,13 +88,15 @@ Write-Step "Mode: $Mode  ->  $outputDir"
 $packageJson = Join-Path $projectRoot 'package.json'
 $viteConfig  = Join-Path $projectRoot 'vite.config.js'
 $nodeModules = Join-Path $projectRoot 'node_modules'
-$stamp       = Get-Date -Format 'yyyyMMddHHmmss'
+$backupSuffix = '.build-miniapp-backup'
 $backups     = @()
 $createdSass = $false
 
+# 备份名固定，构建被强杀（finally 不执行）后下次启动能识别并还原，不会一代代堆积临时文件。
 function Backup-Path($path) {
     if (Test-Path $path) {
-        $backup = "$path.build-miniapp-$stamp"
+        $backup = "$path$backupSuffix"
+        if (Test-Path -LiteralPath $backup) { Remove-PathSafely $backup }
         Move-Item -LiteralPath $path -Destination $backup -Force
         $script:backups += [pscustomobject]@{ Original = $path; Backup = $backup }
     }
@@ -130,6 +132,16 @@ function Write-TextFile($path, $content) {
 }
 
 try {
+    # 上次构建若被强制中断，finally 没有执行：先把当时的备份还原成原文件，再开始本次构建。
+    foreach ($path in @($packageJson, $viteConfig, $nodeModules)) {
+        $staleBackup = "$path$backupSuffix"
+        if (Test-Path -LiteralPath $staleBackup) {
+            Write-Warn "恢复上次中断残留：$path"
+            Remove-PathSafely $path
+            Move-Item -LiteralPath $staleBackup -Destination $path -Force
+        }
+    }
+
     # package.json: copy the compiler dependency list so platform plugins resolve
     Backup-Path $packageJson
     $compilerPkg = Get-Content (Join-Path $cliVite 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -176,9 +188,13 @@ export default defineConfig({
     $outFile = Join-Path $env:TEMP "tcpms-build-$stamp.log"
     $errFile = Join-Path $env:TEMP "tcpms-build-$stamp.err.log"
 
+    # 编译模式必须跟着发行模式走：--mode development 会读到 .env.development，
+    # 曾经导致发行包里接口指向 localhost、模拟支付仍开着。prod 必须用 production。
+    $viteMode = if ($Mode -eq 'prod') { 'production' } else { 'development' }
+
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $nodeExe
-    $psi.Arguments = "`"$uniJs`" build -p $platform --mode development" + $(if ($Mode -eq 'dev') { ' --watch' } else { '' })
+    $psi.Arguments = "`"$uniJs`" build -p $platform --mode $viteMode" + $(if ($Mode -eq 'dev') { ' --watch' } else { '' })
     $psi.WorkingDirectory = $projectRoot
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true

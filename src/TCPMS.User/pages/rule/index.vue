@@ -5,7 +5,7 @@
 			<view class="rule-summary-top">
 				<view>
 					<view class="proto-pill info"><ProtoIcon name="shield" :size="18" /><text>{{ page.kicker || '合规与数字隐私标准' }}</text></view>
-					<text class="rule-summary-title">{{ page.subtitle || page.title || 'TCPMS 智选旅宿服务条款' }}</text>
+					<text class="rule-summary-title">{{ page.subtitle || page.title || '择居青旅服务条款' }}</text>
 					<text class="rule-summary-desc">{{ page.summary }}</text>
 				</view>
 				<view class="rule-summary-mark"><ProtoIcon name="shield" tone="white" :size="30" /></view>

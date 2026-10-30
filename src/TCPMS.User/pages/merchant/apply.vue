@@ -1,7 +1,7 @@
 <template>
 	<view class="apply-page">
 		<view class="apply-hero">
-			<image class="apply-hero-image" src="/static/prototype/home-hero.jpg" mode="aspectFill" />
+			<image class="apply-hero-image" :src="heroImageSrc" mode="aspectFill" @error="useLocalHero" />
 			<view class="apply-hero-mask"></view>
 			<view class="apply-nav" :style="{ paddingTop: statusBarHeightRpx + 'rpx', height: 88 + statusBarHeightRpx + 'rpx' }">
 				<button class="apply-nav-button" hover-class="none" aria-label="返回" @tap="goBack">
@@ -112,6 +112,7 @@
 	import ProtoIcon from '@/components/ProtoIcon.vue'
 	import { fetchMerchantApplication, submitMerchantApplication, uploadMerchantApplicationImage } from '@/common/api.js'
 	import { showToast } from '@/common/prototype.js'
+	import { brandImages, brandImageFallbacks } from '@/common/brand-assets.js'
 
 	// 省市区重名（直辖市）只保留一次，拼成「河南省郑州市金水区」这样的位置文案。
 	const composeRegion = (province, city, district) => {
@@ -156,6 +157,7 @@
 			}
 			return {
 				statusBarHeightRpx,
+				heroImageSrc: brandImages.hero,
 				form: emptyForm(),
 				applicationStatus: 'unapplied',
 				isEditing: false,
@@ -200,6 +202,10 @@
 			uni.$off('merchant:location-selected', this.applyLocationSelection)
 		},
 		methods: {
+			// 后端托管图不可用时退回包内图片。
+			useLocalHero() {
+				this.heroImageSrc = brandImageFallbacks.hero
+			},
 			async loadApplication() {
 				this.loading = true
 				try {

@@ -1,5 +1,5 @@
 import { getApiToken, getBooking, logout, saveApiToken, saveOrders, upsertOrder } from './app-store.js'
-import { ALLOW_DEV_LOGIN, API_BASE_URL_OVERRIDE, IS_DEV_BUILD } from './env.js'
+import { ALLOW_DEV_LOGIN, API_BASE_URL_OVERRIDE, DEFAULT_API_BASE_URL } from './env.js'
 import { isLoginRedirecting, setLoginRedirecting } from './auth-gate.js'
 // findStoreFallback / findRoomFallback 会用原型数据补字段，之前漏了这行导入，
 // 调用时直接抛 `demoRooms is not defined`，表现为提交订单、订单列表同步失败。
@@ -7,12 +7,9 @@ import { demoRooms, demoStores, prototypeImages } from './prototype.js'
 
 // 后端地址：默认连本机后端，发行包用 .env.production 或 VITE_API_BASE_URL 指定线上地址。
 // 真机调试访问不到 localhost，同样用 VITE_API_BASE_URL 指到开发机的局域网地址。
-const localApiBaseUrl = 'http://localhost:5181/api/v1'
-const remoteApiBaseUrl = 'http://39.96.200.62/api/v1'
-
 const resolveDefaultApiBaseUrl = () => {
 	if (API_BASE_URL_OVERRIDE) return API_BASE_URL_OVERRIDE
-	return IS_DEV_BUILD ? localApiBaseUrl : remoteApiBaseUrl
+	return DEFAULT_API_BASE_URL
 }
 
 const getApiBaseUrl = () => {
@@ -325,7 +322,7 @@ export const mapOrder = (order, context = {}) => {
 		orderNumber: order.orderNumber,
 		storeId: order.storeId || context.storeId,
 		roomId: order.roomTypeId || context.roomId,
-		store: order.storeName || context.store || 'TCPMS 直营门店',
+		store: order.storeName || context.store || '择居青旅直营门店',
 		room: order.roomTypeName || context.room || '已预订房型',
 		image: context.image || roomFallback.image,
 		status: meta.status,
